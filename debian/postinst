@@ -63,7 +63,7 @@ explain what to do."
 
         if `which ucf >/dev/null`
         then
-          ucf /etc/chrony/chrony.conf.new /etc/chrony/chrony.conf
+          ucf --three-way /etc/chrony/chrony.conf.new /etc/chrony/chrony.conf
           rm /etc/chrony/chrony.conf.new
         fi
 
