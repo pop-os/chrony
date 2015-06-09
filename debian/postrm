@@ -18,6 +18,11 @@ case "$1" in
         rm -rf /etc/chrony
         rm -rf /var/lib/chrony
         rm -rf /var/log/chrony
+        # Remove "_chrony" system user/group
+        if [ -x "$(which deluser)" ]
+        then
+            deluser --quiet --system --group _chrony > /dev/null 2>&1 || true
+        fi
     ;;
 
     remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
