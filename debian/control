@@ -22,7 +22,8 @@ Depends: ${misc:Depends},
  ucf, timelimit,
  install-info,
  net-tools,
- lsb-base
+ lsb-base,
+ adduser
 Breaks: util-linux (<< 2.20.1-5)
 Recommends: udev (>= 0.124-1)
 Conflicts: time-daemon, ntp
