@@ -21,7 +21,7 @@ case "$1" in
         # Remove "_chrony" system user/group
         if [ -x "$(which deluser)" ]
         then
-            deluser --quiet --system --group _chrony > /dev/null 2>&1 || true
+            deluser --quiet --system _chrony > /dev/null 2>&1 || true
         fi
     ;;
 
