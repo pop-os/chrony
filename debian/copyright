@@ -38,10 +38,11 @@ Copyright: 2015, Vincent Blut
            2000-2012, John Hasler
 License: GPL-2
 
+# Modified copy of /usr/include/linux/timex.h:
+# Old Style MIT license (no advertising without permission)
 Files: chrony_timex.h
-       (modified copy of /usr/include/linux/timex.h)
 Copyright: 1993, David L. Mills
-License: Old Style MIT (no advertising without permission) 
+License: Old-Style-MIT
   Permission to use, copy, modify, and distribute this software and its
   documentation for any purpose and without fee is hereby granted, provided
   that the above copyright notice appears in all copies and that both the
@@ -54,7 +55,7 @@ License: Old Style MIT (no advertising without permission)
 
 Files: md5.*
 Copyright: 1990, RSA Data Security, Inc. All rights reserved.
-License:
+License: RSA-MD
   License to copy and use this software is granted provided that    
   it is identified as the "RSA Data Security, Inc. MD5 Message-     
   Digest Algorithm" in all material mentioning or referencing this  
