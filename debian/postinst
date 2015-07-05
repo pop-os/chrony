@@ -5,6 +5,7 @@
 
 set -e
 
+
 # targets: configure|abort-upgrade|abort-remove|abort-deconfigure
 
 case "$1" in
@@ -20,6 +21,16 @@ case "$1" in
                     --gecos "Chrony daemon" \
                     --home /var/lib/chrony \
                     --no-create-home _chrony
+        fi
+
+        # Change the owner of "/var/l{ib,og}/chrony" directories and their
+        # subfiles to "_chrony" only if the user has not set the "user"
+        # directive in chrony.conf
+        if ! grep "^user" /etc/chrony/chrony.conf > /dev/null 2>&1; then
+            chown -R _chrony:_chrony /var/lib/chrony
+            if [ -d /var/log/chrony ]; then
+                chown -R _chrony:_chrony /var/log/chrony
+            fi
         fi
 
         if [ -z "$2" ]
