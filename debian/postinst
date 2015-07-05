@@ -41,7 +41,6 @@ case "$1" in
             KEYFILE=`tempfile -m 640 -n /etc/chrony/chrony.keys`
             PASSWORD=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
             echo "1 $PASSWORD" > $KEYFILE
-            MAILPASSWORD="The password for chronyc is in $KEYFILE."
         fi
 
         if `which ucf >/dev/null`
