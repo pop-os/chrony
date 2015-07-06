@@ -61,7 +61,7 @@ chrony (1.31.1-1) unstable; urgency=medium
     in /usr/share/doc/chrony/README.Debian.
     (Closes: #688971)
 
- -- Vincent Blut <vincent.debian@free.fr>  Sat, 06 Jul 2015 16:29:33 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 06 Jul 2015 16:29:33 +0200
 
 chrony (1.30-2) unstable; urgency=medium
 
