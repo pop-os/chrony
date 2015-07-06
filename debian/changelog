@@ -1,3 +1,68 @@
+chrony (1.31.1-1) unstable; urgency=medium
+
+  * Import upstream version 1.31 and 1.31.1:
+    - Please see /usr/share/doc/chrony/changelog.gz for release notes.
+
+  * debian/chrony.conf:
+    - Use the 'hwclockfile' directive. Avoid using text processing methods in
+    the post install script to find out if the RTC keeps local time or UTC.
+    (Closes: #778710)
+
+  * debian/clean:
+    - Add getdate.c
+
+  * debian/control:
+    - Move chrony from admin to net section.
+    - Change priority from extra to optional.
+    - Build depends on libcap-dev. (Closes: #768803)
+    - Add ntp to the 'Replaces:' field.
+    - Bump standards-version to 3.9.6 (no changes required).
+    - Set myself as maintainer and Joachim as uploader.
+    - Update Vcs-Browser URL to use cgit and https.
+    - Build depends on pps-tools. Provides PPSAPI (RFC-2783) support.
+    - Improve the synopsis.
+    - Add Breaks on util-linux (<< 2.20.1-5). Ensure that the 'UTC=' setting
+    from the '/etc/default/rcS' file have been migrated to UTC/LOCAL in
+    '/etc/adjtime'.
+    - Depends on adduser. Needed to create "_chrony" system user/group.
+
+  * debian/copyright:
+    - Add myself to copyright holders.
+    - Remove spaces from short name license (fix Lintian warning)
+    - Filled short license field (RSA-MD) (fix Lintian warning)
+
+  * debian/logrotate:
+    - Simplify postrotate script. Thanks to Frédéric Brière
+    <fbriere@fbriere.net> for reporting and diagnosing the issue.
+    (Closes: #763542)
+
+  * debian/patches:
+    - Drop patches for issues fixed upstream.
+    - Rename and update patch. Update the series file accordingly.
+
+  * debian/postinst:
+    - Pass the '--three-way' option to ucf.
+    - Remove useless text processing methods as we now use the 'hwclockfile'
+    directive. (Closes: #778711)
+    - Create "_chrony" system user/group.
+    - Update the "new_file" path in the ucf invocation.
+    - Remove the MAILPASSWORD shell variable as we don’t use it.
+
+  * debian/postrm:
+    - Drop removal instruction of /etc/cron.weekly/chrony.
+    - Remove "_chrony" system user/group on purge.
+    - Don’t pass the --group option to deluser.
+
+  * debian/rules:
+    - Build with all hardening flags.
+    - Ease the reading of configure options.
+    - Specify "_chrony" as default chronyd user. This is the system user to
+    which chronyd will drop root privileges. You'll find further information
+    in /usr/share/doc/chrony/README.Debian.
+    (Closes: #688971)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 06 Jul 2015 16:29:33 +0200
+
 chrony (1.30-2) unstable; urgency=medium
 
   * With the following security bugfixes (Closes: #782160):
