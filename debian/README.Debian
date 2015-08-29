@@ -33,7 +33,7 @@ Chrony for Debian
  installed in chrony.keys as key 1 (unless chrony.keys already has something
  in it). You may change this password if you wish.
 
- The scripts /etc/ppp/ip-up.d/chrony, /etc/ppp/ip-down.d/chrony, and
+ The scripts /etc/ppp/ip-up.d/chrony and /etc/ppp/ip-down.d/chrony
  read key 1 from /etc/chrony/chrony.keys and use it as the password to
  send chronyc commands.  Thus you can change the password by changing
  this key, but if you make the command key anything but 1 these scripts
@@ -49,4 +49,4 @@ Chrony for Debian
  contact the default server whenever you connect to your ISP.
 
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 04 Jul 2015 01:25:04 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 29 Aug 2015 23:39:11 +0200
