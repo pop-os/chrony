@@ -28,7 +28,7 @@ Breaks: util-linux (<< 2.20.1-5)
 Recommends: udev (>= 0.124-1)
 Conflicts: time-daemon, ntp
 Provides: time-daemon
-Replaces: time-daemon, ntp
+Replaces: time-daemon
 Description: Versatile implementation of the Network Time Protocol
  It consists of a pair of programs:
  .
