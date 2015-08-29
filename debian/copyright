@@ -38,8 +38,6 @@ Copyright: 2015, Vincent Blut
            2000-2012, John Hasler
 License: GPL-2
 
-# Modified copy of /usr/include/linux/timex.h:
-# Old Style MIT license (no advertising without permission)
 Files: chrony_timex.h
 Copyright: 1993, David L. Mills
 License: Old-Style-MIT
@@ -52,6 +50,8 @@ License: Old-Style-MIT
   without specific, written prior permission.  The University of Delaware
   makes no representations about the suitability this software for any
   purpose.  It is provided "as is" without express or implied warranty.
+Comment: Modified copy of /usr/include/linux/timex.h:
+  Old Style MIT License (no advertising without permission).
 
 Files: md5.*
 Copyright: 1990, RSA Data Security, Inc. All rights reserved.
