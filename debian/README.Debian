@@ -22,7 +22,7 @@ Chrony for Debian
    still work as it did. However, if you don’t want to deviate from Debian’s
    default configuration, delete or comment out the "user" directive in
    chrony.conf and recursively change the owner of the /var/lib/chrony and
-   /var/log/chrony. For example:
+   /var/log/chrony directories. For example:
 
         # sed -i 's/^user/#user/' /etc/chrony/chrony.conf
         # chown -R _chrony:_chrony /var/l{ib,og}/chrony
@@ -49,4 +49,4 @@ Chrony for Debian
  contact the default server whenever you connect to your ISP.
 
 
- -- Vincent Blut <vincent.debian@free.fr>  Sat, 29 Aug 2015 23:39:11 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 6 Sep 2015 22:10:27 +0200
