@@ -1,0 +1,20 @@
+chrony (1.31.1-1) unstable; urgency=medium
+
+  From now on, we use the "hwclockfile" directive in /etc/chrony/chrony.conf.
+  Basically, it makes the detection of the standard (Local or UTC time) set
+  in /etc/adjtime — and used by the hardware clock — clearer compared to the
+  text processing method we used to use in the post install script to complete
+  the same task. Note that it overrides the "rtconutc" directive.
+
+  Also, we now create the _chrony system user to which chronyd will drop root
+  privileges. For users already allowing chronyd to drop root privileges in
+  favor of the user configured by the "user" directive in
+  /etc/chrony/chrony.conf, your configuration will remain unchanged and will
+  still work as intended.
+  However, some users might use a custom init script to accomplish the same
+  task by invoking chronyd with the '-u' option. We advise you to drop this
+  option from your init script before upgrading, otherwise you’ll have to
+  readjust the owner of the /var/l{ib,og}/chrony directories (recursively) to
+  the user you configured in your the init script.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 6 Sep 2015 22:14:54 +0200
