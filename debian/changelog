@@ -15,13 +15,12 @@ chrony (1.31.1-1) unstable; urgency=medium
     - Move chrony from admin to net section.
     - Change priority from extra to optional.
     - Build depends on libcap-dev. (Closes: #768803)
-    - Add ntp to the 'Replaces:' field.
     - Bump standards-version to 3.9.6 (no changes required).
     - Set myself as maintainer and Joachim as uploader.
     - Update Vcs-Browser URL to use cgit and https.
     - Build depends on pps-tools. Provides PPSAPI (RFC-2783) support.
     - Improve the synopsis.
-    - Add Breaks on util-linux (<< 2.20.1-5). Ensure that the 'UTC=' setting
+    - Depend on util-linux (>= 2.20.1-5). Ensure that the 'UTC=' setting
     from the '/etc/default/rcS' file have been migrated to UTC/LOCAL in
     '/etc/adjtime'.
     - Depends on adduser. Needed to create "_chrony" system user/group.
@@ -30,6 +29,7 @@ chrony (1.31.1-1) unstable; urgency=medium
     - Add myself to copyright holders.
     - Remove spaces from short name license (fix Lintian warning)
     - Filled short license field (RSA-MD) (fix Lintian warning)
+    - Move comment to the "Comment:" field
 
   * debian/logrotate:
     - Simplify postrotate script. Thanks to Frédéric Brière
@@ -53,6 +53,13 @@ chrony (1.31.1-1) unstable; urgency=medium
     - Remove "_chrony" system user/group on purge.
     - Don’t pass the --group option to deluser.
 
+  * debian/NEWS.Debian:
+    - New file incorporating worthwhile changes in this release.
+
+  * debian/README.Debian:
+    - Fix typo, thanks to Paul Gevers <elbrus@debian.org> for catching it.
+    - Missing word added.
+
   * debian/rules:
     - Build with all hardening flags.
     - Ease the reading of configure options.
@@ -61,7 +68,7 @@ chrony (1.31.1-1) unstable; urgency=medium
     in /usr/share/doc/chrony/README.Debian.
     (Closes: #688971)
 
- -- Vincent Blut <vincent.debian@free.fr>  Mon, 06 Jul 2015 16:29:33 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 6 Sep 2015 22:39:22 +0200
 
 chrony (1.30-2) unstable; urgency=medium
 
