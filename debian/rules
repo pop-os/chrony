@@ -17,9 +17,6 @@ override_dh_auto_build:
 	dh_auto_build
 	make docs
 
-override_dh_installchangelogs:
-	dh_installchangelogs NEWS
-
 override_dh_install:
 	dh_install
 	install -m 0755 -T debian/apm   $(BASE)/etc/apm/event.d/01chrony
