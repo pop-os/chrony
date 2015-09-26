@@ -88,7 +88,10 @@
 #define REQ_MODIFY_MAXDELAYDEVRATIO 47
 #define REQ_RESELECT 48
 #define REQ_RESELECTDISTANCE 49
-#define N_REQUEST_TYPES 50
+#define REQ_MODIFY_MAKESTEP 50
+#define REQ_SMOOTHING 51
+#define REQ_SMOOTHTIME 52
+#define N_REQUEST_TYPES 53
 
 /* Special utoken value used to log on with first exchange being the
    password.  (This time value has long since gone by) */
@@ -114,6 +117,10 @@ typedef struct {
 /* The EOR (end of record) fields are used by the offsetof operator in
    pktlength.c, to get the number of bytes that ought to be
    transmitted for each packet type. */
+
+typedef struct {
+  int32_t EOR;
+} REQ_Null;
 
 typedef struct {
   IPAddr mask;
@@ -188,6 +195,12 @@ typedef struct {
 } REQ_Modify_Maxupdateskew;
 
 typedef struct {
+  int32_t limit;
+  Float threshold;
+  int32_t EOR;
+} REQ_Modify_Makestep;
+
+typedef struct {
   Timeval ts;
   int32_t EOR;
 } REQ_Logon;
@@ -209,17 +222,9 @@ typedef struct {
 } REQ_Manual;
 
 typedef struct {
-  int32_t EOR;
-} REQ_N_Sources;
-
-typedef struct {
   int32_t index;
   int32_t EOR;
 } REQ_Source_Data;
-
-typedef struct {
-  int32_t EOR;
-} REQ_Rekey;
 
 typedef struct {
   IPAddr ip;
@@ -258,10 +263,6 @@ typedef struct {
 } REQ_Del_Source;
 
 typedef struct {
-  int32_t EOR;
-} REQ_WriteRtc;
-
-typedef struct {
   Float dfreq;
   int32_t EOR;
 } REQ_Dfreq;
@@ -273,30 +274,9 @@ typedef struct {
 } REQ_Doffset;
 
 typedef struct {
-  int32_t EOR;
-} REQ_Tracking;
-
-typedef struct {
   uint32_t index;
   int32_t EOR;
 } REQ_Sourcestats;
-
-typedef struct {
-  int32_t EOR;
-} REQ_RTCReport;
-
-typedef struct {
-  int32_t EOR;
-} REQ_TrimRTC;
-
-typedef struct {
-  int32_t EOR;
-} REQ_CycleLogs;
-
-typedef struct {
-  IPAddr ip;
-  uint32_t bits_specd;
-} REQ_SubnetsAccessed_Subnet;
 
 /* This is based on the response size rather than the
    request size */
@@ -309,30 +289,22 @@ typedef struct {
 } REQ_ClientAccessesByIndex;
 
 typedef struct {
-  int32_t EOR;
-} REQ_ManualList;
-
-typedef struct {
   int32_t index;
   int32_t EOR;
 } REQ_ManualDelete;
 
 typedef struct {
-  int32_t EOR;
-} REQ_MakeStep;
-
-typedef struct {
-  int32_t EOR;
-} REQ_Activity;
-
-typedef struct {
-  int32_t EOR;
-} REQ_Reselect;
-
-typedef struct {
   Float distance;
   int32_t EOR;
 } REQ_ReselectDistance;
+
+#define REQ_SMOOTHTIME_RESET 0
+#define REQ_SMOOTHTIME_ACTIVATE 1
+
+typedef struct {
+  int32_t option;
+  int32_t EOR;
+} REQ_SmoothTime;
 
 /* ================================================== */
 
@@ -362,7 +334,8 @@ typedef struct {
    subnets accessed and client accesses
 
    Version 6 : added padding to requests to prevent amplification attack,
-   changed maximum number of samples in manual list to 16
+   changed maximum number of samples in manual list to 16, new commands: modify
+   makestep, smoothing report, smoothtime command
  */
 
 #define PROTO_VERSION_NUMBER 6
@@ -395,6 +368,7 @@ typedef struct {
   uint32_t token; /* Command token (to prevent replay attack) */
 
   union {
+    REQ_Null null;
     REQ_Online online;
     REQ_Offline offline;
     REQ_Burst burst;
@@ -407,32 +381,23 @@ typedef struct {
     REQ_Modify_Minstratum modify_minstratum;
     REQ_Modify_Polltarget modify_polltarget;
     REQ_Modify_Maxupdateskew modify_maxupdateskew;
+    REQ_Modify_Makestep modify_makestep;
     REQ_Logon logon;
     REQ_Settime settime;
     REQ_Local local;
     REQ_Manual manual;
-    REQ_N_Sources n_sources;
     REQ_Source_Data source_data;
-    REQ_Rekey rekey;
     REQ_Allow_Deny allow_deny;
     REQ_Ac_Check ac_check;
     REQ_NTP_Source ntp_source;
     REQ_Del_Source del_source;
-    REQ_WriteRtc writertc;
     REQ_Dfreq dfreq;
     REQ_Doffset doffset;
-    REQ_Tracking tracking;
     REQ_Sourcestats sourcestats;
-    REQ_RTCReport rtcreport;
-    REQ_TrimRTC trimrtc;
-    REQ_CycleLogs cyclelogs;
     REQ_ClientAccessesByIndex client_accesses_by_index;
-    REQ_ManualList manual_list;
     REQ_ManualDelete manual_delete;
-    REQ_MakeStep make_step;
-    REQ_Activity activity;
-    REQ_Reselect reselect;
     REQ_ReselectDistance reselect_distance;
+    REQ_SmoothTime smoothtime;
   } data; /* Command specific parameters */
 
   /* The following fields only set the maximum size of the packet.
@@ -468,7 +433,8 @@ typedef struct {
 #define RPY_CLIENT_ACCESSES_BY_INDEX 10
 #define RPY_MANUAL_LIST 11
 #define RPY_ACTIVITY 12
-#define N_REPLY_TYPES 13
+#define RPY_SMOOTHING 13
+#define N_REPLY_TYPES 14
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -582,12 +548,6 @@ typedef struct {
 
 typedef struct {
   IPAddr ip;
-  uint32_t bits_specd;
-  uint32_t bitmap[8];
-} RPY_SubnetsAccessed_Subnet;
-
-typedef struct {
-  IPAddr ip;
   uint32_t client_hits;
   uint32_t peer_hits;
   uint32_t cmd_hits_auth;
@@ -629,6 +589,19 @@ typedef struct {
   int32_t EOR;
 } RPY_Activity;
 
+#define RPY_SMT_FLAG_ACTIVE 0x1
+#define RPY_SMT_FLAG_LEAPONLY 0x2
+
+typedef struct {
+  uint32_t flags;
+  Float offset;
+  Float freq_ppm;
+  Float wander_ppm;
+  Float last_update_ago;
+  Float remaining_time;
+  int32_t EOR;
+} RPY_Smoothing;
+
 typedef struct {
   uint8_t version;
   uint8_t pkt_type;
@@ -655,6 +628,7 @@ typedef struct {
     RPY_ClientAccessesByIndex client_accesses_by_index;
     RPY_ManualList manual_list;
     RPY_Activity activity;
+    RPY_Smoothing smoothing;
   } data; /* Reply specific parameters */
 
   /* authentication of the packet, there is no hole after the actual data

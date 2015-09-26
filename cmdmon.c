@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2014
+ * Copyright (C) Miroslav Lichvar  2009-2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -37,6 +37,7 @@
 #include "keys.h"
 #include "ntp_sources.h"
 #include "ntp_core.h"
+#include "smooth.h"
 #include "sources.h"
 #include "sourcestats.h"
 #include "reference.h"
@@ -54,7 +55,7 @@
 
 union sockaddr_in46 {
   struct sockaddr_in in4;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
   struct sockaddr_in6 in6;
 #endif
   struct sockaddr u;
@@ -62,7 +63,7 @@ union sockaddr_in46 {
 
 /* File descriptors for command and monitoring sockets */
 static int sock_fd4;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
 static int sock_fd6;
 #endif
 
@@ -110,7 +111,7 @@ static ResponseCell *free_replies;
 /* ================================================== */
 /* Array of permission levels for command types */
 
-static int permissions[] = {
+static const char permissions[] = {
   PERMIT_OPEN, /* NULL */
   PERMIT_AUTH, /* ONLINE */
   PERMIT_AUTH, /* OFFLINE */
@@ -160,7 +161,10 @@ static int permissions[] = {
   PERMIT_AUTH, /* MODIFY_POLLTARGET */
   PERMIT_AUTH, /* MODIFY_MAXDELAYDEVRATIO */
   PERMIT_AUTH, /* RESELECT */
-  PERMIT_AUTH  /* RESELECTDISTANCE */
+  PERMIT_AUTH, /* RESELECTDISTANCE */
+  PERMIT_AUTH, /* MODIFY_MAKESTEP */
+  PERMIT_OPEN, /* SMOOTHING */
+  PERMIT_AUTH, /* SMOOTHTIME */
 };
 
 /* ================================================== */
@@ -207,7 +211,7 @@ prepare_socket(int family, int port_number)
   }
 #endif
 
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
   if (family == AF_INET6) {
 #ifdef IPV6_V6ONLY
     /* Receive IPv6 packets only */
@@ -231,9 +235,9 @@ prepare_socket(int family, int port_number)
       if (bind_address.family == IPADDR_INET4)
         my_addr.in4.sin_addr.s_addr = htonl(bind_address.addr.in4);
       else
-        my_addr.in4.sin_addr.s_addr = htonl(INADDR_ANY);
+        my_addr.in4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
       break;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
     case AF_INET6:
       my_addr_len = sizeof (my_addr.in6);
       my_addr.in6.sin6_family = family;
@@ -245,7 +249,7 @@ prepare_socket(int family, int port_number)
         memcpy(my_addr.in6.sin6_addr.s6_addr, bind_address.addr.in6,
             sizeof (my_addr.in6.sin6_addr.s6_addr));
       else
-        my_addr.in6.sin6_addr = in6addr_any;
+        my_addr.in6.sin6_addr = in6addr_loopback;
       break;
 #endif
     default:
@@ -304,7 +308,7 @@ CAM_Initialise(int family)
     sock_fd4 = prepare_socket(AF_INET, port_number);
   else
     sock_fd4 = -1;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
   if (port_number && (family == IPADDR_UNSPEC || family == IPADDR_INET6))
     sock_fd6 = prepare_socket(AF_INET6, port_number);
   else
@@ -312,7 +316,7 @@ CAM_Initialise(int family)
 #endif
 
   if (port_number && sock_fd4 < 0
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
       && sock_fd6 < 0
 #endif
       ) {
@@ -333,7 +337,7 @@ CAM_Finalise(void)
     close(sock_fd4);
   }
   sock_fd4 = -1;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
   if (sock_fd6 >= 0) {
     SCH_RemoveInputFileHandler(sock_fd6);
     close(sock_fd6);
@@ -553,7 +557,7 @@ ts_is_unique_and_not_stale(struct timeval *ts, struct timeval *now)
 
 /* ================================================== */
 
-#define REPLY_EXTEND_QUANTUM 32
+#define REPLY_EXTEND_QUANTUM 8
 
 static void
 get_more_replies(void)
@@ -688,7 +692,7 @@ transmit_reply(CMD_Reply *msg, union sockaddr_in46 *where_to, int auth_len)
       sock_fd = sock_fd4;
       addrlen = sizeof (where_to->in4);
       break;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
     case AF_INET6:
       sock_fd = sock_fd6;
       addrlen = sizeof (where_to->in6);
@@ -706,34 +710,17 @@ transmit_reply(CMD_Reply *msg, union sockaddr_in46 *where_to, int auth_len)
     unsigned short port;
     IPAddr ip;
 
-    switch (where_to->u.sa_family) {
-      case AF_INET:
-        ip.family = IPADDR_INET4;
-        ip.addr.in4 = ntohl(where_to->in4.sin_addr.s_addr);
-        port = ntohs(where_to->in4.sin_port);
-        break;
-#ifdef HAVE_IPV6
-      case AF_INET6:
-        ip.family = IPADDR_INET6;
-        memcpy(ip.addr.in6, (where_to->in6.sin6_addr.s6_addr), sizeof(ip.addr.in6));
-        port = ntohs(where_to->in6.sin6_port);
-        break;
-#endif
-      default:
-        assert(0);
-    }
-
+    UTI_SockaddrToIPAndPort(&where_to->u, &ip, &port);
     DEBUG_LOG(LOGF_CmdMon, "Could not send response to %s:%hu", UTI_IPToString(&ip), port);
   }
 }
   
-
 /* ================================================== */
 
 static void
-handle_null(CMD_Request *rx_message, CMD_Reply *tx_message)
+handle_dump(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  tx_message->status = htons(STT_SUCCESS);
+  SRC_DumpSources();
 }
 
 /* ================================================== */
@@ -741,16 +728,12 @@ handle_null(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_online(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address, mask;
+
   UTI_IPNetworkToHost(&rx_message->data.online.mask, &mask);
   UTI_IPNetworkToHost(&rx_message->data.online.address, &address);
-  status = NSR_TakeSourcesOnline(&mask, &address);
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_TakeSourcesOnline(&mask, &address))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -758,16 +741,12 @@ handle_online(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_offline(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address, mask;
+
   UTI_IPNetworkToHost(&rx_message->data.offline.mask, &mask);
   UTI_IPNetworkToHost(&rx_message->data.offline.address, &address);
-  status = NSR_TakeSourcesOffline(&mask, &address);
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_TakeSourcesOffline(&mask, &address))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -775,19 +754,14 @@ handle_offline(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_burst(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address, mask;
+
   UTI_IPNetworkToHost(&rx_message->data.burst.mask, &mask);
   UTI_IPNetworkToHost(&rx_message->data.burst.address, &address);
-  status = NSR_InitiateSampleBurst(ntohl(rx_message->data.burst.n_good_samples),
-                                   ntohl(rx_message->data.burst.n_total_samples),
-                                   &mask, &address);
-  
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_InitiateSampleBurst(ntohl(rx_message->data.burst.n_good_samples),
+                               ntohl(rx_message->data.burst.n_total_samples),
+                               &mask, &address))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -795,17 +769,12 @@ handle_burst(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_minpoll(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_minpoll.address, &address);
-  status = NSR_ModifyMinpoll(&address,
-                             ntohl(rx_message->data.modify_minpoll.new_minpoll));
-  
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMinpoll(&address,
+                         ntohl(rx_message->data.modify_minpoll.new_minpoll)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -813,17 +782,12 @@ handle_modify_minpoll(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_maxpoll(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_minpoll.address, &address);
-  status = NSR_ModifyMaxpoll(&address,
-                             ntohl(rx_message->data.modify_minpoll.new_minpoll));
-  
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMaxpoll(&address,
+                         ntohl(rx_message->data.modify_minpoll.new_minpoll)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -831,16 +795,12 @@ handle_modify_maxpoll(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_maxdelay(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_maxdelay.address, &address);
-  status = NSR_ModifyMaxdelay(&address,
-                              UTI_FloatNetworkToHost(rx_message->data.modify_maxdelay.new_max_delay));
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMaxdelay(&address,
+        UTI_FloatNetworkToHost(rx_message->data.modify_maxdelay.new_max_delay)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -848,16 +808,12 @@ handle_modify_maxdelay(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_maxdelayratio(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_maxdelayratio.address, &address);
-  status = NSR_ModifyMaxdelayratio(&address,
-                                   UTI_FloatNetworkToHost(rx_message->data.modify_maxdelayratio.new_max_delay_ratio));
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMaxdelayratio(&address,
+        UTI_FloatNetworkToHost(rx_message->data.modify_maxdelayratio.new_max_delay_ratio)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -865,16 +821,12 @@ handle_modify_maxdelayratio(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_maxdelaydevratio(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_maxdelaydevratio.address, &address);
-  status = NSR_ModifyMaxdelaydevratio(&address,
-                                   UTI_FloatNetworkToHost(rx_message->data.modify_maxdelaydevratio.new_max_delay_dev_ratio));
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMaxdelaydevratio(&address,
+        UTI_FloatNetworkToHost(rx_message->data.modify_maxdelaydevratio.new_max_delay_dev_ratio)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -882,17 +834,12 @@ handle_modify_maxdelaydevratio(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_minstratum(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_minpoll.address, &address);
-  status = NSR_ModifyMinstratum(&address,
-                             ntohl(rx_message->data.modify_minstratum.new_min_stratum));
-  
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyMinstratum(&address,
+                            ntohl(rx_message->data.modify_minstratum.new_min_stratum)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -900,17 +847,12 @@ handle_modify_minstratum(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_modify_polltarget(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   IPAddr address;
+
   UTI_IPNetworkToHost(&rx_message->data.modify_polltarget.address, &address);
-  status = NSR_ModifyPolltarget(&address,
-                             ntohl(rx_message->data.modify_polltarget.new_poll_target));
-  
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NSR_ModifyPolltarget(&address,
+                            ntohl(rx_message->data.modify_polltarget.new_poll_target)))
     tx_message->status = htons(STT_NOSUCHSOURCE);
-  }
 }
 
 /* ================================================== */
@@ -919,7 +861,15 @@ static void
 handle_modify_maxupdateskew(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   REF_ModifyMaxupdateskew(UTI_FloatNetworkToHost(rx_message->data.modify_maxupdateskew.new_max_update_skew));
-  tx_message->status = htons(STT_SUCCESS);
+}
+
+/* ================================================== */
+
+static void
+handle_modify_makestep(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  REF_ModifyMakestep(ntohl(rx_message->data.modify_makestep.limit),
+                     UTI_FloatNetworkToHost(rx_message->data.modify_makestep.threshold));
 }
 
 /* ================================================== */
@@ -931,14 +881,15 @@ handle_settime(CMD_Request *rx_message, CMD_Reply *tx_message)
   long offset_cs;
   double dfreq_ppm, new_afreq_ppm;
   UTI_TimevalNetworkToHost(&rx_message->data.settime.ts, &ts);
-  if (MNL_AcceptTimestamp(&ts, &offset_cs, &dfreq_ppm, &new_afreq_ppm)) {
-    tx_message->status = htons(STT_SUCCESS);
+  if (!MNL_IsEnabled()) {
+    tx_message->status = htons(STT_NOTENABLED);
+  } else if (MNL_AcceptTimestamp(&ts, &offset_cs, &dfreq_ppm, &new_afreq_ppm)) {
     tx_message->reply = htons(RPY_MANUAL_TIMESTAMP);
     tx_message->data.manual_timestamp.centiseconds = htonl((int32_t)offset_cs);
     tx_message->data.manual_timestamp.dfreq_ppm = UTI_FloatHostToNetwork(dfreq_ppm);
     tx_message->data.manual_timestamp.new_afreq_ppm = UTI_FloatHostToNetwork(new_afreq_ppm);
   } else {
-    tx_message->status = htons(STT_NOTENABLED);
+    tx_message->status = htons(STT_FAILED);
   }
 }
 
@@ -955,7 +906,6 @@ handle_local(CMD_Request *rx_message, CMD_Reply *tx_message)
   } else {
     REF_DisableLocal();
   }
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -975,8 +925,10 @@ handle_manual(CMD_Request *rx_message, CMD_Reply *tx_message)
     case 2:
       MNL_Reset();
       break;
+    default:
+      tx_message->status = htons(STT_INVALID);
+      break;
   }
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -986,7 +938,6 @@ handle_n_sources(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   int n_sources;
   n_sources = SRC_ReadNumberOfSources();
-  tx_message->status = htons(STT_SUCCESS);
   tx_message->reply = htons(RPY_N_SOURCES);
   tx_message->data.n_sources.n_sources = htonl(n_sources);
 }
@@ -1000,7 +951,7 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
   struct timeval now_corr;
 
   /* Get data */
-  LCL_ReadCookedTime(&now_corr, NULL);
+  SCH_GetLastEventTime(&now_corr, NULL, NULL);
   if (SRC_ReportSource(ntohl(rx_message->data.source_data.index), &report, &now_corr)) {
     switch (SRC_GetType(ntohl(rx_message->data.source_data.index))) {
       case SRC_NTP:
@@ -1011,7 +962,6 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
         break;
     }
     
-    tx_message->status = htons(STT_SUCCESS);
     tx_message->reply  = htons(RPY_SOURCE_DATA);
     
     UTI_IPHostToNetwork(&report.ip_addr, &tx_message->data.source_data.ip_addr);
@@ -1056,7 +1006,7 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
         tx_message->data.source_data.flags = htons(RPY_SD_FLAG_PREFER);
         break;
       case RPT_NOSELECT:
-        tx_message->data.source_data.flags = htons(RPY_SD_FLAG_PREFER);
+        tx_message->data.source_data.flags = htons(RPY_SD_FLAG_NOSELECT);
         break;
     }
     tx_message->data.source_data.reachability = htons(report.reachability);
@@ -1074,136 +1024,35 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_rekey(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  tx_message->status = htons(STT_SUCCESS);
   KEY_Reload();
 }
 
 /* ================================================== */
 
 static void
-handle_allow(CMD_Request *rx_message, CMD_Reply *tx_message)
+handle_allowdeny(CMD_Request *rx_message, CMD_Reply *tx_message, int allow, int all)
 {
   IPAddr ip;
   int subnet_bits;
+
   UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
   subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (NCR_AddAccessRestriction(&ip, subnet_bits, 1, 0)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!NCR_AddAccessRestriction(&ip, subnet_bits, allow, all))
     tx_message->status = htons(STT_BADSUBNET);
-  }              
 }
 
 /* ================================================== */
 
 static void
-handle_allowall(CMD_Request *rx_message, CMD_Reply *tx_message)
+handle_cmdallowdeny(CMD_Request *rx_message, CMD_Reply *tx_message, int allow, int all)
 {
   IPAddr ip;
   int subnet_bits;
+
   UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
   subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (NCR_AddAccessRestriction(&ip, subnet_bits, 1, 1)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!CAM_AddAccessRestriction(&ip, subnet_bits, allow, all))
     tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_deny(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (NCR_AddAccessRestriction(&ip, subnet_bits, 0, 0)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_denyall(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (NCR_AddAccessRestriction(&ip, subnet_bits, 0, 1)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_cmdallow(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (CAM_AddAccessRestriction(&ip, subnet_bits, 1, 0)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_cmdallowall(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (CAM_AddAccessRestriction(&ip, subnet_bits, 1, 1)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_cmddeny(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (CAM_AddAccessRestriction(&ip, subnet_bits, 0, 0)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
-}
-
-/* ================================================== */
-
-static void
-handle_cmddenyall(CMD_Request *rx_message, CMD_Reply *tx_message)
-{
-  IPAddr ip;
-  int subnet_bits;
-  UTI_IPNetworkToHost(&rx_message->data.allow_deny.ip, &ip);
-  subnet_bits = ntohl(rx_message->data.allow_deny.subnet_bits);
-  if (CAM_AddAccessRestriction(&ip, subnet_bits, 0, 1)) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
-    tx_message->status = htons(STT_BADSUBNET);
-  }              
 }
 
 /* ================================================== */
@@ -1261,11 +1110,14 @@ handle_add_source(NTP_Source_Type type, CMD_Request *rx_message, CMD_Reply *tx_m
   params.min_stratum = SRC_DEFAULT_MINSTRATUM;       
   params.poll_target = SRC_DEFAULT_POLLTARGET;
   params.max_delay_dev_ratio = SRC_DEFAULT_MAXDELAYDEVRATIO;
+  params.version = NTP_VERSION;
+  params.max_sources = SRC_DEFAULT_MAXSOURCES;
+  params.min_samples = SRC_DEFAULT_MINSAMPLES;
+  params.max_samples = SRC_DEFAULT_MAXSAMPLES;
 
   status = NSR_AddSource(&rem_addr, type, &params);
   switch (status) {
     case NSR_Success:
-      tx_message->status = htons(STT_SUCCESS);
       break;
     case NSR_AlreadyInUse:
       tx_message->status = htons(STT_SOURCEALREADYKNOWN);
@@ -1296,7 +1148,6 @@ handle_del_source(CMD_Request *rx_message, CMD_Reply *tx_message)
   status = NSR_RemoveSource(&rem_addr);
   switch (status) {
     case NSR_Success:
-      tx_message->status = htons(STT_SUCCESS);
       break;
     case NSR_NoSuchSource:
       tx_message->status = htons(STT_NOSUCHSOURCE);
@@ -1316,7 +1167,6 @@ handle_writertc(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   switch (RTC_WriteParameters()) {
     case RTC_ST_OK:
-      tx_message->status = htons(STT_SUCCESS);
       break;
     case RTC_ST_NODRV:
       tx_message->status = htons(STT_NORTC);
@@ -1336,7 +1186,6 @@ handle_dfreq(CMD_Request *rx_message, CMD_Reply *tx_message)
   dfreq = UTI_FloatNetworkToHost(rx_message->data.dfreq.dfreq);
   LCL_AccumulateDeltaFrequency(dfreq * 1.0e-6);
   LOG(LOGS_INFO, LOGF_CmdMon, "Accumulated delta freq of %.3fppm", dfreq);
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -1351,7 +1200,6 @@ handle_doffset(CMD_Request *rx_message, CMD_Reply *tx_message)
   doffset = (double) sec + 1.0e-6 * (double) usec;
   LOG(LOGS_INFO, LOGF_CmdMon, "Accumulated delta offset of %.6f seconds", doffset);
   LCL_AccumulateOffset(doffset, 0.0);
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -1362,7 +1210,6 @@ handle_tracking(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPT_TrackingReport rpt;
 
   REF_GetTrackingReport(&rpt);
-  tx_message->status = htons(STT_SUCCESS);
   tx_message->reply  = htons(RPY_TRACKING);
   tx_message->data.tracking.ref_id = htonl(rpt.ref_id);
   UTI_IPHostToNetwork(&rpt.ip_addr, &tx_message->data.tracking.ip_addr);
@@ -1383,18 +1230,71 @@ handle_tracking(CMD_Request *rx_message, CMD_Reply *tx_message)
 /* ================================================== */
 
 static void
+handle_smoothing(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_SmoothingReport report;
+  struct timeval now;
+
+  SCH_GetLastEventTime(&now, NULL, NULL);
+
+  if (!SMT_GetSmoothingReport(&report, &now)) {
+    tx_message->status = htons(STT_NOTENABLED);
+    return;
+  }
+
+  tx_message->reply  = htons(RPY_SMOOTHING);
+  tx_message->data.smoothing.flags = htonl((report.active ? RPY_SMT_FLAG_ACTIVE : 0) |
+                                           (report.leap_only ? RPY_SMT_FLAG_LEAPONLY : 0));
+  tx_message->data.smoothing.offset = UTI_FloatHostToNetwork(report.offset);
+  tx_message->data.smoothing.freq_ppm = UTI_FloatHostToNetwork(report.freq_ppm);
+  tx_message->data.smoothing.wander_ppm = UTI_FloatHostToNetwork(report.wander_ppm);
+  tx_message->data.smoothing.last_update_ago = UTI_FloatHostToNetwork(report.last_update_ago);
+  tx_message->data.smoothing.remaining_time = UTI_FloatHostToNetwork(report.remaining_time);
+}
+
+/* ================================================== */
+
+static void
+handle_smoothtime(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  struct timeval now;
+  int option;
+
+  if (!SMT_IsEnabled()) {
+    tx_message->status = htons(STT_NOTENABLED);
+    return;
+  }
+
+  option = ntohl(rx_message->data.smoothtime.option);
+  SCH_GetLastEventTime(&now, NULL, NULL);
+
+  switch (option) {
+    case REQ_SMOOTHTIME_RESET:
+      SMT_Reset(&now);
+      break;
+    case REQ_SMOOTHTIME_ACTIVATE:
+      SMT_Activate(&now);
+      break;
+    default:
+      tx_message->status = htons(STT_INVALID);
+      break;
+  }
+}
+
+/* ================================================== */
+
+static void
 handle_sourcestats(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   int status;
   RPT_SourcestatsReport report;
   struct timeval now_corr;
 
-  LCL_ReadCookedTime(&now_corr, NULL);
+  SCH_GetLastEventTime(&now_corr, NULL, NULL);
   status = SRC_ReportSourcestats(ntohl(rx_message->data.sourcestats.index),
                                  &report, &now_corr);
 
   if (status) {
-    tx_message->status = htons(STT_SUCCESS);
     tx_message->reply = htons(RPY_SOURCESTATS);
     tx_message->data.sourcestats.ref_id = htonl(report.ref_id);
     UTI_IPHostToNetwork(&report.ip_addr, &tx_message->data.sourcestats.ip_addr);
@@ -1420,7 +1320,6 @@ handle_rtcreport(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPT_RTC_Report report;
   status = RTC_GetReport(&report);
   if (status) {
-    tx_message->status = htons(STT_SUCCESS);
     tx_message->reply  = htons(RPY_RTC);
     UTI_TimevalHostToNetwork(&report.ref_time, &tx_message->data.rtc.ref_time);
     tx_message->data.rtc.n_samples = htons(report.n_samples);
@@ -1438,13 +1337,8 @@ handle_rtcreport(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_trimrtc(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
-  status = RTC_Trim();
-  if (status) {
-    tx_message->status = htons(STT_SUCCESS);
-  } else {
+  if (!RTC_Trim())
     tx_message->status = htons(STT_NORTC);
-  }
 }
 
 /* ================================================== */
@@ -1453,8 +1347,6 @@ static void
 handle_cyclelogs(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   LOG_CycleLogFiles();
-  
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -1464,24 +1356,22 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   CLG_Status result;
   RPT_ClientAccessByIndex_Report report;
-  unsigned long first_index, n_indices, last_index, n_indices_in_table;
+  unsigned long first_index, n_indices, n_indices_in_table;
   int i, j;
   struct timeval now;
 
-  LCL_ReadCookedTime(&now, NULL);
+  SCH_GetLastEventTime(&now, NULL, NULL);
 
   first_index = ntohl(rx_message->data.client_accesses_by_index.first_index);
   n_indices = ntohl(rx_message->data.client_accesses_by_index.n_indices);
-  last_index = first_index + n_indices - 1;
+  if (n_indices > MAX_CLIENT_ACCESSES)
+    n_indices = MAX_CLIENT_ACCESSES;
 
-  tx_message->status = htons(STT_SUCCESS);
   tx_message->reply = htons(RPY_CLIENT_ACCESSES_BY_INDEX);
 
-  for (i = first_index, j = 0;
-       (i <= last_index) && (j < MAX_CLIENT_ACCESSES);
-       i++) {
-
-    result = CLG_GetClientAccessReportByIndex(i, &report, now.tv_sec, &n_indices_in_table);
+  for (i = 0, j = 0; i < n_indices; i++) {
+    result = CLG_GetClientAccessReportByIndex(first_index + i, &report,
+                                              now.tv_sec, &n_indices_in_table);
     tx_message->data.client_accesses_by_index.n_indices = htonl(n_indices_in_table);
 
     switch (result) {
@@ -1507,7 +1397,7 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
     }
   }
 
-  tx_message->data.client_accesses_by_index.next_index = htonl(i);
+  tx_message->data.client_accesses_by_index.next_index = htonl(first_index + i);
   tx_message->data.client_accesses_by_index.n_clients = htonl(j);
 }
 
@@ -1521,7 +1411,6 @@ handle_manual_list(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPY_ManualListSample *sample;
   RPT_ManualSamplesReport report[MAX_MANUAL_LIST_SAMPLES];
 
-  tx_message->status = htons(STT_SUCCESS);
   tx_message->reply = htons(RPY_MANUAL_LIST);
   
   MNL_ReportSamples(report, MAX_MANUAL_LIST_SAMPLES, &n_samples);
@@ -1540,16 +1429,11 @@ handle_manual_list(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_manual_delete(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int status;
   int index;
 
   index = ntohl(rx_message->data.manual_delete.index);
-  status = MNL_DeleteSample(index);
-  if (!status) {
+  if (!MNL_DeleteSample(index))
     tx_message->status = htons(STT_BADSAMPLE);
-  } else {
-    tx_message->status = htons(STT_SUCCESS);
-  }
 }  
 
 /* ================================================== */
@@ -1557,8 +1441,8 @@ handle_manual_delete(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_make_step(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  LCL_MakeStep();
-  tx_message->status = htons(STT_SUCCESS);
+  if (!LCL_MakeStep())
+    tx_message->status = htons(STT_FAILED);
 }
 
 /* ================================================== */
@@ -1573,7 +1457,6 @@ handle_activity(CMD_Request *rx_message, CMD_Reply *tx_message)
   tx_message->data.activity.burst_online = htonl(report.burst_online);
   tx_message->data.activity.burst_offline = htonl(report.burst_offline);
   tx_message->data.activity.unresolved = htonl(report.unresolved);
-  tx_message->status = htons(STT_SUCCESS);
   tx_message->reply = htons(RPY_ACTIVITY);
 }
 
@@ -1585,7 +1468,6 @@ handle_reselect_distance(CMD_Request *rx_message, CMD_Reply *tx_message)
   double dist;
   dist = UTI_FloatNetworkToHost(rx_message->data.reselect_distance.distance);
   SRC_SetReselectDistance(dist);
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -1594,7 +1476,6 @@ static void
 handle_reselect(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   SRC_ReselectSource();
-  tx_message->status = htons(STT_SUCCESS);
 }
 
 /* ================================================== */
@@ -1650,27 +1531,20 @@ read_from_cmd_socket(void *anything)
 
   read_length = status;
 
-  LCL_ReadRawTime(&now);
-  LCL_CookTime(&now, &cooked_now, NULL);
+  /* Get current time cheaply */
+  SCH_GetLastEventTime(&cooked_now, NULL, &now);
 
-  switch (where_from.u.sa_family) {
-    case AF_INET:
-      remote_ip.family = IPADDR_INET4;
-      remote_ip.addr.in4 = ntohl(where_from.in4.sin_addr.s_addr);
-      remote_port = ntohs(where_from.in4.sin_port);
-      localhost = (remote_ip.addr.in4 == 0x7f000001UL);
+  UTI_SockaddrToIPAndPort(&where_from.u, &remote_ip, &remote_port);
+
+  /* Check if it's a loopback address (127.0.0.1 or ::1) */
+  switch (remote_ip.family) {
+    case IPADDR_INET4:
+      localhost = remote_ip.addr.in4 == INADDR_LOOPBACK;
       break;
-#ifdef HAVE_IPV6
-    case AF_INET6:
-      remote_ip.family = IPADDR_INET6;
-      memcpy(&remote_ip.addr.in6, where_from.in6.sin6_addr.s6_addr,
-          sizeof (remote_ip.addr.in6));
-      remote_port = ntohs(where_from.in6.sin6_port);
-      /* Check for ::1 */
-      for (localhost = 0; localhost < 16; localhost++)
-        if (remote_ip.addr.in6[localhost] != 0)
-          break;
-      localhost = (localhost == 15 && remote_ip.addr.in6[localhost] == 1);
+#ifdef FEAT_IPV6
+    case IPADDR_INET6:
+      localhost = !memcmp(remote_ip.addr.in6, &in6addr_loopback,
+                          sizeof (in6addr_loopback));
       break;
 #endif
     default:
@@ -1713,6 +1587,7 @@ read_from_cmd_socket(void *anything)
   tx_message.command = rx_message.command;
   tx_message.sequence = rx_message.sequence;
   tx_message.reply = htons(RPY_NULL);
+  tx_message.status = htons(STT_SUCCESS);
   tx_message.pad1 = 0;
   tx_message.pad2 = 0;
   tx_message.pad3 = 0;
@@ -1913,7 +1788,11 @@ read_from_cmd_socket(void *anything)
     if (allowed) {
       switch(rx_command) {
         case REQ_NULL:
-          handle_null(&rx_message, &tx_message);
+          /* Do nothing */
+          break;
+
+        case REQ_DUMP:
+          handle_dump(&rx_message, &tx_message);
           break;
 
         case REQ_ONLINE:
@@ -1936,11 +1815,6 @@ read_from_cmd_socket(void *anything)
           handle_modify_maxpoll(&rx_message, &tx_message);
           break;
 
-        case REQ_DUMP:
-          SRC_DumpSources();
-          tx_message.status = htons(STT_SUCCESS);
-          break;
-
         case REQ_MODIFY_MAXDELAY:
           handle_modify_maxdelay(&rx_message, &tx_message);
           break;
@@ -1955,6 +1829,10 @@ read_from_cmd_socket(void *anything)
 
         case REQ_MODIFY_MAXUPDATESKEW:
           handle_modify_maxupdateskew(&rx_message, &tx_message);
+          break;
+
+        case REQ_MODIFY_MAKESTEP:
+          handle_modify_makestep(&rx_message, &tx_message);
           break;
 
         case REQ_LOGON:
@@ -2004,35 +1882,35 @@ read_from_cmd_socket(void *anything)
           break;
 
         case REQ_ALLOW:
-          handle_allow(&rx_message, &tx_message);
+          handle_allowdeny(&rx_message, &tx_message, 1, 0);
           break;
 
         case REQ_ALLOWALL:
-          handle_allowall(&rx_message, &tx_message);
+          handle_allowdeny(&rx_message, &tx_message, 1, 1);
           break;
 
         case REQ_DENY:
-          handle_deny(&rx_message, &tx_message);
+          handle_allowdeny(&rx_message, &tx_message, 0, 0);
           break;
 
         case REQ_DENYALL:
-          handle_denyall(&rx_message, &tx_message);
+          handle_allowdeny(&rx_message, &tx_message, 0, 1);
           break;
 
         case REQ_CMDALLOW:
-          handle_cmdallow(&rx_message, &tx_message);
+          handle_cmdallowdeny(&rx_message, &tx_message, 1, 0);
           break;
 
         case REQ_CMDALLOWALL:
-          handle_cmdallowall(&rx_message, &tx_message);
+          handle_cmdallowdeny(&rx_message, &tx_message, 1, 1);
           break;
 
         case REQ_CMDDENY:
-          handle_cmddeny(&rx_message, &tx_message);
+          handle_cmdallowdeny(&rx_message, &tx_message, 0, 0);
           break;
 
         case REQ_CMDDENYALL:
-          handle_cmddenyall(&rx_message, &tx_message);
+          handle_cmdallowdeny(&rx_message, &tx_message, 0, 1);
           break;
 
         case REQ_ACCHECK:
@@ -2069,6 +1947,14 @@ read_from_cmd_socket(void *anything)
 
         case REQ_TRACKING:
           handle_tracking(&rx_message, &tx_message);
+          break;
+
+        case REQ_SMOOTHING:
+          handle_smoothing(&rx_message, &tx_message);
+          break;
+
+        case REQ_SMOOTHTIME:
+          handle_smoothtime(&rx_message, &tx_message);
           break;
 
         case REQ_SOURCESTATS:

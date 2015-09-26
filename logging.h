@@ -80,6 +80,7 @@ typedef enum {
   LOGF_Local,
   LOGF_Util,
   LOGF_Main,
+  LOGF_Memory,
   LOGF_ClientLog,
   LOGF_Configure,
   LOGF_CmdMon,
@@ -93,13 +94,15 @@ typedef enum {
   LOGF_Sys,
   LOGF_SysGeneric,
   LOGF_SysLinux,
+  LOGF_SysMacOSX,
   LOGF_SysNetBSD,
   LOGF_SysSolaris,
   LOGF_SysSunOS,
   LOGF_SysWinnt,
   LOGF_TempComp,
   LOGF_RtcLinux,
-  LOGF_Refclock
+  LOGF_Refclock,
+  LOGF_Smooth,
 } LOG_Facility;
 
 /* Init function */

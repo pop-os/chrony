@@ -1,4 +1,4 @@
-.TH CHRONYC 1 "April 2015" "chrony 1.31.1" "User's Manual"
+.TH CHRONYC 1 "June 2015" "chrony 2.1.1" "User's Manual"
 .SH NAME
 chronyc \- command-line interface for chronyd
 
@@ -60,8 +60,7 @@ interactively.
 To report bugs, please visit \fIhttp://chrony.tuxfamily.org\fR
 
 .SH "SEE ALSO"
-.BR chronyd(8),
-.BR chrony(1)
+.BR chronyd(8)
 
 .I http://chrony.tuxfamily.org/
 

@@ -29,9 +29,9 @@
 #ifndef GOT_SYSINCL_H
 #define GOT_SYSINCL_H
 
-#if defined (SOLARIS) || defined(SUNOS) || defined(LINUX) || defined(__NetBSD__)
+#if defined (SOLARIS) || defined(SUNOS) || defined(LINUX) || defined(__NetBSD__) || defined (MACOSX)
 
-#if !defined(__NetBSD__) && !defined(__FreeBSD__)
+#if !defined(__NetBSD__) && !defined(__FreeBSD__) && !defined(MACOSX)
 #include <alloca.h>
 #endif
 #include <assert.h>
@@ -39,7 +39,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <float.h>
-#if !defined(__FreeBSD__)
+#if !defined(__FreeBSD__) && !defined(MACOSX)
 #include <malloc.h>
 #endif
 #include <math.h>
@@ -62,9 +62,9 @@
 #include <syslog.h>
 #include <time.h>
 
-#ifdef HAS_INTTYPES_H
+#ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
-#elif HAS_STDINT_H
+#elif HAVE_STDINT_H
 #include <stdint.h>
 #else
 /* Tough */
@@ -78,7 +78,7 @@
 
 #endif
 
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
 /* For inet_ntop() */
 #include <arpa/inet.h>
 #endif

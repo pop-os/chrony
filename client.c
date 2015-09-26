@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2014
+ * Copyright (C) Miroslav Lichvar  2009-2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -36,7 +36,6 @@
 #include "getdate.h"
 #include "cmdparse.h"
 #include "pktlength.h"
-#include "memory.h"
 #include "util.h"
 
 #ifdef FEAT_READLINE
@@ -52,7 +51,7 @@
 
 union sockaddr_in46 {
   struct sockaddr_in in4;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
   struct sockaddr_in6 in6;
 #endif
   struct sockaddr u;
@@ -67,30 +66,6 @@ static int on_terminal = 0;
 static int no_dns = 0;
 
 static int recv_errqueue = 0;
-
-/* ================================================== */
-/* Ought to extract some code from util.c to make
-   a new set of utilities that can be linked into either
-   the daemon or the client. */
-
-static char *
-time_to_log_form(time_t t)
-{
-  struct tm stm;
-  static char buffer[64];
-  static const char *months[] = {"Jan", "Feb", "Mar", "Apr",
-                                 "May", "Jun", "Jul", "Aug",
-                                 "Sep", "Oct", "Nov", "Dec"};
-
-
-  stm = *gmtime(&t);
-  snprintf(buffer, sizeof(buffer),
-          "%2d%s%02d %02d:%02d:%02d",
-          stm.tm_mday, months[stm.tm_mon], stm.tm_year % 100,
-          stm.tm_hour, stm.tm_min, stm.tm_sec);
-
-  return buffer;
-}
 
 /* ================================================== */
 /* Read a single line of commands from standard input.  Eventually we
@@ -144,36 +119,25 @@ open_io(const char *hostname, int port)
   int on_off = 1;
 
   /* Note, this call could block for a while */
-  if (DNS_Name2IPAddress(hostname, &ip) != DNS_Success) {
+  if (DNS_Name2IPAddress(hostname, &ip, 1) != DNS_Success) {
     fprintf(stderr, "Could not get IP address for %s\n", hostname);
     exit(1);
   }
 
-  memset(&his_addr, 0, sizeof (his_addr));
-
   switch (ip.family) {
     case IPADDR_INET4:
       sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-
-      his_addr.in4.sin_family = AF_INET;
-      his_addr.in4.sin_addr.s_addr = htonl(ip.addr.in4);
-      his_addr.in4.sin_port = htons(port);
-      his_addr_len = sizeof (his_addr.in4);
       break;
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
     case IPADDR_INET6:
       sock_fd = socket(AF_INET6, SOCK_DGRAM, 0);
-
-      his_addr.in6.sin6_family = AF_INET6;
-      memcpy(his_addr.in6.sin6_addr.s6_addr, ip.addr.in6,
-          sizeof (his_addr.in6.sin6_addr.s6_addr));
-      his_addr.in6.sin6_port = htons(port);
-      his_addr_len = sizeof (his_addr.in6);
       break;
 #endif
     default:
       assert(0);
   }
+
+  his_addr_len = UTI_IPAndPortToSockaddr(&ip, port, &his_addr.u);
 
   if (sock_fd < 0) {
     perror("Can't create socket");
@@ -187,7 +151,7 @@ open_io(const char *hostname, int port)
     recv_errqueue = 1;
   }
 #endif
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
 #ifdef IPV6_RECVERR
   if (ip.family == IPADDR_INET6 &&
       !setsockopt(sock_fd, IPPROTO_IPV6, IPV6_RECVERR, &on_off, sizeof(on_off))) {
@@ -269,7 +233,7 @@ read_mask_address(char *line, IPAddr *mask, IPAddr *address)
         }
       }
     } else {
-      if (DNS_Name2IPAddress(p, address) == DNS_Success) {
+      if (DNS_Name2IPAddress(p, address, 1) == DNS_Success) {
         bits_to_mask(-1, address->family, mask);
         return 1;
       } else {
@@ -341,7 +305,7 @@ read_address_integer(char *line, IPAddr *address, int *value)
     fprintf(stderr, "Invalid syntax for address value\n");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, address) != DNS_Success) {
+    if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
       fprintf(stderr, "Could not get address for hostname\n");
       ok = 0;
     } else {
@@ -369,7 +333,7 @@ read_address_double(char *line, IPAddr *address, double *value)
     fprintf(stderr, "Invalid syntax for address value\n");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, address) != DNS_Success) {
+    if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
       fprintf(stderr, "Could not get address for hostname\n");
       ok = 0;
     } else {
@@ -676,7 +640,8 @@ process_cmd_manual(CMD_Request *msg, const char *line)
 static int
 parse_allow_deny(CMD_Request *msg, char *line)
 {
-  unsigned long a, b, c, d, n;
+  unsigned long a, b, c, d;
+  int n, specified_subnet_bits;
   IPAddr ip;
   char *p;
   
@@ -693,10 +658,10 @@ parse_allow_deny(CMD_Request *msg, char *line)
     
     n = 0;
     if (!UTI_StringToIP(p, &ip) &&
-        (n = sscanf(p, "%lu.%lu.%lu.%lu", &a, &b, &c, &d)) == 0) {
+        (n = sscanf(p, "%lu.%lu.%lu.%lu", &a, &b, &c, &d)) <= 0) {
 
       /* Try to parse as the name of a machine */
-      if (DNS_Name2IPAddress(p, &ip) != DNS_Success) {
+      if (DNS_Name2IPAddress(p, &ip, 1) != DNS_Success) {
         fprintf(stderr, "Could not read address\n");
         return 0;
       } else {
@@ -746,7 +711,6 @@ parse_allow_deny(CMD_Request *msg, char *line)
       UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
 
       if (slashpos) {
-        int specified_subnet_bits, n;
         n = sscanf(slashpos+1, "%d", &specified_subnet_bits);
         if (n == 1) {
           msg->data.allow_deny.subnet_bits = htonl(specified_subnet_bits);
@@ -864,7 +828,7 @@ accheck_getaddr(char *line, IPAddr *addr)
       addr->addr.in4 = (a<<24) | (b<<16) | (c<<8) | d;
       return 1;
     } else {
-      if (DNS_Name2IPAddress(p, &ip) != DNS_Success) {
+      if (DNS_Name2IPAddress(p, &ip, 1) != DNS_Success) {
         return 0;
       } else {
         *addr = ip;
@@ -966,17 +930,16 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
   CPS_NTP_Source data;
   CPS_Status status;
   IPAddr ip_addr;
+  char str[64];
   int result = 0;
   
   status = CPS_ParseNTPSourceAdd(line, &data);
   switch (status) {
     case CPS_Success:
-      if (DNS_Name2IPAddress(data.name, &ip_addr) != DNS_Success) {
-        Free(data.name);
+      if (DNS_Name2IPAddress(data.name, &ip_addr, 1) != DNS_Success) {
         fprintf(stderr, "Invalid host/IP address\n");
         break;
       }
-      Free(data.name);
 
       if (data.params.min_stratum != SRC_DEFAULT_MINSTRATUM) {
         fprintf(stderr, "Option minstratum not supported\n");
@@ -990,6 +953,26 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
 
       if (data.params.max_delay_dev_ratio != SRC_DEFAULT_MAXDELAYDEVRATIO) {
         fprintf(stderr, "Option maxdelaydevratio not supported\n");
+        break;
+      }
+
+      if (data.params.version != NTP_VERSION) {
+        fprintf(stderr, "Option version not supported\n");
+        break;
+      }
+
+      if (data.params.max_sources != SRC_DEFAULT_MAXSOURCES) {
+        fprintf(stderr, "Option maxsources not supported\n");
+        break;
+      }
+
+      if (data.params.min_samples != SRC_DEFAULT_MINSAMPLES) {
+        fprintf(stderr, "Option minsamples not supported\n");
+        break;
+      }
+
+      if (data.params.max_samples != SRC_DEFAULT_MAXSAMPLES) {
+        fprintf(stderr, "Option maxsamples not supported\n");
         break;
       }
 
@@ -1010,41 +993,9 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       result = 1;
 
       break;
-    case CPS_BadOption:
-      fprintf(stderr, "Unrecognized subcommand\n");
-      break;
-    case CPS_BadHost:
-      fprintf(stderr, "Invalid host/IP address\n");
-      break;
-    case CPS_BadPort:
-      fprintf(stderr, "Unreadable port number\n");
-      break;
-    case CPS_BadMinpoll:
-      fprintf(stderr, "Unreadable minpoll value\n");
-      break;
-    case CPS_BadMaxpoll:
-      fprintf(stderr, "Unreadable maxpoll value\n");
-      break;
-    case CPS_BadPresend:
-      fprintf(stderr, "Unreadable presend value\n");
-      break;
-    case CPS_BadMaxdelaydevratio:
-      fprintf(stderr, "Unreadable max delay dev ratio value\n");
-      break;
-    case CPS_BadMaxdelayratio:
-      fprintf(stderr, "Unreadable max delay ratio value\n");
-      break;
-    case CPS_BadMaxdelay:
-      fprintf(stderr, "Unreadable max delay value\n");
-      break;
-    case CPS_BadKey:
-      fprintf(stderr, "Unreadable key value\n");
-      break;
-    case CPS_BadMinstratum:
-      fprintf(stderr, "Unreadable minstratum value\n");
-      break;
-    case CPS_BadPolltarget:
-      fprintf(stderr, "Unreadable polltarget value\n");
+    default:
+      CPS_StatusToString(status, str, sizeof (str));
+      fprintf(stderr, "%s\n", str);
       break;
   }
 
@@ -1086,7 +1037,7 @@ process_cmd_delete(CMD_Request *msg, char *line)
     fprintf(stderr, "Invalid syntax for address\n");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, &address) != DNS_Success) {
+    if (DNS_Name2IPAddress(hostname, &address, 1) != DNS_Success) {
       fprintf(stderr, "Could not get address for hostname\n");
       ok = 0;
     } else {
@@ -1216,7 +1167,7 @@ give_help(void)
   printf("dump : Dump all measurements to save files\n");
   printf("local off : Disable server capability for unsynchronised clock\n");
   printf("local stratum <stratum> : Enable server capability for unsynchronised clock\n");
-  printf("makestep : Jump the time to remove any correction being slewed\n");
+  printf("makestep [<threshold> <updates>] : Correct clock by stepping\n");
   printf("manual off|on|reset : Disable/enable/reset settime command and statistics\n");
   printf("manual list : Show previous settime entries\n");
   printf("maxdelay <address> <new-max-delay> : Modify maximum round-trip valid sample delay for source\n");
@@ -1233,6 +1184,8 @@ give_help(void)
   printf("reselect : Reselect synchronisation source\n");
   printf("rtcdata : Print current RTC performance parameters\n");
   printf("settime <date/time (e.g. Nov 21, 1997 16:30:05 or 16:30:05)> : Manually set the daemon time\n");
+  printf("smoothing : Display current time smoothing state\n");
+  printf("smoothtime reset|activate : Reset/activate time smoothing\n");
   printf("sources [-v] : Display information about current sources\n");
   printf("sourcestats [-v] : Display estimation information about current sources\n");
   printf("tracking : Display system time information\n");
@@ -1412,7 +1365,7 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
                       (where_from.u.sa_family == AF_INET &&
                        (where_from.in4.sin_addr.s_addr != his_addr.in4.sin_addr.s_addr ||
                         where_from.in4.sin_port != his_addr.in4.sin_port)) ||
-#ifdef HAVE_IPV6
+#ifdef FEAT_IPV6
                       (where_from.u.sa_family == AF_INET6 &&
                        (memcmp(where_from.in6.sin6_addr.s6_addr, his_addr.in6.sin6_addr.s6_addr,
                                sizeof (where_from.in6.sin6_addr.s6_addr)) != 0 ||
@@ -1750,10 +1703,10 @@ process_cmd_sources(char *line)
       printf(" / .- Source state '*' = current synced, '+' = combined , '-' = not combined,\n");
       printf("| /   '?' = unreachable, 'x' = time may be in error, '~' = time too variable.\n");
       printf("||                                                 .- xxxx [ yyyy ] +/- zzzz\n");
-      printf("||                                                /   xxxx = adjusted offset,\n");
-      printf("||         Log2(Polling interval) -.             |    yyyy = measured offset,\n");
-      printf("||                                  \\            |    zzzz = estimated error.\n");
-      printf("||                                   |           |                         \n");
+      printf("||      Reachability register (octal) -.           |  xxxx = adjusted offset,\n");
+      printf("||      Log2(Polling interval) --.      |          |  yyyy = measured offset,\n");
+      printf("||                                \\     |          |  zzzz = estimated error.\n");
+      printf("||                                 |    |           \\\n");
     }
 
     printf("MS Name/IP address         Stratum Poll Reach LastRx Last sample\n");
@@ -2014,6 +1967,63 @@ process_cmd_tracking(char *line)
 /* ================================================== */
 
 static int
+process_cmd_smoothing(char *line)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  uint32_t flags;
+  double offset;
+  double freq_ppm;
+  double wander_ppm;
+  double last_update_ago;
+  double remaining_time;
+
+  request.command = htons(REQ_SMOOTHING);
+
+  if (request_reply(&request, &reply, RPY_SMOOTHING, 0)) {
+    flags = ntohl(reply.data.smoothing.flags);
+    offset = UTI_FloatNetworkToHost(reply.data.smoothing.offset);
+    freq_ppm = UTI_FloatNetworkToHost(reply.data.smoothing.freq_ppm);
+    wander_ppm = UTI_FloatNetworkToHost(reply.data.smoothing.wander_ppm);
+    last_update_ago = UTI_FloatNetworkToHost(reply.data.smoothing.last_update_ago);
+    remaining_time = UTI_FloatNetworkToHost(reply.data.smoothing.remaining_time);
+
+    printf("Active         : %s%s\n",
+           flags & RPY_SMT_FLAG_ACTIVE ? "Yes" : "No",
+           flags & RPY_SMT_FLAG_LEAPONLY ? " (leap second only)" : "");
+    printf("Offset         : %+.9f seconds\n", offset);
+    printf("Frequency      : %+.6f ppm\n", freq_ppm);
+    printf("Wander         : %+.6f ppm per second\n", wander_ppm);
+    printf("Last update    : %.1f seconds ago\n", last_update_ago);
+    printf("Remaining time : %.1f seconds\n", remaining_time);
+    return 1;
+  }
+
+  return 0;
+}
+
+/* ================================================== */
+
+static int
+process_cmd_smoothtime(CMD_Request *msg, const char *line)
+{
+  if (!strcmp(line, "reset")) {
+    msg->data.smoothtime.option = htonl(REQ_SMOOTHTIME_RESET);
+  } else if (!strcmp(line, "activate")) {
+    msg->data.smoothtime.option = htonl(REQ_SMOOTHTIME_ACTIVATE);
+  } else {
+    fprintf(stderr, "Invalid syntax for smoothtime command\n");
+    return 0;
+  }
+
+  msg->command = htons(REQ_SMOOTHTIME);
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
 process_cmd_rtcreport(char *line)
 {
   CMD_Request request;
@@ -2157,15 +2167,15 @@ process_cmd_manual_list(const char *line)
   if (request_reply(&request, &reply, RPY_MANUAL_LIST, 0)) {
           n_samples = ntohl(reply.data.manual_list.n_samples);
           printf("210 n_samples = %d\n", n_samples);
-          printf("#    Date  Time(UTC)    Slewed   Original   Residual\n"
-                 "====================================================\n");
+          printf("#    Date     Time(UTC)    Slewed   Original   Residual\n"
+                 "=======================================================\n");
           for (i=0; i<n_samples; i++) {
             sample = &reply.data.manual_list.samples[i];
             UTI_TimevalNetworkToHost(&sample->when, &when);
             slewed_offset = UTI_FloatNetworkToHost(sample->slewed_offset);
             orig_offset = UTI_FloatNetworkToHost(sample->orig_offset);
             residual = UTI_FloatNetworkToHost(sample->residual);
-            printf("%2d %s %10.2f %10.2f %10.2f\n", i, time_to_log_form(when.tv_sec), slewed_offset, orig_offset, residual);
+            printf("%2d %s %10.2f %10.2f %10.2f\n", i, UTI_TimeToLogForm(when.tv_sec), slewed_offset, orig_offset, residual);
           }
           return 1;
   }
@@ -2236,10 +2246,25 @@ process_cmd_rekey(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
-static void
+static int
 process_cmd_makestep(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_MAKESTEP);
+  int limit;
+  double threshold;
+
+  if (*line) {
+    if (sscanf(line, "%lf %d", &threshold, &limit) != 2) {
+      fprintf(stderr, "Bad syntax for makestep command\n");
+      return 0;
+    }
+    msg->command = htons(REQ_MODIFY_MAKESTEP);
+    msg->data.modify_makestep.limit = htonl(limit);
+    msg->data.modify_makestep.threshold = UTI_FloatHostToNetwork(threshold);
+  } else {
+    msg->command = htons(REQ_MAKESTEP);
+  }
+
+  return 1;
 }
 
 /* ================================================== */
@@ -2518,7 +2543,7 @@ process_line(char *line, int *quit)
   } else if (!strcmp(command, "local")) {
     do_normal_submit = process_cmd_local(&tx_message, line);
   } else if (!strcmp(command, "makestep")) {
-    process_cmd_makestep(&tx_message, line);
+    do_normal_submit = process_cmd_makestep(&tx_message, line);
   } else if (!strcmp(command, "manual")) {
     if (!strncmp(line, "list", 4)) {
       do_normal_submit = 0;
@@ -2569,6 +2594,11 @@ process_line(char *line, int *quit)
   } else if (!strcmp(command, "settime")) {
     do_normal_submit = 0;
     ret = process_cmd_settime(line);
+  } else if (!strcmp(command, "smoothing")) {
+    do_normal_submit = 0;
+    ret = process_cmd_smoothing(line);
+  } else if (!strcmp(command, "smoothtime")) {
+    do_normal_submit = process_cmd_smoothtime(&tx_message, line);
   } else if (!strcmp(command, "sources")) {
     do_normal_submit = 0;
     ret = process_cmd_sources(line);
@@ -2610,8 +2640,8 @@ authenticate_from_config(const char *filename)
   CMD_Reply rx_message;
   char line[2048], keyfile[2048], *command, *arg, *password;
   const char *hashname;
-  unsigned long key_id = 0, key_id2 = -1;
-  int ret;
+  uint32_t key_id = 0, key_id2;
+  int key_id_valid = 1, ret;
   FILE *in;
 
   in = fopen(filename, "r");
@@ -2628,13 +2658,12 @@ authenticate_from_config(const char *filename)
     if (!strcasecmp(command, "keyfile")) {
       snprintf(keyfile, sizeof (keyfile), "%s", arg);
     } else if (!strcasecmp(command, "commandkey")) {
-      if (sscanf(arg, "%lu", &key_id) != 1)
-        key_id = -1;
+      key_id_valid = sscanf(arg, "%"SCNu32, &key_id) == 1;
     }
   }
   fclose(in);
 
-  if (!*keyfile || key_id == -1) {
+  if (!*keyfile || !key_id_valid) {
     fprintf(stderr, "Could not read keyfile or commandkey in file %s\n", filename);
     return 0;
   }
@@ -2645,6 +2674,7 @@ authenticate_from_config(const char *filename)
     return 0;
   }
 
+  key_id2 = key_id + 1;
   while (fgets(line, sizeof (line), in)) {
     CPS_NormalizeLine(line);
     if (!*line || !CPS_ParseKey(line, &key_id2, &hashname, &password))
@@ -2662,7 +2692,7 @@ authenticate_from_config(const char *filename)
       ret = 0;
     }
   } else {
-    fprintf(stderr, "Could not find key %lu in keyfile %s\n", key_id, keyfile);
+    fprintf(stderr, "Could not find key %"PRIu32" in keyfile %s\n", key_id, keyfile);
     ret = 0;
   }
 
@@ -2715,7 +2745,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2014 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2015 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",
@@ -2762,11 +2792,12 @@ main(int argc, char **argv)
     } else if (!strcmp(*argv, "-6")) {
       family = IPADDR_INET6;
     } else if (!strcmp("-v", *argv) || !strcmp("--version",*argv)) {
-      printf("chronyc (chrony) version %s\n", CHRONY_VERSION);
-      exit(0);
+      printf("chronyc (chrony) version %s (%s)\n", CHRONY_VERSION, CHRONYC_FEATURES);
+      return 0;
     } else if (!strncmp(*argv, "-", 1)) {
-      fprintf(stderr, "Usage : %s [-h <hostname>] [-p <port-number>] [-n] [-4|-6] [-m] [-a] [-f <file>]] [command]\n", progname);
-      exit(1);
+      fprintf(stderr, "Usage: %s [-h HOST] [-p PORT] [-n] [-4|-6] [-a] [-f FILE] [-m] [COMMAND]\n",
+              progname);
+      return 1;
     } else {
       break; /* And process remainder of line as a command */
     }

@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Richard P. Curnow  1997-2002
+ * Copyright (C) Miroslav Lichvar  2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -21,17 +21,28 @@
 
   =======================================================================
 
-  Deal with broadcast server functions.
+  This module implements time smoothing.
   */
 
-#ifndef GOT_BROADCAST_H
-#define GOT_BROADCAST_H
+#ifndef GOT_SMOOTH_H
+#define GOT_SMOOTH_H
 
-#include "addressing.h"
+#include "reports.h"
 
-extern void BRD_Initialise(void);
-extern void BRD_Finalise(void);
-extern void BRD_AddDestination(IPAddr *addr, unsigned short port, int interval);
+extern void SMT_Initialise(void);
 
-#endif /* GOT_BROADCAST_H */
+extern void SMT_Finalise(void);
 
+extern int SMT_IsEnabled(void);
+
+extern double SMT_GetOffset(struct timeval *now);
+
+extern void SMT_Activate(struct timeval *now);
+
+extern void SMT_Reset(struct timeval *now);
+
+extern void SMT_Leap(struct timeval *now, int leap);
+
+extern int SMT_GetSmoothingReport(RPT_SmoothingReport *report, struct timeval *now);
+
+#endif

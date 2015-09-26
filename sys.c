@@ -46,6 +46,10 @@
 #include "sys_netbsd.h"
 #endif
 
+#if defined (MACOSX)
+#include "sys_macosx.h"
+#endif
+
 /* ================================================== */
 
 void
@@ -66,6 +70,10 @@ SYS_Initialise(void)
 
 #if defined(__NetBSD__)
   SYS_NetBSD_Initialise();
+#endif
+
+#if defined(MACOSX)
+  SYS_MacOSX_Initialise();
 #endif
 
 }
@@ -91,13 +99,17 @@ SYS_Finalise(void)
 #if defined(__NetBSD__)
   SYS_NetBSD_Finalise();
 #endif
+
+#if defined(MACOSX)
+  SYS_MacOSX_Finalise();
+#endif
 }
 
 /* ================================================== */
 
 void SYS_DropRoot(char *user)
 {
-#if defined(LINUX) && defined (FEAT_LINUXCAPS)
+#if defined(LINUX) && defined (FEAT_PRIVDROP)
   SYS_Linux_DropRoot(user);
 #else
   LOG_FATAL(LOGF_Sys, "dropping root privileges not supported");
