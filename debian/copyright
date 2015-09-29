@@ -21,6 +21,12 @@ Copyright: 2009-2015, Miroslav Lichvar
            1997-2003, Richard P. Curnow
 License: GPL-2
 
+Files: sys_macosx.?
+Copyright: 2015, Bryan Christianson
+           2001, J. Hannken-Illjes
+           1997-2001, Richard P. Curnow
+License: GPL-2
+
 Files: sys_netbsd.?
 Copyright: 2001, J. Hannken-Illjes
            1997-2001, Richard P. Curnow
