@@ -1,3 +1,11 @@
+chrony (2.1.1-1) unstable; urgency=medium
+
+  From this version, 'chronyd' will strictly act as an NTP client by default. If
+  you want it to serve time to other systems, please do so by configuring the
+  'allow' directive.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 12 Oct 2015 19:12:39 +0200
+
 chrony (1.31.1-1) unstable; urgency=medium
 
   From now on, we use the "hwclockfile" directive in /etc/chrony/chrony.conf.
