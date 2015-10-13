@@ -34,10 +34,9 @@ Chrony for Debian
  in it). You may change this password if you wish.
 
  The scripts /etc/ppp/ip-up.d/chrony and /etc/ppp/ip-down.d/chrony
- read key 1 from /etc/chrony/chrony.keys and use it as the password to
- send chronyc commands.  Thus you can change the password by changing
- this key, but if you make the command key anything but 1 these scripts
- won't work without editing.
+ read the key ID configured with the 'commandkey' directive in the
+ configuration file (chrony.conf) and use the correspondent password
+ from /etc/chrony/chrony.keys to send chronyc commands.
 
  The standard Debian chrony installation is designed for systems with an
  intermittent dial-up connection.  If you have such a system the most you
@@ -49,4 +48,4 @@ Chrony for Debian
  contact the default server whenever you connect to your ISP.
 
 
- -- Vincent Blut <vincent.debian@free.fr>  Sun, 6 Sep 2015 22:10:27 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 13 Oct 2015 14:46:59 +0200
