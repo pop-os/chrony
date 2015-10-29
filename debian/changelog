@@ -1,3 +1,48 @@
+chrony (2.1.1-1) unstable; urgency=medium
+
+  * Import upstream version 2.0 and 2.1.1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/:
+    - Rename ppp scripts from ip-{up,down} to chrony.ppp.ip-{up,down}.
+    Necessary to let dh_installppp do its magic.
+
+  * debian/chrony.conf:
+    - Use the new 'pool' directive to specify the pool of NTP servers.
+    - Use the iburst option to speed up the initial synchronization.
+    - Drop the minpoll option. There is no point to deviate from upstream here.
+    Consequently, the default minimum polling interval is now 64 seconds
+    instead of 256 seconds.
+    - Enable kernel synchronization of the RTC via the 'rtcsync' directive.
+    - Drop the commented out 'rtcfile' directive in the configuration file.
+    - Stricly act as an NTP client by default. Serving time to other systems
+    should be the decision of the administrator(s). (Closes: #778770)
+    - Clarify some comments.
+    - Improve comment about the 'commandkey' directive.
+
+  * debian/control:
+    - Drop 'Recommends: udev (>= 0.124-1)' since it predates Debian squeeze.
+
+  * debian/copyright:
+    - Update copyright years.
+    - Various cleanups.
+    - Update relative to sys_macosx.{c,h} files.
+
+  * debian/NEWS:
+    - Comment the deactivation of the NTP server capability by default.
+
+  * debian/patches/:
+    - Refresh 01_do-not-install-copying-file.patch.
+
+  * debian/README.Debian:
+    - Fix misleading information.
+
+  * debian/rules:
+    - No need to install ppp scripts from the 'rules' script. Let 'dh_installppp'
+    handle that.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 29 Oct 2015 22:52:53 +0100
+
 chrony (1.31.1-2) unstable; urgency=medium
 
   * Rename the NEWS.Debian file to NEWS. dh_installchangelogs doesn’t seems
