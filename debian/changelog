@@ -27,6 +27,8 @@ chrony (2.1.1-1) unstable; urgency=medium
     - Update copyright years.
     - Various cleanups.
     - Update relative to sys_macosx.{c,h} files.
+    - The test/simulation/test.common file is under the GPL-2+ license.
+    Thanks to Paul Gevers <elbrus@debian.org> for catching it.
 
   * debian/NEWS:
     - Comment the deactivation of the NTP server capability by default.
@@ -41,7 +43,7 @@ chrony (2.1.1-1) unstable; urgency=medium
     - No need to install ppp scripts from the 'rules' script. Let dh_installppp
     handle that.
 
- -- Vincent Blut <vincent.debian@free.fr>  Thu, 29 Oct 2015 23:04:53 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 18 Nov 2015 00:11:23 +0100
 
 chrony (1.31.1-2) unstable; urgency=medium
 
