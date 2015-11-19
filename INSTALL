@@ -62,10 +62,10 @@ entered.
 
      make install
 
-   This will install the binaries, plain text manual and manpages.
+   This will install the binaries and manpages.
 
-   To install the HTML and info versions of the manual as well, enter
-the command
+   To install the plain text, HTML and info versions of the manual,
+enter the command
 
      make install-docs
 
@@ -88,7 +88,7 @@ servers from the pool.ntp.org project as your time reference.  A minimal
 useful configuration file could be
 
      pool pool.ntp.org iburst
-     makestep 10 3
+     makestep 1.0 3
      rtcsync
 
    Then, 'chronyd' can be run.

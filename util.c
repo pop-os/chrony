@@ -29,12 +29,14 @@
 
 #include "sysincl.h"
 
+#include "logging.h"
+#include "memory.h"
 #include "util.h"
 #include "hash.h"
 
 /* ================================================== */
 
-INLINE_STATIC void
+void
 UTI_TimevalToDouble(struct timeval *a, double *b)
 {
   *b = (double)(a->tv_sec) + 1.0e-6 * (double)(a->tv_usec);
@@ -43,20 +45,22 @@ UTI_TimevalToDouble(struct timeval *a, double *b)
 
 /* ================================================== */
 
-INLINE_STATIC void
+void
 UTI_DoubleToTimeval(double a, struct timeval *b)
 {
-  long int_part, frac_part;
+  long int_part;
+  double frac_part;
   int_part = (long)(a);
-  frac_part = (long)(0.5 + 1.0e6 * (a - (double)(int_part)));
+  frac_part = 1.0e6 * (a - (double)(int_part));
+  frac_part = frac_part > 0 ? frac_part + 0.5 : frac_part - 0.5;
   b->tv_sec = int_part;
-  b->tv_usec = frac_part;
+  b->tv_usec = (long)frac_part;
   UTI_NormaliseTimeval(b);
 }
 
 /* ================================================== */
 
-INLINE_STATIC int
+int
 UTI_CompareTimevals(struct timeval *a, struct timeval *b)
 {
   if (a->tv_sec < b->tv_sec) {
@@ -76,7 +80,7 @@ UTI_CompareTimevals(struct timeval *a, struct timeval *b)
 
 /* ================================================== */
 
-INLINE_STATIC void
+void
 UTI_NormaliseTimeval(struct timeval *x)
 {
   /* Reduce tv_usec to within +-1000000 of zero. JGH */
@@ -95,7 +99,7 @@ UTI_NormaliseTimeval(struct timeval *x)
 
 /* ================================================== */
 
-INLINE_STATIC void
+void
 UTI_DiffTimevals(struct timeval *result,
                  struct timeval *a,
                  struct timeval *b)
@@ -112,7 +116,7 @@ UTI_DiffTimevals(struct timeval *result,
 /* ================================================== */
 
 /* Calculate result = a - b and return as a double */
-INLINE_STATIC void
+void
 UTI_DiffTimevalsToDouble(double *result, 
                          struct timeval *a,
                          struct timeval *b)
@@ -123,7 +127,7 @@ UTI_DiffTimevalsToDouble(double *result,
 
 /* ================================================== */
 
-INLINE_STATIC void
+void
 UTI_AddDoubleToTimeval(struct timeval *start,
                        double increment,
                        struct timeval *end)
@@ -147,7 +151,7 @@ UTI_AddDoubleToTimeval(struct timeval *start,
 /* ================================================== */
 
 /* Calculate the average and difference (as a double) of two timevals */
-INLINE_STATIC void
+void
 UTI_AverageDiffTimevals (struct timeval *earlier,
                          struct timeval *later,
                          struct timeval *average,
@@ -485,6 +489,55 @@ UTI_IPAndPortToSockaddr(IPAddr *ip, unsigned short port, struct sockaddr *sa)
 
 /* ================================================== */
 
+char *UTI_SockaddrToString(struct sockaddr *sa)
+{
+  unsigned short port;
+  IPAddr ip;
+  char *result;
+
+  result = NEXT_BUFFER;
+
+  switch (sa->sa_family) {
+    case AF_INET:
+#ifdef AF_INET6
+    case AF_INET6:
+#endif
+      UTI_SockaddrToIPAndPort(sa, &ip, &port);
+      snprintf(result, BUFFER_LENGTH, "%s:%hu", UTI_IPToString(&ip), port);
+      break;
+    case AF_UNIX:
+      snprintf(result, BUFFER_LENGTH, "%s", ((struct sockaddr_un *)sa)->sun_path);
+      break;
+    default:
+      snprintf(result, BUFFER_LENGTH, "[UNKNOWN]");
+  }
+
+  return result;
+}
+
+/* ================================================== */
+
+const char *
+UTI_SockaddrFamilyToString(int family)
+{
+  switch (family) {
+    case AF_INET:
+      return "IPv4";
+#ifdef AF_INET6
+    case AF_INET6:
+      return "IPv6";
+#endif
+    case AF_UNIX:
+      return "Unix";
+    case AF_UNSPEC:
+      return "UNSPEC";
+    default:
+      return "?";
+  }
+}
+
+/* ================================================== */
+
 char *
 UTI_TimeToLogForm(time_t t)
 {
@@ -649,11 +702,11 @@ UTI_Log2ToDouble(int l)
   if (l >= 0) {
     if (l > 31)
       l = 31;
-    return 1 << l;
+    return (uint32_t)1 << l;
   } else {
     if (l < -31)
       l = -31;
-    return 1.0 / (1 << -l);
+    return 1.0 / ((uint32_t)1 << -l);
   }
 }
 
@@ -836,4 +889,184 @@ UTI_DecodePasswordFromText(char *key)
     /* assume ASCII */
     return len;
   }
+}
+
+/* ================================================== */
+
+int
+UTI_SetQuitSignalsHandler(void (*handler)(int))
+{
+  struct sigaction sa;
+
+  sa.sa_handler = handler;
+  sa.sa_flags = SA_RESTART;
+  if (sigemptyset(&sa.sa_mask) < 0)
+    return 0;
+
+#ifdef SIGINT
+  if (sigaction(SIGINT, &sa, NULL) < 0)
+    return 0;
+#endif
+#ifdef SIGTERM
+  if (sigaction(SIGTERM, &sa, NULL) < 0)
+    return 0;
+#endif
+#ifdef SIGQUIT
+  if (sigaction(SIGQUIT, &sa, NULL) < 0)
+    return 0;
+#endif
+#ifdef SIGHUP
+  if (sigaction(SIGHUP, &sa, NULL) < 0)
+    return 0;
+#endif
+
+  return 1;
+}
+
+/* ================================================== */
+
+char *
+UTI_PathToDir(const char *path)
+{
+  char *dir, *slash;
+
+  slash = strrchr(path, '/');
+
+  if (!slash)
+    return Strdup(".");
+
+  if (slash == path)
+    return Strdup("/");
+
+  dir = Malloc(slash - path + 1);
+  snprintf(dir, slash - path + 1, "%s", path);
+
+  return dir;
+}
+
+/* ================================================== */
+
+static int
+create_dir(char *p, mode_t mode, uid_t uid, gid_t gid)
+{
+  int status;
+  struct stat buf;
+
+  /* See if directory exists */
+  status = stat(p, &buf);
+
+  if (status < 0) {
+    if (errno != ENOENT) {
+      LOG(LOGS_ERR, LOGF_Util, "Could not access %s : %s", p, strerror(errno));
+      return 0;
+    }
+  } else {
+    if (S_ISDIR(buf.st_mode))
+      return 1;
+    LOG(LOGS_ERR, LOGF_Util, "%s is not directory", p);
+    return 0;
+  }
+
+  /* Create the directory */
+  if (mkdir(p, mode) < 0) {
+    LOG(LOGS_ERR, LOGF_Util, "Could not create directory %s : %s", p, strerror(errno));
+    return 0;
+  }
+
+  /* Set its owner */
+  if (chown(p, uid, gid) < 0) {
+    LOG(LOGS_ERR, LOGF_Util, "Could not change ownership of %s : %s", p, strerror(errno));
+    /* Don't leave it there with incorrect ownership */
+    rmdir(p);
+    return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+/* Return 0 if the directory couldn't be created, 1 if it could (or
+   already existed) */
+int
+UTI_CreateDirAndParents(const char *path, mode_t mode, uid_t uid, gid_t gid)
+{
+  char *p;
+  int i, j, k, last;
+
+  /* Don't try to create current directory */
+  if (!strcmp(path, "."))
+    return 1;
+
+  p = (char *)Malloc(1 + strlen(path));
+
+  i = k = 0;
+  while (1) {
+    p[i++] = path[k++];
+
+    if (path[k] == '/' || !path[k]) {
+      /* Check whether its end of string, a trailing / or group of / */
+      last = 1;
+      j = k;
+      while (path[j]) {
+        if (path[j] != '/') {
+          /* Pick up a / into p[] thru the assignment at the top of the loop */
+          k = j - 1;
+          last = 0;
+          break;
+        }
+        j++;
+      }
+
+      p[i] = 0;
+
+      if (!create_dir(p, last ? mode : 0755, last ? uid : 0, last ? gid : 0)) {
+        Free(p);
+        return 0;
+      }
+
+      if (last)
+        break;
+    }
+
+    if (!path[k])
+      break;
+  }
+
+  Free(p);
+  return 1;
+}
+
+/* ================================================== */
+
+int
+UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid)
+{
+  struct stat buf;
+
+  if (stat(path, &buf)) {
+    LOG(LOGS_ERR, LOGF_Util, "Could not access %s : %s", path, strerror(errno));
+    return 0;
+  }
+
+  if (!S_ISDIR(buf.st_mode)) {
+    LOG(LOGS_ERR, LOGF_Util, "%s is not directory", path);
+    return 0;
+  }
+
+  if ((buf.st_mode & 0777) & ~perm) {
+    LOG(LOGS_ERR, LOGF_Util, "Wrong permissions on %s", path);
+    return 0;
+  }
+
+  if (buf.st_uid != uid) {
+    LOG(LOGS_ERR, LOGF_Util, "Wrong owner of %s (%s != %d)", path, "UID", uid);
+    return 0;
+  }
+
+  if (buf.st_gid != gid) {
+    LOG(LOGS_ERR, LOGF_Util, "Wrong owner of %s (%s != %d)", path, "GID", gid);
+    return 0;
+  }
+
+  return 1;
 }

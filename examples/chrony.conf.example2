@@ -6,8 +6,8 @@ pool pool.ntp.org iburst
 driftfile /var/lib/chrony/drift
 
 # In first three updates step the system clock instead of slew
-# if the adjustment is larger than 10 seconds.
-makestep 10 3
+# if the adjustment is larger than 1 second.
+makestep 1.0 3
 
 # Enable kernel synchronization of the real-time clock (RTC).
 rtcsync
@@ -18,14 +18,8 @@ rtcsync
 # Serve time even if not synchronized to any NTP server.
 #local stratum 10
 
-# Specify file containing keys for NTP and command authentication.
-keyfile /etc/chrony.keys
-
-# Specify key number for command authentication.
-commandkey 1
-
-# Generate new command key on start if missing.
-generatecommandkey
+# Specify file containing keys for NTP authentication.
+#keyfile /etc/chrony.keys
 
 # Disable logging of client accesses.
 noclientlog

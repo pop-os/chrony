@@ -44,7 +44,6 @@
 #include "logging.h"
 #include "reports.h"
 #include "nameserv.h"
-#include "mkdirpp.h"
 #include "sched.h"
 #include "regress.h"
 
@@ -71,6 +70,7 @@ typedef enum {
   SRC_OK,               /* OK so far, not a final status! */
   SRC_UNSELECTABLE,     /* Has noselect option set */
   SRC_BAD_STATS,        /* Doesn't have valid stats data */
+  SRC_BAD_DISTANCE,     /* Has root distance longer than allowed maximum */
   SRC_WAITS_STATS,      /* Others have bad stats, selection postponed */
   SRC_STALE,            /* Has older samples than others */
   SRC_FALSETICKER,      /* Doesn't agree with others */
@@ -156,6 +156,7 @@ static int selected_source_index; /* Which source index is currently
 /* Number of updates needed to reset the distant status */
 #define DISTANT_PENALTY 32
 
+static double max_distance;
 static double reselect_distance;
 static double stratum_weight;
 static double combine_limit;
@@ -180,6 +181,7 @@ void SRC_Initialise(void) {
   n_sources = 0;
   max_n_sources = 0;
   selected_source_index = INVALID_SOURCE;
+  max_distance = CNF_GetMaxDistance();
   reselect_distance = CNF_GetReselectDistance();
   stratum_weight = CNF_GetStratumWeight();
   combine_limit = CNF_GetCombineLimit();
@@ -654,6 +656,12 @@ SRC_SelectSource(SRC_Instance updated_inst)
       continue;
     }
 
+    /* Require the root distance to be below the allowed maximum */
+    if (si->root_distance > max_distance) {
+      sources[i]->status = SRC_BAD_DISTANCE;
+      continue;
+    }
+
     sources[i]->status = SRC_OK; /* For now */
 
     if (sources[i]->reachability && max_reach_sample_ago < first_sample_ago)
@@ -1093,25 +1101,23 @@ SRC_DumpSources(void)
   direc_len = strlen(direc);
   file_len = direc_len + 24;
   filename = MallocArray(char, file_len); /* a bit of slack */
-  if (mkdir_and_parents(direc)) {
-    for (i=0; i<n_sources; i++) {
-      a = (sources[i]->ref_id) >> 24;
-      b = ((sources[i]->ref_id) >> 16) & 0xff;
-      c = ((sources[i]->ref_id) >> 8) & 0xff;
-      d = ((sources[i]->ref_id)) & 0xff;
-      
-      snprintf(filename, file_len-1, "%s/%d.%d.%d.%d.dat", direc, a, b, c, d);
-      out = fopen(filename, "w");
-      if (!out) {
-        LOG(LOGS_WARN, LOGF_Sources, "Could not open dump file %s", filename);
-      } else {
-        SST_SaveToFile(sources[i]->stats, out);
-        fclose(out);
-      }
+
+  for (i = 0; i < n_sources; i++) {
+    a = (sources[i]->ref_id) >> 24;
+    b = ((sources[i]->ref_id) >> 16) & 0xff;
+    c = ((sources[i]->ref_id) >> 8) & 0xff;
+    d = ((sources[i]->ref_id)) & 0xff;
+
+    snprintf(filename, file_len - 1, "%s/%d.%d.%d.%d.dat", direc, a, b, c, d);
+    out = fopen(filename, "w");
+    if (!out) {
+      LOG(LOGS_WARN, LOGF_Sources, "Could not open dump file %s", filename);
+    } else {
+      SST_SaveToFile(sources[i]->stats, out);
+      fclose(out);
     }
-  } else {
-    LOG(LOGS_ERR, LOGF_Sources, "Could not create directory %s", direc);
   }
+
   Free(filename);
 }
 
@@ -1219,6 +1225,7 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
     switch (src->status) {
       case SRC_UNSELECTABLE:
       case SRC_BAD_STATS:
+      case SRC_BAD_DISTANCE:
       case SRC_STALE:
       case SRC_WAITS_STATS:
         report->state = RPT_UNREACH;

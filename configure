@@ -4,31 +4,11 @@
 # chronyd/chronyc - Programs for keeping computer clocks accurate.
 #
 # Copyright (C) Richard P. Curnow  1997-2003
-# Copyright (C) Miroslav Lichvar  2009, 2012-2014
+# Copyright (C) Miroslav Lichvar  2009, 2012-2015
 #
 # =======================================================================
 
 # This configure script determines the operating system type and version
-
-if [ "x${CC}" = "x" ]; then
-  MYCC="gcc"
-else
-  MYCC="${CC}"
-fi
-
-if [ "x${CFLAGS}" = "x" ]; then
-  MYCFLAGS="-O2 -g"
-else
-  MYCFLAGS="${CFLAGS}"
-fi
-
-MYCPPFLAGS="${CPPFLAGS}"
-
-if [ "x${MYCC}" = "xgcc" ]; then
-  MYCFLAGS="${MYCFLAGS} -Wmissing-prototypes -Wall"
-fi
-
-MYLDFLAGS="${LDFLAGS}"
 
 # ======================================================================
 # FUNCTIONS
@@ -41,7 +21,7 @@ test_code () {
   ldflags=$4
   code=$5
 
-  echo -n "Checking for $name : "
+  printf "%s" "Checking for $name : "
 
   (
     for h in $headers; do
@@ -113,12 +93,16 @@ For better control, use the options below.
   --disable-pps          Disable PPS refclock driver
   --disable-ipv6         Disable IPv6 support
   --disable-rtc          Don't include RTC even on Linux
-  --disable-linuxcaps    Disable libcap (Linux capabilities) support
+  --disable-privdrop     Disable support for dropping root privileges
+  --without-libcap       Don't use libcap even if it is available
+  --enable-scfilter      Enable support for system call filtering
+  --without-seccomp      Don't use seccomp even if it is available
   --disable-asyncdns     Disable asynchronous name resolving
   --disable-forcednsretry Don't retry on permanent DNS error
   --with-ntp-era=SECONDS Specify earliest assumed NTP time in seconds
                          since 1970-01-01 [50*365 days ago]
   --with-user=USER       Specify default chronyd user [root]
+  --with-hwclockfile=PATH Specify default path to hwclock(8) adjtime file
   --with-sendmail=PATH   Path to sendmail binary [/usr/lib/sendmail]
   --enable-debug         Enable debugging support
 
@@ -131,6 +115,7 @@ Fine tuning of the installation directories:
   --mandir=DIR           man documentation [DATAROOTDIR/man]
   --docdir=DIR           documentation root [DATAROOTDIR/doc/chrony]
   --localstatedir=DIR    modifiable single-machine data [/var]
+  --chronysockdir=DIR    location for chrony sockets [LOCALSTATEDIR/run/chrony]
   --chronyvardir=DIR     location for chrony data [LOCALSTATEDIR/lib/chrony]
 
 Overriding system detection when cross-compiling:
@@ -174,12 +159,12 @@ get_features () {
   ff=1
   for f; do
     if [ "$ff" = "0" ]; then
-      echo -n " "
+      printf " "
     fi
     if grep "define FEAT_$f" config.h > /dev/null; then
-      echo -n "+$f"
+      printf "%s" "+$f"
     else
-      echo -n "-$f"
+      printf "%s" "-$f"
     fi
     ff=0
   done
@@ -213,7 +198,10 @@ try_tomcrypt=1
 feat_rtc=1
 try_rtc=0
 feat_droproot=1
-try_libcap=0
+try_libcap=-1
+try_clockctl=0
+feat_scfilter=0
+try_seccomp=-1
 readline_lib=""
 readline_inc=""
 ncurses_lib=""
@@ -227,6 +215,7 @@ feat_asyncdns=1
 feat_forcednsretry=1
 ntp_era_split=""
 default_user="root"
+default_hwclockfile=""
 mail_program="/usr/lib/sendmail"
 
 for option
@@ -283,6 +272,9 @@ do
     --localstatedir=* )
       SETLOCALSTATEDIR=`echo $option | sed -e 's/^.*=//;'`
     ;;
+    --chronysockdir=* )
+      SETCHRONYSOCKDIR=`echo $option | sed -e 's/^.*=//;'`
+    ;;
     --chronyvardir=* )
       SETCHRONYVARDIR=`echo $option | sed -e 's/^.*=//;'`
     ;;
@@ -307,8 +299,20 @@ do
     --disable-pps)
       feat_pps=0
     ;;
-    --disable-linuxcaps)
+    --disable-privdrop)
       feat_droproot=0
+    ;;
+    --without-libcap|--disable-linuxcaps)
+      try_libcap=0
+    ;;
+    --enable-scfilter)
+      feat_scfilter=1
+    ;;
+    --disable-scfilter)
+      feat_scfilter=0
+    ;;
+    --without-seccomp)
+      try_seccomp=0
     ;;
     --disable-asyncdns)
       feat_asyncdns=0
@@ -321,6 +325,9 @@ do
     ;;
     --with-user=* )
       default_user=`echo $option | sed -e 's/^.*=//;'`
+    ;;
+    --with-hwclockfile=* )
+      default_hwclockfile=`echo $option | sed -e 's/^.*=//;'`
     ;;
     --with-sendmail=* )
       mail_program=`echo $option | sed -e 's/^.*=//;'`
@@ -356,78 +363,50 @@ rm -f config.h config.log
 
 SYSTEM=${OPERATINGSYSTEM}-${MACHINE}
 
-case $SYSTEM in
-    SunOS-sun4* )
-    case $VERSION in
-        4.* )
-            EXTRA_OBJECTS="sys_sunos.o strerror.o"
-            EXTRA_LIBS="-lkvm"
-            add_def SUNOS
-            echo "Configuring for SunOS (" $SYSTEM "version" $VERSION ")"
-        ;;
-        5.* )
-            EXTRA_OBJECTS="sys_solaris.o"
-            EXTRA_LIBS="-lsocket -lnsl -lkvm -lelf"
-            EXTRA_CLI_LIBS="-lsocket -lnsl"
-            add_def SOLARIS
-            echo "Configuring for Solaris (" $SYSTEM "SunOS version" $VERSION ")"
-        ;;
-    esac
-    ;;
-    Linux* )
-        EXTRA_OBJECTS="sys_generic.o sys_linux.o wrap_adjtimex.o"
-        try_libcap=1
+case $OPERATINGSYSTEM in
+    Linux)
+        EXTRA_OBJECTS="sys_generic.o sys_linux.o sys_timex.o"
+        [ $try_libcap != "0" ] && try_libcap=1
         try_rtc=1
+        [ $try_seccomp != "0" ] && try_seccomp=1
         try_setsched=1
         try_lockmem=1
         try_phc=1
         add_def LINUX
         echo "Configuring for " $SYSTEM
-        if [ "${MACHINE}" = "alpha" ]; then
-           echo "Enabling -mieee"
-           # FIXME: Should really test for GCC
-           MYCFLAGS="$MYCFLAGS -mieee"
-        fi
     ;;
 
-    BSD/386-i[3456]86|FreeBSD-i386|FreeBSD-amd64 )
-        # Antti Jrvinen <costello@iki.fi> reported that this system can
-        # be supported with the SunOS 4.x driver files.
-        EXTRA_OBJECTS="sys_sunos.o strerror.o"
-        EXTRA_LIBS="-lkvm"
-        add_def SUNOS
-        echo "Configuring for $SYSTEM (using SunOS driver)"
-    ;;
-    NetBSD-* )
-        EXTRA_OBJECTS="sys_netbsd.o"
-        EXTRA_LIBS="-lkvm"
-        SYSDEFS=""
+    FreeBSD)
+        EXTRA_OBJECTS="sys_generic.o sys_netbsd.o sys_timex.o"
+        add_def FREEBSD
         echo "Configuring for $SYSTEM"
     ;;
-    Darwin-* )
+    NetBSD)
+        EXTRA_OBJECTS="sys_generic.o sys_netbsd.o sys_timex.o"
+        try_clockctl=1
+        add_def NETBSD
+        echo "Configuring for $SYSTEM"
+    ;;
+    Darwin)
         EXTRA_OBJECTS="sys_macosx.o"
         EXTRA_LIBS="-lresolv"
         EXTRA_CLI_LIBS="-lresolv"
         add_def MACOSX
         echo "Configuring for MacOS X (" $SYSTEM "MacOS X version" $VERSION ")"
     ;;
-    SunOS-i86pc* )                                          
-        # Doug Woodward <dougw@whistler.com> reported that this configuration
-        # works for Solaris 2.8 / SunOS 5.8 on x86 platforms
-        EXTRA_OBJECTS="sys_solaris.o"                
-        EXTRA_LIBS="-lsocket -lnsl -lkvm -lelf"      
-        EXTRA_CLI_LIBS="-lsocket -lnsl"                              
+    SunOS)
+        EXTRA_OBJECTS="sys_generic.o sys_solaris.o sys_timex.o"
+        EXTRA_LIBS="-lsocket -lnsl -lresolv"
+        EXTRA_CLI_LIBS="-lsocket -lnsl -lresolv"
         add_def SOLARIS
+        # These are needed to have msg_control in struct msghdr
+        add_def __EXTENSIONS__
+        add_def _XOPEN_SOURCE 1
+        add_def _XOPEN_SOURCE_EXTENDED 1
         echo "Configuring for Solaris (" $SYSTEM "SunOS version" $VERSION ")" 
     ;;                                                                        
-    CYGWIN32_NT-i[3456]86 )
-        EXTRA_OBJECTS="sys_winnt.o"
-        EXTRA_LIBS=""
-        add_def WINNT
-        echo "Configuring for Windows NT (Cygwin32)"
-    ;;
     * )
-        echo "Sorry, I don't know how to build this software on your system."
+        echo "error: $SYSTEM is not supported (yet?)"
         exit 1
     ;;
 esac
@@ -460,6 +439,35 @@ if [ $feat_refclock = "1" ]; then
   EXTRA_OBJECTS="$EXTRA_OBJECTS refclock.o refclock_phc.o refclock_pps.o refclock_shm.o refclock_sock.o"
 fi
 
+MYCC="$CC"
+MYCFLAGS="$CFLAGS"
+MYCPPFLAGS="$CPPFLAGS"
+MYLDFLAGS="$LDFLAGS"
+
+if [ "x$MYCC" = "x" ]; then
+  MYCC=gcc
+  if ! test_code "$MYCC" '' '' '' ''; then
+    MYCC=cc
+    if ! test_code "$MYCC" '' '' '' ''; then
+      echo "error: no C compiler found"
+      exit 1
+    fi
+  fi
+else
+  if ! test_code "$MYCC" '' '' '' ''; then
+    echo "error: C compiler $MYCC cannot create executables"
+    exit 1
+  fi
+fi
+
+if [ "x$MYCFLAGS" = "x" ]; then
+  MYCFLAGS="-O2 -g"
+fi
+
+if [ "x$MYCC" = "xgcc" ]; then
+  MYCFLAGS="$MYCFLAGS -Wmissing-prototypes -Wall"
+fi
+
 if test_code '64-bit time_t' 'time.h' '' '' '
   char x[sizeof(time_t) > 4 ? 1 : -1] = {0};
   return x[0];'
@@ -472,7 +480,7 @@ then
   else
     split_seconds=`date '+%s'`
     if [ "x$split_seconds" = "" ]; then
-      echo "Could not get current time, --with-ntp-era option is needed"
+      echo "error: could not get current time, --with-ntp-era option is needed"
       exit 1
     fi
     split_days=$((50 * 365))
@@ -501,7 +509,7 @@ else
   if test_code 'math in -lm' 'math.h' '' '-lm' "$MATHCODE"; then
     LIBS="-lm"
   else
-    echo "Can't compile/link a program which uses sqrt(), log(), pow(), bailing out"
+    echo "error: could not compile/link a program which uses sqrt(), log(), pow()"
     exit 1
   fi
 fi
@@ -514,21 +522,28 @@ if test_code '<inttypes.h>' 'inttypes.h' '' '' ''; then
   add_def HAVE_INTTYPES_H
 fi
 
+if test_code 'struct in_pktinfo' 'sys/socket.h netinet/in.h' '' '' '
+  struct in_pktinfo ipi;
+  return sizeof (ipi.ipi_spec_dst.s_addr) + IP_PKTINFO;'
+then
+  add_def HAVE_IN_PKTINFO
+fi
+
 if [ $feat_ipv6 = "1" ] && \
-  test_code 'IPv6 support' 'arpa/inet.h sys/socket.h netinet/in.h' '' '' '
+  test_code 'IPv6 support' 'arpa/inet.h sys/socket.h netinet/in.h' '' "$EXTRA_LIBS" '
     struct sockaddr_in6 n;
     char p[100];
     n.sin6_addr = in6addr_any;
     return !inet_ntop(AF_INET6, &n.sin6_addr.s6_addr, p, sizeof(p));'
 then
   add_def FEAT_IPV6
-  if test_code 'in6_pktinfo' 'sys/socket.h netinet/in.h' '' '' '
-    return sizeof(struct in6_pktinfo);'
+  if test_code 'struct in6_pktinfo' 'sys/socket.h netinet/in.h' '' '' '
+    return sizeof (struct in6_pktinfo) + IPV6_PKTINFO;'
   then
     add_def HAVE_IN6_PKTINFO
   else
-    if test_code 'in6_pktinfo with _GNU_SOURCE' 'sys/socket.h netinet/in.h' \
-      '-D_GNU_SOURCE' '' 'return sizeof(struct in6_pktinfo);'
+    if test_code 'struct in6_pktinfo with _GNU_SOURCE' 'sys/socket.h netinet/in.h' \
+      '-D_GNU_SOURCE' '' 'return sizeof (struct in6_pktinfo) + IPV6_PKTINFO;'
     then
       add_def _GNU_SOURCE
       add_def HAVE_IN6_PKTINFO
@@ -536,7 +551,7 @@ then
   fi
 fi
 
-if test_code 'getaddrinfo()' 'sys/types.h sys/socket.h netdb.h' '' '' \
+if test_code 'getaddrinfo()' 'sys/types.h sys/socket.h netdb.h' '' "$EXTRA_LIBS" \
   'return getaddrinfo(0, 0, 0, 0);'
 then
   add_def HAVE_GETADDRINFO
@@ -584,6 +599,20 @@ if [ $feat_droproot = "1" ] && [ $try_libcap = "1" ] && \
 then
     add_def FEAT_PRIVDROP
     EXTRA_LIBS="$EXTRA_LIBS -lcap"
+fi
+
+if [ $feat_droproot = "1" ] && [ $try_clockctl = "1" ] && \
+  test_code '<sys/clockctl.h>' 'sys/clockctl.h' '' '' ''
+then
+  add_def FEAT_PRIVDROP
+fi
+
+if [ $feat_scfilter = "1" ] && [ $try_seccomp = "1" ] && \
+  test_code seccomp 'seccomp.h' '' '-lseccomp' \
+    'seccomp_init(SCMP_ACT_KILL);'
+then
+  add_def FEAT_SCFILTER
+  EXTRA_LIBS="$EXTRA_LIBS -lseccomp"
 fi
 
 if [ $feat_rtc = "1" ] && [ $try_rtc = "1" ] && \
@@ -759,27 +788,36 @@ if [ "x$SETLOCALSTATEDIR" != "x" ]; then
   LOCALSTATEDIR=$SETLOCALSTATEDIR
 fi
 
+CHRONYSOCKDIR=${LOCALSTATEDIR}/run/chrony
+if [ "x$SETCHRONYSOCKDIR" != "x" ]; then
+  CHRONYSOCKDIR=$SETCHRONYSOCKDIR
+fi
+
 CHRONYVARDIR=${LOCALSTATEDIR}/lib/chrony
 if [ "x$SETCHRONYVARDIR" != "x" ]; then
   CHRONYVARDIR=$SETCHRONYVARDIR
 fi
 
 add_def DEFAULT_CONF_FILE "\"$SYSCONFDIR/chrony.conf\""
+add_def DEFAULT_HWCLOCK_FILE "\"$default_hwclockfile\""
 add_def DEFAULT_USER "\"$default_user\""
+add_def DEFAULT_COMMAND_SOCKET "\"$CHRONYSOCKDIR/chronyd.sock\""
 add_def MAIL_PROGRAM "\"$mail_program\""
 
-common_features="`get_features ASYNCDNS IPV6 SECHASH`"
+common_features="`get_features IPV6 DEBUG`"
 chronyc_features="`get_features READLINE`"
-chronyd_features="`get_features CMDMON NTP REFCLOCK RTC PRIVDROP DEBUG`"
+chronyd_features="`get_features CMDMON NTP REFCLOCK RTC PRIVDROP SCFILTER SECHASH ASYNCDNS`"
 add_def CHRONYC_FEATURES "\"$chronyc_features $common_features\""
 add_def CHRONYD_FEATURES "\"$chronyd_features $common_features\""
 echo "Features : $chronyd_features $chronyc_features $common_features"
 
 if [ -f version.txt ]; then
-  add_def CHRONY_VERSION "\"`cat version.txt`\""
+  CHRONY_VERSION="`cat version.txt`"
 else
-  add_def CHRONY_VERSION "\"DEVELOPMENT\""
+  CHRONY_VERSION="DEVELOPMENT"
 fi
+
+add_def CHRONY_VERSION "\"${CHRONY_VERSION}\""
 
 for f in Makefile chrony.conf.5 chrony.texi chronyc.1 chronyd.8
 do
@@ -802,8 +840,11 @@ do
           s%@MANDIR@%${MANDIR}%;\
           s%@INFODIR@%${INFODIR}%;\
           s%@LOCALSTATEDIR@%${LOCALSTATEDIR}%;\
+          s%@CHRONYSOCKDIR@%${CHRONYSOCKDIR}%;\
           s%@CHRONYVARDIR@%${CHRONYVARDIR}%;\
-          s%@DEFAULT_USER@%${default_user}%;"\
+          s%@DEFAULT_HWCLOCK_FILE@%${default_hwclockfile}%;\
+          s%@DEFAULT_USER@%${default_user}%;\
+          s%@CHRONY_VERSION@%${CHRONY_VERSION}%;" \
           < ${f}.in > $f
 done
 

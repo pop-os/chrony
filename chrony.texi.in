@@ -3,7 +3,7 @@
 @afourwide
 @paragraphindent 0
 @setfilename chrony.info
-@settitle User guide for the chrony suite
+@settitle User guide for the chrony suite version @CHRONY_VERSION@
 @c @setchapternewpage off
 
 @ifinfo
@@ -49,7 +49,6 @@ Copyright @copyright{} 2009-2015 Miroslav Lichvar
 * Other time synchronisation packages::  Comparision with other software
 * Distribution and warranty::   There is no warranty
 * Bug reporting::               How to report bugs and make suggestions
-* Contributing::                Areas where contributions are particularly welcome
 @end menu
 @c }}}
 @c {{{ S:Overview
@@ -120,8 +119,9 @@ different quirks in its behaviour.
 
 The software is known to work on Linux, FreeBSD, NetBSD, Mac OS X and Solaris.
 Closely related systems may work too.  Porting the software to other systems
-(particularly to those supporting an @code{adjtime} system call) should not be
-difficult, however it requires access to such systems to test out the driver.
+(particularly to those supporting an @code{adjtime} or @code{ntp_adjtime}
+system call) should not be difficult, however it requires access to such
+systems to test out the driver.
 @c }}}
 @c {{{ S:Other programs
 @node Other time synchronisation packages
@@ -137,9 +137,9 @@ The `reference' implementation of the Network Time Protocol is the
 program @code{ntpd}, available via
 @uref{http://www.ntp.org/, The NTP home page}.
 
-One of the main differences between @code{ntpd} and @code{chronyd} is in
-the algorithms used to control the computer's clock. Things
-@code{chronyd} can do better than @code{ntpd}:
+One of the main differences between @code{ntpd} and @code{chronyd} is in how
+they control the computer's clock.  Things @code{chronyd} can do better than
+@code{ntpd}:
 
 @itemize @bullet
 @item
@@ -159,13 +159,16 @@ longer periods of time.
 @item
 @code{chronyd} in the default configuration never steps the time to not
 upset other running programs.  @code{ntpd} can be configured to never
-step the time too, but it has to use a different means of adjusting the
-clock, which has some
-disadvantages.
+step the time too, but in that case it has to use a different means of
+adjusting the clock (daemon loop instead of kernel discipline), which may
+have a negative effect on accuracy of the clock.
 @item
-@code{chronyd} can adjust the rate of the clock on Linux in a larger
-range, which allows it to operate even on machines with broken or
-unstable clock (e.g. in some virtual machines).
+@code{chronyd} can adjust the rate of the clock in a larger range, which
+allows it to operate even on machines with broken or unstable clock
+(e.g. in some virtual machines).
+@item
+@code{chronyd} is smaller, it uses less memory and it wakes up the CPU only
+when necessary, which is better for power saving.
 @end itemize
 
 Things @code{chronyd} can do that @code{ntpd} can't:
@@ -191,20 +194,35 @@ Things @code{ntpd} can do that @code{chronyd} can't:
 
 @itemize @bullet
 @item
-@code{ntpd} supports all operating modes from RFC 5905, including
-broadcast, multicast and manycast client / server.  It supports the
-orphan mode and it also supports authentication based on public-key
-cryptography described in RFC 5906.
+@code{ntpd} supports all operating modes from RFC 5905, including broadcast,
+multicast, and manycast server/client.  However, the broadcast and multicast
+modes are inherently less accurate and less secure (even with authentication)
+than the ordinary server/client mode and should generally be avoided.
 
 @item
-@code{ntpd} has been ported to more types of computer / operating
-system.
+@code{ntpd} supports the Autokey protocol (RFC 5906) to authenticate servers
+with public-key cryptography.  Note that the protocol has been shown to be
+insecure and it will be probably replaced with an implementation of the Network
+Time Security (NTS) specification.
 
 @item
-@code{ntpd} includes drivers for many reference clocks. @code{chronyd}
-relies on other programs (e.g. gpsd) to access the data from the
-reference clocks.
+@code{ntpd} supports the orphan mode, which allows synchronisation to a common
+timescale in isolated networks with multiple servers.  With @code{chronyd}
+there can be only one master and all other computers have to be directly or
+indirectly synchronised to it.
+
+@item
+@code{ntpd} has been ported to more operating systems.
+
+@item
+@code{ntpd} includes a large number of reference clock drivers. @code{chronyd}
+relies on other programs (e.g. @code{gpsd}) to access the timing data via the
+@code{SHM} or @code{SOCK} driver.
 @end itemize
+
+A comparison of NTP implementations that includes more features and also
+their performance is on the @uref{http://chrony.tuxfamily.org/comparison.html,
+chrony comparison} page.
 
 @node Comparison with timed
 @subsection timed
@@ -271,39 +289,6 @@ pin-point the problem in some cases.  Please be patient and plan for this!
 Of course, if you can debug the problem yourself and send us a source code
 patch to fix it, we will be very grateful!
 
-@c }}}
-@c {{{ S:Contributions
-@node Contributing
-@section Contributions
-
-Although chrony is now a fairly mature and established project, there are still
-areas that could be improved.  If you can program in C and have some expertise
-in these areas, you might be able to fill the gaps.
-
-Particular areas that need addressing are :
-
-@enumerate
-@item Porting to other Unices
-
-This involves creating equivalents of sys_solaris.c, sys_linux.c etc for the
-new system.
-
-@item Porting to Windows NT
-
-A small amount of work on this was done under Cygwin.  Only the sorting
-out of the include files has really been achieved so far.  The two main
-areas still to address are
-
-@enumerate
-@item The system clock driver.
-@item How to make chronyd into an NT service (i.e. what to replace fork(),
-setsid() etc with so that chronyd can be automatically started in the system
-bootstrap.
-@end enumerate
-
-@item More drivers for reference clock support
-
-@end enumerate
 @c }}}
 @c }}}
 @c {{{ Ch:Installation
@@ -387,9 +372,10 @@ entered.
 make install
 @end example
 
-This will install the binaries, plain text manual and manpages.
+This will install the binaries and manpages.
 
-To install the HTML and info versions of the manual as well, enter the command
+To install the plain text, HTML and info versions of the manual, enter the
+command
 
 @example
 make install-docs
@@ -417,7 +403,7 @@ minimal useful configuration file could be
 
 @example
 pool pool.ntp.org iburst
-makestep 10 3
+makestep 1.0 3
 rtcsync
 @end example
 
@@ -574,7 +560,7 @@ server foo.example.net iburst
 server bar.example.net iburst
 server baz.example.net iburst
 driftfile @CHRONYVARDIR@/drift
-makestep 10 3
+makestep 1.0 3
 rtcsync
 @end example
 
@@ -586,7 +572,7 @@ could in this case look like
 @example
 pool pool.ntp.org iburst
 driftfile @CHRONYVARDIR@/drift
-makestep 10 3
+makestep 1.0 3
 rtcsync
 @end example
 @c }}}
@@ -635,16 +621,9 @@ server bar.example.net offline
 server baz.example.net offline
 @end example
 
-The @code{offline} keyword indicates that the servers start
-in an offline state, and that they should not be contacted until @code{chronyd}
-receives notification that the link to the internet is present.
-
-In order to notify @code{chronyd} of the presence of the link, you will need to
-be able to log in to it with the program @code{chronyc}.  To do this,
-@code{chronyd} needs to be configured with an administrator password.  The
-password is read from a file specified by the @code{keyfile} directive.  The
-@code{generatecommandkey} directive can be used to generate a random password
-automatically on the first @code{chronyd} start.
+The @code{offline} keyword indicates that the servers start in an offline
+state, and that they should not be contacted until @code{chronyd} receives
+notification from @code{chronyc} that the link to the internet is present.
 
 The smallest useful configuration file would look something like
 
@@ -652,10 +631,9 @@ The smallest useful configuration file would look something like
 server foo.example.net offline
 server bar.example.net offline
 server baz.example.net offline
-keyfile @SYSCONFDIR@/chrony.keys
-generatecommandkey
 driftfile @CHRONYVARDIR@/drift
-makestep 10 3
+makestep 1.0 3
+rtcsync
 @end example
 
 The next section describes how to tell @code{chronyd} when the internet link
@@ -663,28 +641,22 @@ goes up and down.
 
 @node Advising chronyd of internet availability
 @subsection How to tell chronyd when the internet link is available.
-To use this option, you will need to configure a command key in
-@code{chronyd's} configuration file @file{@SYSCONFDIR@/chrony.conf}, as described in
-the previous section.
-
 To tell @code{chronyd} when to start and finish sampling the servers, the
-@code{online} and @code{offline} commands of chronyc need to be used.
+@code{online} and @code{offline} commands of @code{chronyc} need to be used.
 To give an example of their use, we assume that @code{pppd} is the
-program being used to connect to the internet, and that chronyc has been
-installed at its default location @file{@BINDIR@/chronyc}.  We
-also assume that the command key has been set up as described in the
-previous section.
+program being used to connect to the internet, and that @code{chronyc} has been
+installed at its default location @file{@BINDIR@/chronyc}.
 
 In the file @file{/etc/ppp/ip-up} we add the command sequence
 
 @example
-@BINDIR@/chronyc -a online
+@BINDIR@/chronyc online
 @end example
 
 and in the file @file{/etc/ppp/ip-down} we add the sequence
 
 @example
-@BINDIR@/chronyc -a offline
+@BINDIR@/chronyc offline
 @end example
 
 @code{chronyd's} polling of the servers will now only occur whilst the
@@ -707,44 +679,31 @@ support for this, in the form of the @code{manual} directive in the
 configuration file and the @code{settime} command in the @code{chronyc}
 program.
 
-If the master is rebooted, @code{chronyd} can re-read the drift rate
-from the drift file.  However, the master has no accurate estimate of
-the current time.  To get around this, the system can be configured so
-that the master can initially set itself to a `majority-vote' of
-selected clients' times; this allows the clients to `flywheel' the
-master across its outage.
+The @code{smoothtime} directive (@pxref{smoothtime directive}) is useful when
+the clocks of the clients need to stay close together when the local time is
+adjusted by the @code{settime} command.  The smoothing process needs to be
+activated by the @code{smoothtime activate} command when the local time is
+ready to be served. After that point, any adjustments will be smoothed out.
 
-A typical configuration file for the master (called @code{master}) might
-be (assuming the clients are in the 192.168.165.x subnet and that the
-master's address is 192.168.169.170)
+A typical configuration file for the master (called @code{master}) might be
+(assuming the clients are in the 192.168.165.x subnet)
 
 @example
 driftfile @CHRONYVARDIR@/drift
-generatecommandkey
-keyfile @SYSCONFDIR@/chrony.keys
-initstepslew 10 client1 client3 client6
 local stratum 8
 manual
 allow 192.168.165
+smoothtime 400 0.01
 @end example
 
-For the clients that have to resynchronise the master when it restarts,
-the configuration file might be
+For the clients the configuration file might be
 
 @example
-server master
+server master iburst
 driftfile @CHRONYVARDIR@/drift
 logdir /var/log/chrony
 log measurements statistics tracking
-keyfile @SYSCONFDIR@/chrony.keys
-generatecommandkey
-local stratum 10
-initstepslew 20 master
-allow 192.168.169.170
 @end example
-
-The rest of the clients would be the same, except that the @code{local}
-and @code{allow} directives are not required.
 @c }}}
 @c {{{ S:Dial-up home PCs
 @node Dial-up home PCs
@@ -870,9 +829,7 @@ server baz.example.net maxdelay 0.4 offline
 logdir /var/log/chrony
 log statistics measurements tracking
 driftfile @CHRONYVARDIR@/drift
-keyfile @SYSCONFDIR@/chrony.keys
-generatecommandkey
-makestep 10 3
+makestep 1.0 3
 maxupdateskew 100.0
 dumponexit
 dumpdir @CHRONYVARDIR@
@@ -886,13 +843,13 @@ online and offline respectively.
 The relevant part of the @file{/etc/ppp/ip-up} file is
 
 @example
-@BINDIR@/chronyc -a online
+@BINDIR@/chronyc online
 @end example
 
 and the relevant part of the @file{/etc/ppp/ip-down} script is
 
 @example
-@BINDIR@/chronyc -a -m offline dump writertc
+@BINDIR@/chronyc -m offline dump writertc
 @end example
 
 To start @code{chronyd} during the boot sequence, the following
@@ -989,10 +946,9 @@ used.  These histories are created by using the @code{dump} command in
 @code{chronyc}, or by setting the @code{dumponexit} directive in the
 configuration file.  This option is useful if you want to stop and
 restart @code{chronyd} briefly for any reason, e.g. to install a new
-version.  However, it only makes sense on systems where the kernel can
-maintain clock compensation whilst not under @code{chronyd's} control.
-The only version where this happens so far is Linux.  On other systems
-this option should not be used.
+version.  However, it should be used only on systems where the kernel
+can maintain clock compensation whilst not under @code{chronyd's}
+control (i.e. Linux, FreeBSD, NetBSD and Solaris).
 @item -R
 When this option is used, the @code{initstepslew} directive and the
 @code{makestep} directive used with a positive limit will be ignored.
@@ -1000,13 +956,9 @@ This option is useful when restarting @code{chronyd} and can be used
 in conjunction with the `-r' option.
 
 @item -s
-This option will set the system clock from the computer's real-time
-clock.  This is analogous to supplying the `-s' flag to the
-@file{/sbin/hwclock} program during the Linux boot sequence.
-
-Support for real-time clocks is limited at present - the criteria are
-described in the section on the @code{rtcfile} directive (@pxref{rtcfile
-directive}).
+This option will set the system clock from the computer's real-time clock or
+to the last modification time of the file specified by the @code{driftfile}
+directive.  Real-time clocks are supported only on Linux.
 
 If used in conjunction with the `-r' flag, @code{chronyd} will attempt
 to preserve the old samples after setting the system clock from the real
@@ -1017,15 +969,21 @@ to work well, it relies on @code{chronyd} having been able to determine
 accurate statistics for the difference between the RTC and
 system clock last time the computer was on.
 
-If @code{chronyd} doesn't support the RTC on your computer or there is no RTC
-installed, the system clock will be set with this option forward to the time of
-the last modification of the drift file (specified by the @code{driftfile}
-directive) to restore the system time at which @code{chronyd} was previously
-stopped.
+If the last modification time of the drift file is later than the current time
+and the RTC time, the system time will be set to it to restore the time when
+@code{chronyd} was previously stopped.  This is useful on computers that have
+no RTC or the RTC is broken (e.g. it has no battery).
 @item -u <user>
-This option sets the name of the user to which will @code{chronyd} switch to
-drop root privileges if compiled with Linux capabilities support (default
-@code{@DEFAULT_USER@}).
+This option sets the name of the system user to which @code{chronyd} will
+switch after start in order to drop root privileges.  It overrides the
+@code{user} directive (default @code{@DEFAULT_USER@}).  It may be set to a
+non-root user only when @code{chronyd} is compiled with support for Linux
+capabilities (libcap) or on NetBSD with the @code{/dev/clockctl} device.
+@item -F <level>
+This option configures a system call filter when @code{chronyd} is compiled with
+support for the Linux secure computing (seccomp) facility. In level 1 the
+process is killed when a forbidden system call is made, in level -1 the SYSSIG
+signal is thrown instead and in level 0 the filter is disabled (default 0).
 @item -q
 When run in this mode, @code{chronyd} will set the system clock once
 and exit.  It will not detach from the terminal.
@@ -1036,9 +994,11 @@ not correct the clock.
 This option displays @code{chronyd's} version number to the terminal and
 exits.
 @item -P <priority>
-This option will select the SCHED_FIFO real-time scheduler at the
-specified priority (which must be between 0 and 100).  This mode is
-supported only on Linux.
+On Linux, this option will select the SCHED_FIFO real-time scheduler at the
+specified priority (which must be between 0 and 100).  On Mac OS X, this option
+must have either a value of 0 (the default) to disable the thread time
+constraint policy or 1 for the policy to be enabled. Other systems do not
+support this option.
 @item -m     
 This option will lock chronyd into RAM so that it will never be paged
 out.  This mode is only supported on Linux.
@@ -1120,18 +1080,16 @@ the configuration file is ignored.
 * bindcmdaddress directive::    Limit network interface used for commands
 * broadcast directive::         Make chronyd act as an NTP broadcast server
 * clientloglimit directive::    Set client log memory limit
-* cmdallow directive::          Give control access to chronyc on other computers
-* cmddeny directive::           Deny control access to chronyc on other computers
-* cmdport directive::           Set port to use for runtime commanding
+* cmdallow directive::          Give monitoring access to chronyc on other computers
+* cmddeny directive::           Deny monitoring access to chronyc on other computers
+* cmdport directive::           Set port to use for runtime monitoring
 * combinelimit directive::      Limit sources included in combining algorithm
-* commandkey directive::        Set runtime command key
 * corrtimeratio directive::     Set correction time ratio
 * deny directive::              Deny access to NTP clients
 * driftfile directive::         Specify location of file containing drift data
 * dumpdir directive::           Specify directory for dumping measurements
 * dumponexit directive::        Dump measurements when daemon exits
 * fallbackdrift directive::     Specify fallback drift intervals
-* generatecommandkey directive:: Generate command key automatically
 * hwclockfile directive::       Specify location of hwclock's adjtime file
 * include directive::           Include a configuration file
 * initstepslew directive::      Trim the system clock on boot-up
@@ -1149,6 +1107,7 @@ the configuration file is ignored.
 * manual directive::            Allow manual entry using chronyc's settime cmd
 * maxchange directive::         Set maximum allowed offset
 * maxclockerror directive::     Set maximum frequency error of local clock
+* maxdistance directive::       Set maximum allowed distance of sources
 * maxsamples directive::        Set maximum number of samples per source
 * maxslewrate directive::       Set maximum slew rate
 * maxupdateskew directive::     Stop bad estimates upsetting machine clock
@@ -1318,9 +1277,15 @@ on multiple network interfaces.
 @node bindcmdaddress directive
 @subsection bindcmdaddress
 The @code{bindcmdaddress} directive allows you to specify the network
-interface to which @code{chronyd} will listen for command packets (issued by
-@code{chronyc}).  This provides an additional level of access restriction above
-that available through @code{cmddeny} mechanism.
+interface to which @code{chronyd} will listen for monitoring command packets
+(issued by @code{chronyc}).  This provides an additional level of access
+restriction above that available through @code{cmddeny} mechanism.
+
+This directive can also change the path of the Unix domain command socket,
+which is used by @code{chronyc} to send configuration commands.  The socket
+must be in a directory that is accessible only by the root or chrony user.  The
+directory will be created on start if it doesn't exist.  The default path of
+the socket is @code{@CHRONYSOCKDIR@/chronyd.sock}.
 
 By default, @code{chronyd} binds to the loopback interface (with addresses
 @code{127.0.0.1} and @code{::1}).  This blocks all access except from
@@ -1336,6 +1301,11 @@ to the configuration file.
 
 For each of IPv4 and IPv6 protocols, only one @code{bindcmdaddress}
 directive can be specified.
+
+An example that sets the path of the Unix domain command socket is
+@example
+bindcmdaddress /var/run/chrony/chronyd.sock
+@end example
 @c }}}
 @c {{{ broadcast directive
 @node broadcast directive
@@ -1394,14 +1364,15 @@ clientloglimit 1048576
 @subsection cmdallow
 
 This is similar to the @code{allow} directive (@pxref{allow directive}), except
-that it allows control access (rather than NTP client access) to a particular
-subnet or host.  (By 'control access' is meant that chronyc can be run on those
-hosts and successfully connect to chronyd on this computer.)
+that it allows monitoring access (rather than NTP client access) to a particular
+subnet or host.  (By 'monitoring access' is meant that @code{chronyc} can be
+run on those hosts and retrieve monitoring data from @code{chronyd} on this
+computer.)
 
 The syntax is identical to the @code{allow} directive.
 
 There is also a @code{cmdallow all} directive with similar behaviour to the
-@code{allow all} directive (but applying to control access in this case, of
+@code{allow all} directive (but applying to monitoring access in this case, of
 course).
 
 Note that @code{chronyd} has to be configured with the @code{bindcmdaddress}
@@ -1413,7 +1384,7 @@ access.
 @subsection cmddeny
 
 This is similar to the @code{cmdallow} directive (@pxref{cmdallow directive}),
-except that it denies control access to a particular subnet or host,
+except that it denies monitoring access to a particular subnet or host,
 rather than allowing it.
 
 The syntax is identical.
@@ -1426,9 +1397,10 @@ There is also a @code{cmddeny all} directive with similar behaviour to the
 @subsection cmdport
 
 The @code{cmdport} directive allows the port that is used for run-time
-command and monitoring (via the program @code{chronyc}) to be altered
+monitoring (via the @code{chronyc} program) to be altered
 from its default (323/udp).  If set to 0, @code{chronyd} will not open the
-port, this is useful to disable the @code{chronyc} access completely.
+port, this is useful to disable the @code{chronyc} access from the internet.
+(It does not disable the Unix domain command socket.)
 
 An example shows the syntax
 
@@ -1464,46 +1436,12 @@ The syntax is
 combinelimit <limit>
 @end example
 @c }}}
-@c {{{ commandkey
-@node commandkey directive
-@subsection commandkey
-The commandkey command is used to set the key number used for
-authenticating user commands via the chronyc program at run time.
-This allows certain actions of the chronyc program to be restricted to
-administrators.
-
-An example of the commandkey command is
-
-@example
-commandkey 20
-@end example
-
-By default, the key number is 0.
-
-In the key file (see the keyfile command) there should be a line of
-the form
-
-@example
-20 MD5 HEX:B028F91EA5C38D06C2E140B26C7F41EC
-@end example
-
-When running the chronyc program to perform run-time configuration,
-the command
-
-@example
-password HEX:B028F91EA5C38D06C2E140B26C7F41EC
-@end example
-
-must be entered before any commands affecting the operation of the
-daemon can be entered, or chronyc must be started with the `-a' option to run
-the password command automatically.
-@c }}}
 @c {{{ corrtimeratio
 @node corrtimeratio directive
 @subsection corrtimeratio
-When @code{chronyd} makes a time correction, it controls how quickly
-the system clock is slewed (so far only on Linux).  This rate
-affects the frequency error of the system clock.
+When @code{chronyd} is slewing the system clock to correct an offset, the rate
+at which it is slewing adds to the frequency error of the clock.  On Linux,
+FreeBSD, NetBSD and Solaris this rate can be controlled.
 
 The @code{corrtimeratio} directive sets the ratio between the
 duration in which the clock is slewed for an average correction
@@ -1580,12 +1518,11 @@ driftfile @CHRONYVARDIR@/drift
 To compute the rate of gain or loss of time, @code{chronyd} has to store
 a measurement history for each of the time sources it uses.
 
-Certain systems (so far only Linux) have operating system support for
-setting the rate of gain or loss to compensate for known errors.  (On
-other systems, @code{chronyd} must simulate such a capability by
-periodically slewing the system clock forwards or backwards by a
-suitable amount to compensate for the error built up since the previous
-slew).
+Certain systems (Linux, FreeBSD, NetBSD, Solaris) have operating system
+support for setting the rate of gain or loss to compensate for known errors.
+(On Mac OS X, @code{chronyd} must simulate such a capability by periodically
+slewing the system clock forwards or backwards by a suitable amount to
+compensate for the error built up since the previous slew).
 
 For such systems, it is possible to save the measurement history across
 restarts of @code{chronyd} (assuming no changes are made to the system
@@ -1638,23 +1575,15 @@ By default (or if the specified maximum or minimum is 0), no fallbacks
 are used and the clock frequency changes only with new measurements from
 NTP, reference clocks or manual input.
 @c }}}
-@c {{{ generatecommandkey
-@node generatecommandkey directive
-@subsection generatecommandkey
-With this directive, if the command key is not found on start in the file
-specified by the @code{keyfile} directive, @code{chronyd} will generate a new
-command key from the /dev/urandom file and write it to the key file.
-
-The generated key will use SHA1 if @code{chronyd} is compiled with the support,
-otherwise MD5 will be used.
-@c }}}
 @c {{{ hwclockfile
 @node hwclockfile directive
 @subsection hwclockfile
 The @code{hwclockfile} directive sets the location of the adjtime file which is
-used by the @file{/sbin/hwclock} program.  With this directive, @code{chronyd}
-will parse the file to find out if the RTC keeps local time or UTC.  It
-overrides the @code{rtconutc} directive (@pxref{rtconutc directive}).
+used by the @file{/sbin/hwclock} program on Linux.  @code{chronyd} parses the
+file to find out if the RTC keeps local time or UTC.  It overrides the
+@code{rtconutc} directive (@pxref{rtconutc directive}).
+
+The default value is @file{@DEFAULT_HWCLOCK_FILE@}.
 
 An example of the command is
 
@@ -1665,12 +1594,15 @@ hwclockfile /etc/adjtime
 @c {{{ include
 @node include directive
 @subsection include
-The @code{include} directive includes a specified configuration file.
-This is useful when maintaining configuration on multiple hosts to
-keep the differences in a separate file.
+The @code{include} directive includes a specified configuration file or
+multiple configuration files when a wildcard pattern is specified.  This can be
+useful when maintaining configuration on multiple hosts to keep the differences
+in separate files.
+
+An example of the command is
 
 @example
-include @SYSCONFDIR@/chrony/local.conf
+include @SYSCONFDIR@/chrony.d/*.conf
 @end example
 @c }}}
 @c {{{ initstepslew
@@ -1743,12 +1675,7 @@ from reading the clock before it's stepped.
 @node keyfile directive
 @subsection keyfile
 This command is used to specify the location of the file containing
-ID/key pairs for the following 2 uses:
-
-@itemize @bullet 
-@item Authentication of NTP packets.
-@item Authentication of administrator commands entered via chronyc.
-@end itemize
+ID/key pairs for authentication of NTP packets.
 
 The format of the command is shown in the example below
 
@@ -1768,24 +1695,27 @@ pairs.  The format of the file is shown below
 @end example
 
 Each line consists of an ID, a name of authentication hash function (optional)
-and a password. The ID can be any unsigned integer in the range 0 through
-2**32-1, but ID of 0 can be used only for the command key and not for the NTP
-authentication. The hash function is MD5 by default, depending on how was
-@code{chronyd} compiled other allowed hash functions may be SHA1, SHA256,
+and a password.  The ID can be any unsigned integer in the range 1 through
+2**32-1.  The hash function is MD5 by default, depending on how was
+@code{chronyd} compiled, other allowed hash functions may be SHA1, SHA256,
 SHA384, SHA512, RMD128, RMD160, RMD256, RMD320, TIGER and WHIRLPOOL.  The
 password can be encoded as a string of characters not containing a space with
 optional @code{ASCII:} prefix or as a hexadecimal number with @code{HEX:}
 prefix.
 
 The password is used with the hash function to generate and verify a message
-authentication code (MAC) in NTP and command packets.
+authentication code (MAC) in NTP packets.
 For maximum security, it's recommended to use SHA1 or stronger hash function.
 The passwords should be random and they should be as long as the output size of
 the configured hash function, e.g. 160 bits with SHA1.
 
-The ID for the chronyc authentication key is specified with the commandkey
-command (see earlier). The command key can be generated automatically on
-start with the @code{generatecommandkey} directive.
+These shell commands can be used to generate random MD5 and SHA1 keys on
+systems which have the @code{/dev/urandom} device:
+
+@example
+echo "1 MD5 HEX:$(tr -d -c '[:xdigit:]' < /dev/urandom | head -c 32)"
+echo "1 SHA1 HEX:$(tr -d -c '[:xdigit:]' < /dev/urandom | head -c 40)"
+@end example
 @c }}}
 @c {{{ leapsecmode
 @node leapsecmode directive
@@ -1806,8 +1736,8 @@ selects how that error is corrected.  There are four options:
 When inserting a leap second, the kernel steps the system clock backwards by
 one second when the clock gets to 00:00:00 UTC.  When deleting a leap second,
 it steps forward by one second when the clock gets to 23:59:59 UTC.  This is
-the default mode when the system driver supports leap seconds (currently Linux
-only).
+the default mode when the system driver supports leap seconds (i.e. on
+Linux, FreeBSD, NetBSD and Solaris).
 @item step
 This is similar to the @code{system} mode, except the clock is stepped by
 @code{chronyd} instead of the kernel.  It can be useful to avoid bugs in the
@@ -2354,6 +2284,10 @@ mailonchange root@@localhost 0.5
 
 This would send a mail message to root if a change of more than 0.5
 seconds were applied to the system clock.
+
+This directive can't be used when a system call filter is enabled by the
+@code{-F} option as the @code{chronyd} process will not be allowed to fork
+and execute the sendmail binary.
 @c }}}
 @c {{{ makestep
 @node makestep directive
@@ -2375,10 +2309,10 @@ only with NTP sources.
 An example of the use of this directive is
 
 @example
-makestep 1000 10
+makestep 0.1 10
 @end example
 
-This would step system clock if the adjustment is larger than 1000
+This would step system clock if the adjustment is larger than 0.1
 seconds, but only in the first ten clock updates.
 @c }}}
 @c {{{ manual
@@ -2435,6 +2369,27 @@ Typical values for <error-in-ppm> might be 10 for a low quality clock
 to 0.1 for a high quality clock using a temperature compensated
 crystal oscillator.
 @c }}}
+@c {{{ maxdistance
+@node maxdistance directive
+@subsection maxdistance
+The @code{maxdistance} directive sets the maximum allowed root distance of the
+sources to not be rejected by the source selection algorithm.  The distance
+includes the accumulated dispersion, which may be large when the source is no
+longer synchronised, and half of the total round-trip delay to the primary
+source.
+
+By default, the maximum root distance is 3 seconds.
+
+Setting @code{maxdistance} to a larger value can be useful to allow
+synchronisation with a server that only has a very infrequent connection to its
+sources and can accumulate a large dispersion between updates of its clock.
+
+The syntax is
+
+@example
+maxdistance <seconds>
+@end example
+@c }}}
 @c {{{ maxsamples
 @node maxsamples directive
 @subsection maxsamples
@@ -2456,10 +2411,16 @@ maxsamples <samples>
 The @code{maxslewrate} directive sets the maximum rate at which @code{chronyd}
 is allowed to slew the time.  It limits the slew rate controlled by the
 correction time ratio (@pxref{corrtimeratio directive}) and is effective
-only on systems where @code{chronyd} is able to control the rate (so
-far only Linux).
+only on systems where @code{chronyd} is able to control the rate (i.e.
+Linux, FreeBSD, NetBSD, Solaris).
 
-By default, the maximum slew rate is 83333.333 ppm (one twelfth).
+For each system there is a maximum frequency offset of the clock that
+can be set by the driver.  On Linux it's 100000 ppm, on FreeBSD and NetBSD
+it's 5000 ppm and on Solaris it is 32500 ppm.  Also, due to a kernel
+limitation, setting @code{maxslewrate} on FreeBSD and NetBSD to a value between
+500 ppm and 5000 ppm will effectively set it to 500 ppm.
+
+By default, the maximum slew rate is set to 83333.333 ppm (one twelfth).
 
 The syntax is
 
@@ -2880,19 +2841,21 @@ system time is copied to the real time clock (RTC) every 11 minutes.
 
 This directive is supported only on Linux and cannot be used when the
 normal RTC tracking is enabled, i.e. when the @code{rtcfile} directive
-is used.
+is used.  On other systems this directive does nothing.
 @c }}}
 @c {{{ sched_priority
 @node sched_priority directive
 @subsection sched_priority
 
-The @code{sched_priority} directive will select the SCHED_FIFO real-time
-scheduler at the specified priority (which must be between 0 and 100).
-This mode is supported only on Linux.
+On Linux, the @code{sched_priority} directive will select the SCHED_FIFO
+real-time scheduler at the specified priority (which must be between 0 and
+100).  On Mac OS X, this option must have either a value of 0 (the default) to
+disable the thread time constraint policy or 1 for the policy to be enabled.
+Other systems do not support this option.
 
-This directive uses the Linux sched_setscheduler() system call to
-instruct the kernel to use the SCHED_FIFO first-in, first-out
-real-time scheduling policy for @code{chronyd} with the specified priority.
+On Linux, this directive uses the sched_setscheduler() system call to instruct
+the kernel to use the SCHED_FIFO first-in, first-out real-time scheduling
+policy for @code{chronyd} with the specified priority.
 This means that whenever @code{chronyd} is ready to run it will run,
 interrupting whatever else is running unless it is a higher priority
 real-time process.  This should not impact performance as @code{chronyd's}
@@ -2900,6 +2863,10 @@ resource requirements are modest, but it should result in lower and
 more consistent latency since @code{chronyd} will not need to wait for the
 scheduler to get around to running it.  You should not use this unless
 you really need it.  The sched_setscheduler man page has more details.
+
+On Mac OS X, this directive uses the thread_policy_set() kernel call to specify
+real-time scheduling. As noted for Linux, you should not use this directive
+unless you really need it.
 @c }}}
 @c {{{ server
 @node server directive
@@ -3199,10 +3166,11 @@ Valid measurements with corresponding compensations are logged to the
 @c {{{ user
 @node user directive
 @subsection user
-The @code{user} directive sets the name of the user to which will
-@code{chronyd} switch on initialisation to drop root privileges.
-So far, it works only on Linux when compiled with capabilities support.
-Setting the name to root will disable it.
+The @code{user} directive sets the name of the system user to which
+@code{chronyd} will switch after start in order to drop root privileges.
+It may be set to a non-root user only when @code{chronyd} is compiled with
+support for Linux capabilities (libcap) or on NetBSD with the
+@code{/dev/clockctl} device.
 
 The default value is @code{@DEFAULT_USER@}.
 @c }}}
@@ -3234,7 +3202,7 @@ chronyc
 at the command line.  The prompt @code{chronyc} is displayed whilst
 chronyc is expecting input from the user, when it is being run from a
 terminal.  If chronyc's input or output are redirected from/to a file,
-the prompt is now shown.
+the prompt is not shown.
 
 When you are finished entering commands, the commands @code{exit} or
 @code{quit} will terminate the program.  (Entering @key{Control-D} will
@@ -3249,9 +3217,9 @@ Chronyc supports the following command line options.
 @item -v
 Displays the version number of chronyc on the terminal, and exists.
 @item -h <host>
-This option allows the user to specify which host running the
-@code{chronyd} program is to be contacted.  This allows for remote
-configuration, without having to ssh to the other host first.
+This option allows the user to specify which host (or comma-separated list of
+addresses) running the @code{chronyd} program is to be contacted.  This allows
+for remote monitoring, without having to ssh to the other host first.
 
 The default is to contact @code{chronyd} running on the same host as
 that where chronyc is being run.
@@ -3262,6 +3230,9 @@ This defaults to the compiled-in default; there would rarely be a need
 to change this.
 @item -n
 This option disables resolving IP addresses to hostnames.
+@item -d
+This option enables printing of debugging messages (if compiled with debugging
+support).
 @item -4
 With this option hostnames will be resolved only to IPv4 addresses.
 @item -6
@@ -3270,13 +3241,9 @@ With this option hostnames will be resolved only to IPv6 addresses.
 With this option multiple commands can be specified on the command line.
 Each argument will be interpreted as a whole command.
 @item -f <conf-file>
-This option can be used to specify an alternate location of the @code{chronyd}
-configuration file (default @file{@SYSCONFDIR@/chrony.conf}). The configuration file is
-needed for the `-a' option.
+This option is ignored and is provided only for compatibility.
 @item -a
-With this option @code{chronyc} will try to authenticate automatically on
-start. It will read the configuration file, read the command key from the
-keyfile and run the authhash and password commands.
+This option is ignored and is provided only for compatibility.
 @end table
 @c }}}
 @c {{{ SS:Security with chronyc
@@ -3285,51 +3252,49 @@ keyfile and run the authhash and password commands.
 Many of the commands available through chronyc have a fair amount of
 power to reconfigure the run-time behaviour of @code{chronyd}.  Consequently,
 @code{chronyc} is quite dangerous for the integrity of the target
-system's clock performance.  Having access to @code{chronyd} via chronyc is
-more or less equivalent to being able to modify @code{chronyd's} configuration
-file (typically @file{@SYSCONFDIR@/chrony.conf}) and to restart @code{chronyd}.
+system's clock performance.  Having access to @code{chronyd} via @code{chronyc}
+is more or less equivalent to being able to modify @code{chronyd's}
+configuration file (typically @file{@SYSCONFDIR@/chrony.conf}) and to restart
+@code{chronyd}.
 
-Chronyc also provides a number of monitoring (as opposed to commanding)
-commands, which will not affect the behaviour of @code{chronyd}.  However, you
-may still want to restrict access to these commands.
+@code{chronyc} also provides a number of monitoring (as opposed to
+commanding or configuration) commands, which will not affect the behaviour of
+@code{chronyd}.  However, you may still want to restrict access to these
+commands.
 
-In view of this, access to some of the capabilities of chronyc will
-usually be tightly controlled.  There are two mechanisms supported:
+There are two ways how @code{chronyc} can access @code{chronyd}.  One is the
+Internet Protocol (IPv4 or IPv6) and the other is a Unix domain socket, which
+is accessible only locally by the root or chrony user (by default
+@code{@CHRONYSOCKDIR@/chronyd.sock}).
 
-@enumerate 1
-@item
-The set of hosts from which @code{chronyd} will accept commands can be
-restricted.  By default, commands will only be accepted from the same
-host that @code{chronyd} is running on.
-@item
-Any command that actually reconfigures some aspect of @code{chronyd's}
-behaviour requires the user of chronyc to know a password.  This
-password is specified in @code{chronyd's} keys file (@pxref{keyfile directive})
-and specified via the commandkey option in its configuration file
-(@pxref{commandkey directive}).
-@end enumerate
-
-Only the following commands can be used @emph{without} providing a
-password:
+Only the following monitoring commands are allowed from the internet:
 
 @itemize @bullet
 @item @code{activity}
-@item @code{authhash}
-@item @code{dns}
-@item @code{exit}
-@item @code{help}
-@item @code{password}
-@item @code{quit}
+@item @code{manual list}
 @item @code{rtcdata}
 @item @code{smoothing}
 @item @code{sources}
 @item @code{sourcestats}
 @item @code{tracking}
-@item @code{waitsync}
+@item @code{waitsync}.
 @end itemize
 
-All other commands require a password to have been specified previously,
-because they affect @code{chronyd's} operation.
+The set of hosts from which @code{chronyd} will accept these commands can be
+restricted.  By default, the commands will be accepted only from the localhost
+(127.0.0.1 or ::1).
+
+All other commands are allowed only through the Unix domain socket.  When sent
+over the internet, @code{chronyd} will respond with a @code{Not authorised}
+error, even if it's from the localhost.
+
+In @code{chrony} versions before 2.2 the commands had to be authenticated with
+a password and they were allowed from the internet, but that is no longer
+supported.
+
+By default, @code{chronyc} tries to connect to the Unix domain socket first.
+If that fails (e.g. because @code{chronyc} is running under a non-root user),
+it will try to connect to 127.0.0.1 and then ::1.
 @c }}}
 @c {{{ SS:Chronyc command reference
 @node Chronyc command reference
@@ -3346,14 +3311,13 @@ interface.
 * add server command::          Add a new NTP server
 * allow all command::           Allowing NTP client access
 * allow command::               Allowing NTP client access
-* authhash command::            Set the command authentication hash function
 * burst command::               Initiating a rapid set of measurements
 * clients command::             Show clients that have accessed the server
-* cmdaccheck command::          Verifying command client access
-* cmdallow all command::        Allowing command client access
-* cmdallow command::            Allowing command client access
-* cmddeny all command::         Denying command client access
-* cmddeny command::             Denying command client access
+* cmdaccheck command::          Verifying monitoring client access
+* cmdallow all command::        Allowing monitoring client access
+* cmdallow command::            Allowing monitoring client access
+* cmddeny all command::         Denying monitoring client access
+* cmddeny command::             Denying monitoring client access
 * cyclelogs command::           Close and re-open open log files
 * delete command::              Remove an NTP server or peer
 * deny all command::            Denying NTP client access
@@ -3374,9 +3338,9 @@ interface.
 * minstratum command::          Set minimum stratum for a source
 * offline command::             Warn that connectivity to a source will be lost
 * online command::              Warn that connectivity to a source has been restored
-* password command::            Provide password needed for most commands
 * polltarget command::          Set poll target for a source
 * quit command::                Exit from chronyc
+* refresh command::             Refresh IP addresses
 * reselect command::            Reselect synchronisation source
 * reselectdist command::        Set improvement in distance needed to reselect a source
 * retries command::             Set maximum number of retries
@@ -3504,24 +3468,6 @@ allow
 The effect of each of these examples is the same as that of the @code{allow}
 directive in the configuration file.
 @c }}}
-@c {{{ authhash
-@node authhash command
-@subsubsection authhash
-This command selects the hash function used for authenticating user commands.
-For successful authentication the hash function has to be the same as the
-function specified for the command key in the keys file on the server
-(@pxref{keyfile directive}).  It needs to be selected before the
-@code{password} command is used.  The default hash function is MD5.
-
-An example is
-
-@example
-authhash SHA1
-@end example
-
-The authhash command is run automatically on start if @code{chronyc} was
-started with the `-a' option.
-@c }}}
 @c {{{ burst
 @node burst command
 @subsubsection burst
@@ -3614,14 +3560,15 @@ burst 2/10 foo.example.net
 @comment  node-name,  next,  previous,  up
 @subsubsection clients
 This command shows a list of all clients that have accessed the server,
-through either the NTP or command/monitoring ports.  There are no arguments.
+through either the NTP or command/monitoring ports.  It doesn't include
+access to the Unix domain comamnd socket.  There are no arguments.
 
 An example of the output is
 
 @example
 Hostname                   Client    Peer CmdAuth CmdNorm  CmdBad  LstN  LstC
 =========================  ======  ======  ======  ======  ======  ====  ====
-localhost                       0       0      15       1       0   29y     0
+localhost                       0       0       0       1       0   29y     0
 aardvark.xxx                    4       0       0       0       0    49   29y
 badger.xxx                      4       0       0       0       0     6   29y
 @end example
@@ -3643,9 +3590,9 @@ client mode packet.
 The number of times the client has accessed the server using an NTP
 symmetric active mode packet.
 @item
-The number of authenticated command packets that have been processed
-from the client (i.e. those following a successful @code{password}
-command).
+The number of authenticated command packets that have been processed from the
+client.  Authentication is no longer supported in command packets, so the
+number should be always zero.
 @item
 The number of unauthenticated command packets that have been processed
 from the client.
@@ -3665,7 +3612,7 @@ of that type has ever been received.
 @node cmdaccheck command
 @subsubsection cmdaccheck
 This command is similar to the @code{accheck} command, except that it is
-used to check whether command access is permitted from a named host.
+used to check whether monitoring access is permitted from a named host.
 
 Examples of use are as follows:
 
@@ -3678,30 +3625,30 @@ cmdaccheck 2001:db8::1
 @c {{{ cmdallow all
 @node cmdallow all command
 @subsubsection cmdallow all
-This is similar to the @code{allow all} command, except that it is used to@c {{{
-allow particular hosts or subnets to use the chronyc program to interact@c }}}
-with @code{chronyd} on the current host.
+This is similar to the @code{allow all} command, except that it is used to
+allow particular hosts or subnets to use @code{chronyc} to monitor with
+@code{chronyd} on the current host.
 @c }}}
 @c {{{ cmdallow
 @node cmdallow command
 @subsubsection cmdallow
-This is similar to the @code{allow} command, except that it is used to
-allow particular hosts or subnets to use the chronyc program to interact
-with @code{chronyd} on the current host.
+This is similar to the @code{allow} command, except that it is used to allow
+particular hosts or subnets to use @code{chronyc} to monitor with
+@code{chronyd} on the current host.
 @c }}}
 @c {{{ cmddeny all
 @node cmddeny all command
 @subsubsection cmddeny all
-This is similar to the @code{deny all} command, except that it is used
-to allow particular hosts or subnets to use the chronyc program to
-interact with @code{chronyd} on the current host.
+This is similar to the @code{deny all} command, except that it is used to allow
+particular hosts or subnets to use @code{chronyc} to monitor @code{chronyd} on
+the current host.
 @c }}}
 @c {{{ cmddeny
 @node cmddeny command
 @subsubsection cmddeny
-This is similar to the @code{deny} command, except that it is used to
-allow particular hosts or subnets to use the chronyc program to interact
-with @code{chronyd} on the current host.
+This is similar to the @code{deny} command, except that it is used to allow
+particular hosts or subnets to use @code{chronyc} to monitor @code{chronyd} on
+the current host.
 @c }}}
 @c {{{ cyclelogs
 @node cyclelogs command
@@ -3712,7 +3659,7 @@ periodically purged.  An example of how to do this is shown below.
 
 @example
 % mv /var/log/chrony/measurements.log /var/log/chrony/measurements1.log
-% chronyc -a cyclelogs
+% chronyc cyclelogs
 % ls -l /var/log/chrony
 -rw-r--r--   1 root     root            0 Jun  8 18:17 measurements.log
 -rw-r--r--   1 root     root        12345 Jun  8 18:17 measurements1.log
@@ -4181,40 +4128,6 @@ particular source or sources has been restored.
 The syntax is identical to that of the @code{offline} command, see
 @ref{offline command}.
 @c }}}
-@c {{{ password
-@node password command
-@subsubsection password
-The password command is used to allow chronyc to send privileged
-commands to @code{chronyd}.  The password can either be entered on the command
-line, or can be entered without echoing.  The syntax for entering the
-password on the command line is as follows
-
-@example
-password xyzzy
-password ASCII:xyzzy
-password HEX:78797a7a79
-@end example
-
-To enter the password without it being echoed, enter
-
-@example
-password
-@end example
-
-The computer will respond with a @samp{Password:} prompt, at which you
-should enter the password and press return.
-
-The password can be encoded as a string of characters not containing a space
-with optional @code{ASCII:} prefix or as a hexadecimal number with @code{HEX:}
-prefix.  It has to match @code{chronyd's} currently defined command key
-(@pxref{commandkey directive}).  If the command key was specified with a
-different hash function than MD5, it's necessary to select the hash function
-with the @code{authhash} command (@pxref{authhash command}) before entering the
-password.
-
-The password command is run automatically on start if @code{chronyc} was
-started with the `-a' option.
-@c }}}
 @c {{{ polltarget
 @node polltarget command
 @subsubsection polltarget
@@ -4246,6 +4159,17 @@ to 12.
 @subsubsection quit
 The quit command exits from chronyc and returns the user to the shell
 (same as the exit command).
+@c }}}
+@c {{{ refresh command
+@node refresh command
+@subsubsection refresh
+The @code{refresh} command can be used to force @code{chronyd} to resolve the
+names of configured sources to IP addresses again, e.g. after suspending and
+resuming the machine in a different network.
+
+Sources that stop responding will be replaced with newly resolved addresses
+automatically after 8 polling intervals, but this command may still be useful
+to replace them immediately and not wait until they are marked as unreachable.
 @c }}}
 @c {{{ reselect command
 @node reselect command
@@ -4587,9 +4511,7 @@ in milliseconds.  If no response is received from @code{chronyd}, the timeout is
 doubled and the request is resent.  The maximum number of retries is configured
 with the @code{retries} command (@pxref{retries command}).
 
-By default, the timeout is 1000 milliseconds or 100 milliseconds if
-@code{chronyc} is contacting localhost (i.e. the `-h' option wasn't specified)
-and @code{chronyd} was compiled with asynchronous name resolving.
+By default, the timeout is 1000 milliseconds.
 @c }}}
 @c {{{ tracking
 @node tracking command
@@ -4648,12 +4570,6 @@ shell) will be different from @code{chronyd's} estimate of the current
 true time (which it reports to NTP clients when it is operating in
 server mode).  The value reported on this line is the difference due to
 this effect.
-
-On systems other than Linux, @code{chronyd} doesn't
-adjust the fundamental rate of the system clock, so keeps the system
-time correct by periodically making offsets to it as though an error had
-been measured.  The build up of these offsets will be observed in this
-report.
 
 @item Last offset
 This is the estimated local offset on the last clock update.
@@ -4761,10 +4677,10 @@ with the @code{rtcautotrim} directive (@pxref{rtcautotrim directive}).
 @subsubsection waitsync
 The @code{waitsync} command waits for @code{chronyd} to synchronise.
 
-Up to three optional arguments can be specified, the first is the maximum
-number of tries in 10 second intervals before giving up and returning a
-non-zero error code.  When 0 is specified, or there are no arguments, the
-number of tries will not be limited.
+Up to four optional arguments can be specified, the first is the maximum
+number of tries before giving up and returning a non-zero error code.  When 0
+is specified, or there are no arguments, the number of tries will not be
+limited.
 
 The second and third arguments are the maximum allowed remaining correction of
 the system clock and the maximum allowed skew (in ppm) as reported by the
@@ -4772,14 +4688,18 @@ the system clock and the maximum allowed skew (in ppm) as reported by the
 and @code{Skew} fields.  If not specified or zero, the value will not be
 checked.
 
+The fourth argument is the interval in which the check is repeated.  The
+interval is 10 seconds by default.
+
 An example is
 
 @example
 waitsync 60 0.01
 @end example
 
-which will wait up to about 10 minutes for @code{chronyd} to synchronise to a
-source and the remaining correction to be less than 10 milliseconds.
+which will wait up to about 10 minutes (60 times 10 seconds) for @code{chronyd}
+to synchronise to a source and the remaining correction to be less than 10
+milliseconds.
 @c }}}
 @c {{{ writertc
 @node writertc command

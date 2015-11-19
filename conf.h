@@ -39,6 +39,8 @@ extern char *CNF_GetRtcDevice(void);
 extern void CNF_ReadFile(const char *filename);
 extern void CNF_ParseLine(const char *filename, int number, char *line);
 
+extern void CNF_CreateDirs(uid_t uid, gid_t gid);
+
 extern void CNF_AddInitSources(void);
 extern void CNF_AddSources(void);
 extern void CNF_AddBroadcasts(void);
@@ -58,8 +60,6 @@ extern int CNF_GetLogRefclocks(void);
 extern int CNF_GetLogTempComp(void);
 extern char *CNF_GetKeysFile(void);
 extern char *CNF_GetRtcFile(void);
-extern uint32_t CNF_GetCommandKey(void);
-extern int CNF_GetGenerateCommandKey(void);
 extern int CNF_GetDumpOnExit(void);
 extern int CNF_GetManualEnabled(void);
 extern int CNF_GetCommandPort(void);
@@ -75,6 +75,7 @@ extern void CNF_GetFallbackDrifts(int *min, int *max);
 extern void CNF_GetBindAddress(int family, IPAddr *addr);
 extern void CNF_GetBindAcquisitionAddress(int family, IPAddr *addr);
 extern void CNF_GetBindCommandAddress(int family, IPAddr *addr);
+extern char *CNF_GetBindCommandPath(void);
 extern char *CNF_GetPidFile(void);
 extern REF_LeapMode CNF_GetLeapSecMode(void);
 extern char *CNF_GetLeapSecTimezone(void);
@@ -85,6 +86,7 @@ extern double CNF_GetMaxClockError(void);
 extern double CNF_GetCorrectionTimeRatio(void);
 extern double CNF_GetMaxSlewRate(void);
 
+extern double CNF_GetMaxDistance(void);
 extern double CNF_GetReselectDistance(void);
 extern double CNF_GetStratumWeight(void);
 extern double CNF_GetCombineLimit(void);
