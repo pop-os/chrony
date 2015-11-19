@@ -47,7 +47,6 @@
 
 static int parse_string(char *line, char **result);
 static int parse_int(char *line, int *result);
-static int parse_uint32(char *, uint32_t *result);
 static int parse_double(char *line, double *result);
 static int parse_null(char *line);
 
@@ -80,19 +79,18 @@ static void parse_tempcomp(char *);
 /* Configuration variables */
 
 static int restarted = 0;
-static int generate_command_key = 0;
 static char *rtc_device;
 static int acquisition_port = -1;
 static int ntp_port = 123;
 static char *keys_file = NULL;
 static char *drift_file = NULL;
 static char *rtc_file = NULL;
-static uint32_t command_key_id;
 static double max_update_skew = 1000.0;
 static double correction_time_ratio = 3.0;
 static double max_clock_error = 1.0; /* in ppm */
 static double max_slew_rate = 1e6 / 12.0; /* in ppm */
 
+static double max_distance = 3.0;
 static double reselect_distance = 1e-4;
 static double stratum_weight = 1e-3;
 static double combine_limit = 3.0;
@@ -126,7 +124,7 @@ static int enable_manual=0;
 static int rtc_on_utc = 0;
 
 /* Filename used to read the hwclock(8) LOCAL/UTC setting */
-static char *hwclock_file = NULL;
+static char *hwclock_file;
 
 /* Flag set if the RTC should be automatically synchronised by kernel */
 static int rtc_sync = 0;
@@ -181,6 +179,9 @@ static IPAddr bind_acq_address4, bind_acq_address6;
 /* IP addresses for binding the command socket to.  UNSPEC family means
    the loopback address will be used */
 static IPAddr bind_cmd_address4, bind_cmd_address6;
+
+/* Path to the Unix domain command socket. */
+static char *bind_cmd_path;
 
 /* Filename to use for storing pid of running chronyd, to prevent multiple
  * chronyds being started. */
@@ -320,8 +321,10 @@ CNF_Initialise(int r)
 
   dumpdir = Strdup(".");
   logdir = Strdup(".");
+  bind_cmd_path = Strdup(DEFAULT_COMMAND_SOCKET);
   pidfile = Strdup("/var/run/chronyd.pid");
   rtc_device = Strdup("/dev/rtc");
+  hwclock_file = Strdup(DEFAULT_HWCLOCK_FILE);
   user = Strdup(DEFAULT_USER);
 }
 
@@ -349,6 +352,7 @@ CNF_Finalise(void)
   Free(keys_file);
   Free(leapsec_tz);
   Free(logdir);
+  Free(bind_cmd_path);
   Free(pidfile);
   Free(rtc_device);
   Free(rtc_file);
@@ -370,9 +374,12 @@ CNF_ReadFile(const char *filename)
 
   in = fopen(filename, "r");
   if (!in) {
-    LOG_FATAL(LOGF_Configure, "Could not open configuration file %s", filename);
+    LOG_FATAL(LOGF_Configure, "Could not open configuration file %s : %s",
+              filename, strerror(errno));
     return;
   }
+
+  DEBUG_LOG(LOGF_Configure, "Reading %s", filename);
 
   for (i = 1; fgets(line, sizeof(line), in); i++) {
     CNF_ParseLine(filename, i, line);
@@ -426,8 +433,6 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_int(p, &cmd_port);
   } else if (!strcasecmp(command, "combinelimit")) {
     parse_double(p, &combine_limit);
-  } else if (!strcasecmp(command, "commandkey")) {
-    parse_uint32(p, &command_key_id);
   } else if (!strcasecmp(command, "corrtimeratio")) {
     parse_double(p, &correction_time_ratio);
   } else if (!strcasecmp(command, "deny")) {
@@ -440,8 +445,6 @@ CNF_ParseLine(const char *filename, int number, char *line)
     do_dump_on_exit = parse_null(p);
   } else if (!strcasecmp(command, "fallbackdrift")) {
     parse_fallbackdrift(p);
-  } else if (!strcasecmp(command, "generatecommandkey")) {
-    generate_command_key = parse_null(p);
   } else if (!strcasecmp(command, "hwclockfile")) {
     parse_string(p, &hwclock_file);
   } else if (!strcasecmp(command, "include")) {
@@ -454,10 +457,6 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_leapsecmode(p);
   } else if (!strcasecmp(command, "leapsectz")) {
     parse_string(p, &leapsec_tz);
-  } else if (!strcasecmp(command, "linux_freq_scale")) {
-    LOG(LOGS_WARN, LOGF_Configure, "%s directive is no longer supported", command);
-  } else if (!strcasecmp(command, "linux_hz")) {
-    LOG(LOGS_WARN, LOGF_Configure, "%s directive is no longer supported", command);
   } else if (!strcasecmp(command, "local")) {
     parse_local(p);
   } else if (!strcasecmp(command, "lock_all")) {
@@ -480,6 +479,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_maxchange(p);
   } else if (!strcasecmp(command, "maxclockerror")) {
     parse_double(p, &max_clock_error);
+  } else if (!strcasecmp(command, "maxdistance")) {
+    parse_double(p, &max_distance);
   } else if (!strcasecmp(command, "maxsamples")) {
     parse_int(p, &max_samples);
   } else if (!strcasecmp(command, "maxslewrate")) {
@@ -526,6 +527,11 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_tempcomp(p);
   } else if (!strcasecmp(command, "user")) {
     parse_string(p, &user);
+  } else if (!strcasecmp(command, "commandkey") ||
+             !strcasecmp(command, "generatecommandkey") ||
+             !strcasecmp(command, "linux_freq_scale") ||
+             !strcasecmp(command, "linux_hz")) {
+    LOG(LOGS_WARN, LOGF_Configure, "%s directive is no longer supported", command);
   } else {
     other_parse_error("Invalid command");
   }
@@ -549,19 +555,6 @@ parse_int(char *line, int *result)
 {
   check_number_of_args(line, 1);
   if (sscanf(line, "%d", result) != 1) {
-    command_parse_error();
-    return 0;
-  }
-  return 1;
-}
-
-/* ================================================== */
-
-static int
-parse_uint32(char *line, uint32_t *result)
-{
-  check_number_of_args(line, 1);
-  if (sscanf(line, "%"SCNu32, result) != 1) {
     command_parse_error();
     return 0;
   }
@@ -1113,7 +1106,14 @@ parse_bindcmdaddress(char *line)
   IPAddr ip;
 
   check_number_of_args(line, 1);
-  if (UTI_StringToIP(line, &ip)) {
+
+  /* Address starting with / is for the Unix domain socket */
+  if (line[0] == '/') {
+    parse_string(line, &bind_cmd_path);
+    /* / disables the socket */
+    if (!strcmp(bind_cmd_path, "/"))
+        bind_cmd_path[0] = '\0';
+  } else if (UTI_StringToIP(line, &ip)) {
     if (ip.family == IPADDR_INET4)
       bind_cmd_address4 = ip;
     else if (ip.family == IPADDR_INET6)
@@ -1240,8 +1240,47 @@ parse_tempcomp(char *line)
 static void
 parse_include(char *line)
 {
+  glob_t gl;
+  size_t i;
+
   check_number_of_args(line, 1);
-  CNF_ReadFile(line);
+
+  if (glob(line, 0, NULL, &gl)) {
+    DEBUG_LOG(LOGF_Configure, "glob of %s failed", line);
+    return;
+  }
+
+  for (i = 0; i < gl.gl_pathc; i++)
+    CNF_ReadFile(gl.gl_pathv[i]);
+
+  globfree(&gl);
+}
+
+/* ================================================== */
+
+void
+CNF_CreateDirs(uid_t uid, gid_t gid)
+{
+  char *dir;
+
+  UTI_CreateDirAndParents(logdir, 0755, uid, gid);
+  UTI_CreateDirAndParents(dumpdir, 0755, uid, gid);
+
+  /* Create a directory for the Unix domain command socket */
+  if (bind_cmd_path[0]) {
+    dir = UTI_PathToDir(bind_cmd_path);
+    UTI_CreateDirAndParents(dir, 0770, uid, gid);
+
+    /* Check the permissions and owner/group in case the directory already
+       existed.  It MUST NOT be accessible by others as permissions on Unix
+       domain sockets are ignored on some systems (e.g. Solaris). */
+    if (!UTI_CheckDirPermissions(dir, 0770, uid, gid)) {
+      LOG(LOGS_WARN, LOGF_Configure, "Disabled command socket %s", bind_cmd_path);
+      bind_cmd_path[0] = '\0';
+    }
+
+    Free(dir);
+  }
 }
 
 /* ================================================== */
@@ -1449,22 +1488,6 @@ CNF_GetRtcDevice(void)
 
 /* ================================================== */
 
-uint32_t
-CNF_GetCommandKey(void)
-{
-  return command_key_id;
-}
-
-/* ================================================== */
-
-int
-CNF_GetGenerateCommandKey(void)
-{
-  return generate_command_key;
-}
-
-/* ================================================== */
-
 int
 CNF_GetDumpOnExit(void)
 {
@@ -1501,6 +1524,14 @@ double
 CNF_GetMaxSlewRate(void)
 {
   return max_slew_rate;
+}
+
+/* ================================================== */
+
+double
+CNF_GetMaxDistance(void)
+{
+  return max_distance;
 }
 
 /* ================================================== */
@@ -1693,6 +1724,14 @@ CNF_GetBindAcquisitionAddress(int family, IPAddr *addr)
     *addr = bind_acq_address6;
   else
     addr->family = IPADDR_UNSPEC;
+}
+
+/* ================================================== */
+
+char *
+CNF_GetBindCommandPath(void)
+{
+  return bind_cmd_path;
 }
 
 /* ================================================== */

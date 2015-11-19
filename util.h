@@ -88,6 +88,8 @@ extern int UTI_CompareIPs(IPAddr *a, IPAddr *b, IPAddr *mask);
 
 extern void UTI_SockaddrToIPAndPort(struct sockaddr *sa, IPAddr *ip, unsigned short *port);
 extern int UTI_IPAndPortToSockaddr(IPAddr *ip, unsigned short port, struct sockaddr *sa);
+extern char *UTI_SockaddrToString(struct sockaddr *sa);
+extern const char *UTI_SockaddrFamilyToString(int family);
 
 extern char *UTI_TimeToLogForm(time_t t);
 
@@ -127,11 +129,19 @@ extern int UTI_CheckNTPAuth(int hash_id, const unsigned char *key, int key_len,
 /* Decode password encoded in ASCII or HEX */
 extern int UTI_DecodePasswordFromText(char *key);
 
-#if defined (INLINE_UTILITIES)
-#define INLINE_STATIC inline static
-#include "util.c"
-#else
-#define INLINE_STATIC
-#endif /* defined (INLINE_UTILITIES) */
+extern int UTI_SetQuitSignalsHandler(void (*handler)(int));
+
+/* Get directory (as an allocated string) for a path */
+extern char *UTI_PathToDir(const char *path);
+
+/* Create a directory with a specified mode (umasked) and set its uid/gid.
+   Create also any parent directories that don't exist with mode 755 and
+   default uid/gid.  Returns 1 if created or already exists (even with
+   different mode/uid/gid), 0 otherwise. */
+extern int UTI_CreateDirAndParents(const char *path, mode_t mode, uid_t uid, gid_t gid);
+
+/* Check if a directory is secure.  It must not have other than the specified
+   permissions and its uid/gid must match the specified values. */
+extern int UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid);
 
 #endif /* GOT_UTIL_H */

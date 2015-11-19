@@ -31,7 +31,9 @@ extern void SYS_Linux_Initialise(void);
 
 extern void SYS_Linux_Finalise(void);
 
-extern void SYS_Linux_DropRoot(char *user);
+extern void SYS_Linux_DropRoot(uid_t uid, gid_t gid);
+
+extern void SYS_Linux_EnableSystemCallFilter(int level);
 
 extern void SYS_Linux_MemLockAll(int LockAll);
 

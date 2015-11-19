@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2002
- * Copyright (C) Miroslav Lichvar  2013-2014
+ * Copyright (C) Miroslav Lichvar  2013-2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -45,17 +45,27 @@ extern int log_debug_enabled;
 #define FORMAT_ATTRIBUTE_PRINTF(str, first)
 #endif
 
+#if DEBUG > 0
+#define LOG_MESSAGE(severity, facility, ...) \
+  LOG_Message(severity, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__);
+#else
+#define LOG_MESSAGE(severity, facility, ...) \
+  LOG_Message(severity, __VA_ARGS__);
+#endif
+
 #define DEBUG_LOG(facility, ...) \
   do { \
     if (DEBUG && log_debug_enabled) \
-      LOG_Message(LOGS_DEBUG, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__); \
+      LOG_MESSAGE(LOGS_DEBUG, facility, __VA_ARGS__); \
   } while (0)
-#define LOG(severity, facility, ...) LOG_Message(severity, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__)
+
 #define LOG_FATAL(facility, ...) \
   do { \
-    LOG_Message(LOGS_FATAL, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__); \
+    LOG_MESSAGE(LOGS_FATAL, facility, __VA_ARGS__); \
     exit(1); \
   } while (0)
+
+#define LOG(severity, facility, ...) LOG_MESSAGE(severity, facility, __VA_ARGS__)
 
 /* Definition of severity */
 typedef enum {
@@ -81,6 +91,7 @@ typedef enum {
   LOGF_Util,
   LOGF_Main,
   LOGF_Memory,
+  LOGF_Client,
   LOGF_ClientLog,
   LOGF_Configure,
   LOGF_CmdMon,
@@ -98,6 +109,7 @@ typedef enum {
   LOGF_SysNetBSD,
   LOGF_SysSolaris,
   LOGF_SysSunOS,
+  LOGF_SysTimex,
   LOGF_SysWinnt,
   LOGF_TempComp,
   LOGF_RtcLinux,
@@ -112,10 +124,15 @@ extern void LOG_Initialise(void);
 extern void LOG_Finalise(void);
 
 /* Line logging function */
+#if DEBUG > 0
 FORMAT_ATTRIBUTE_PRINTF(6, 7)
 extern void LOG_Message(LOG_Severity severity, LOG_Facility facility,
                         int line_number, const char *filename,
                         const char *function_name, const char *format, ...);
+#else
+FORMAT_ATTRIBUTE_PRINTF(2, 3)
+extern void LOG_Message(LOG_Severity severity, const char *format, ...);
+#endif
 
 /* Set debug level:
    0, 1 - only non-debug messages are logged
@@ -142,7 +159,6 @@ extern LOG_FileID LOG_FileOpen(const char *name, const char *banner);
 FORMAT_ATTRIBUTE_PRINTF(2, 3)
 extern void LOG_FileWrite(LOG_FileID id, const char *format, ...);
 
-extern void LOG_CreateLogFileDir(void);
 extern void LOG_CycleLogFiles(void);
 
 #endif /* GOT_LOGGING_H */

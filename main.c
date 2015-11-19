@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2012-2014
+ * Copyright (C) Miroslav Lichvar  2012-2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -51,6 +51,7 @@
 #include "nameserv.h"
 #include "smooth.h"
 #include "tempcomp.h"
+#include "util.h"
 
 /* ================================================== */
 
@@ -94,10 +95,10 @@ MAI_CleanupAndExit(void)
   MNL_Finalise();
   CLG_Finalise();
   NSR_Finalise();
-  NCR_Finalise();
-  CAM_Finalise();
-  NIO_Finalise();
   SST_Finalise();
+  NCR_Finalise();
+  NIO_Finalise();
+  CAM_Finalise();
   KEY_Finalise();
   RCL_Finalise();
   SRC_Finalise();
@@ -264,7 +265,7 @@ write_lockfile(void)
   if (!out) {
     LOG_FATAL(LOGF_Main, "could not open lockfile %s for writing", pidfile);
   } else {
-    fprintf(out, "%d\n", getpid());
+    fprintf(out, "%d\n", (int)getpid());
     fclose(out);
   }
 }
@@ -274,11 +275,6 @@ write_lockfile(void)
 static void
 go_daemon(void)
 {
-#ifdef WINNT
-
-
-#else
-
   int pid, fd, pipefd[2];
 
   /* Create pipe which will the daemon use to notify the grandparent
@@ -337,8 +333,6 @@ go_daemon(void)
       LOG_SetParentFd(pipefd[1]);
     }
   }
-
-#endif
 }
 
 /* ================================================== */
@@ -349,10 +343,11 @@ int main
   const char *conf_file = DEFAULT_CONF_FILE;
   const char *progname = argv[0];
   char *user = NULL;
+  struct passwd *pw;
   int debug = 0, nofork = 0, address_family = IPADDR_UNSPEC;
   int do_init_rtc = 0, restarted = 0;
   int other_pid;
-  int lock_memory = 0, sched_priority = 0;
+  int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
   int system_log = 1;
   int config_args = 0;
 
@@ -382,6 +377,10 @@ int main
       } else {
         user = *argv;
       }
+    } else if (!strcmp("-F", *argv)) {
+      ++argv, --argc;
+      if (argc == 0 || sscanf(*argv, "%d", &scfilter_level) != 1)
+        LOG_FATAL(LOGF_Main, "Bad syscall filter level");
     } else if (!strcmp("-s", *argv)) {
       do_init_rtc = 1;
     } else if (!strcmp("-v", *argv) || !strcmp("--version",*argv)) {
@@ -472,6 +471,12 @@ int main
   RCL_Initialise();
   KEY_Initialise();
 
+  /* Open privileged ports before dropping root */
+  CAM_Initialise(address_family);
+  NIO_Initialise(address_family);
+  NCR_Initialise();
+  CNF_SetupAccessRestrictions();
+
   /* Command-line switch must have priority */
   if (!sched_priority) {
     sched_priority = CNF_GetSchedPriority();
@@ -487,17 +492,19 @@ int main
   if (!user) {
     user = CNF_GetUser();
   }
-  if (user && strcmp(user, "root")) {
-    SYS_DropRoot(user);
-  }
 
-  LOG_CreateLogFileDir();
+  if ((pw = getpwnam(user)) == NULL)
+    LOG_FATAL(LOGF_Main, "Could not get %s uid/gid", user);
+
+  /* Create all directories before dropping root */
+  CNF_CreateDirs(pw->pw_uid, pw->pw_gid);
+
+  /* Drop root privileges if the user has non-zero uid or gid */
+  if (pw->pw_uid || pw->pw_gid)
+    SYS_DropRoot(pw->pw_uid, pw->pw_gid);
 
   REF_Initialise();
   SST_Initialise();
-  NIO_Initialise(address_family);
-  CAM_Initialise(address_family);
-  NCR_Initialise();
   NSR_Initialise();
   CLG_Initialise();
   MNL_Initialise();
@@ -507,7 +514,12 @@ int main
   /* From now on, it is safe to do finalisation on exit */
   initialised = 1;
 
-  CNF_SetupAccessRestrictions();
+  UTI_SetQuitSignalsHandler(signal_cleanup);
+
+  CAM_OpenUnixSocket();
+
+  if (scfilter_level)
+    SYS_EnableSystemCallFilter(scfilter_level);
 
   if (ref_mode == REF_ModeNormal && CNF_GetInitSources() > 0) {
     ref_mode = REF_ModeInitStepSlew;
@@ -521,13 +533,6 @@ int main
   } else {
     post_init_rtc_hook(NULL);
   }
-
-  signal(SIGINT, signal_cleanup);
-  signal(SIGTERM, signal_cleanup);
-#if !defined(WINNT)
-  signal(SIGQUIT, signal_cleanup);
-  signal(SIGHUP, signal_cleanup);
-#endif /* WINNT */
 
   /* The program normally runs under control of the main loop in
      the scheduler. */

@@ -31,7 +31,6 @@
 
 #include "conf.h"
 #include "logging.h"
-#include "mkdirpp.h"
 #include "util.h"
 
 /* This is used by DEBUG_LOG macro */
@@ -48,10 +47,6 @@ static int parent_fd = 0;
 #define DEBUG_LEVEL_PRINT_FUNCTION 2
 #define DEBUG_LEVEL_PRINT_DEBUG 2
 static int debug_level = 0;
-
-#ifdef WINNT
-static FILE *logfile;
-#endif
 
 struct LogFile {
   const char *name;
@@ -74,10 +69,6 @@ void
 LOG_Initialise(void)
 {
   initialised = 1;
-
-#ifdef WINNT
-  logfile = fopen("./chronyd.err", "a");
-#endif
 }
 
 /* ================================================== */
@@ -86,15 +77,9 @@ LOG_Initialise(void)
 void
 LOG_Finalise(void)
 {
-#ifdef WINNT
-  if (logfile) {
-    fclose(logfile);
-  }
-#else
   if (system_log) {
     closelog();
   }
-#endif
 
   LOG_CycleLogFiles();
 
@@ -105,11 +90,6 @@ LOG_Finalise(void)
 
 static void log_message(int fatal, LOG_Severity severity, const char *message)
 {
-#ifdef WINNT
-  if (logfile) {
-    fprintf(logfile, fatal ? "Fatal error : %s\n" : "%s\n", message);
-  }
-#else
   if (system_log) {
     int priority;
     switch (severity) {
@@ -135,32 +115,33 @@ static void log_message(int fatal, LOG_Severity severity, const char *message)
   } else {
     fprintf(stderr, fatal ? "Fatal error : %s\n" : "%s\n", message);
   }
-#endif
 }
 
 /* ================================================== */
 
-void LOG_Message(LOG_Severity severity, LOG_Facility facility,
-                 int line_number, const char *filename,
-                 const char *function_name, const char *format, ...)
+void LOG_Message(LOG_Severity severity,
+#if DEBUG > 0
+                 LOG_Facility facility, int line_number,
+                 const char *filename, const char *function_name,
+#endif
+                 const char *format, ...)
 {
   char buf[2048];
   va_list other_args;
   time_t t;
   struct tm stm;
 
-#ifdef WINNT
-#else
   if (!system_log) {
     /* Don't clutter up syslog with timestamps and internal debugging info */
     time(&t);
     stm = *gmtime(&t);
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &stm);
     fprintf(stderr, "%s ", buf);
+#if DEBUG > 0
     if (debug_level >= DEBUG_LEVEL_PRINT_FUNCTION)
       fprintf(stderr, "%s:%d:(%s) ", filename, line_number, function_name);
-  }
 #endif
+  }
 
   va_start(other_args, format);
   vsnprintf(buf, sizeof(buf), format, other_args);
@@ -198,11 +179,8 @@ void LOG_Message(LOG_Severity severity, LOG_Facility facility,
 void
 LOG_OpenSystemLog(void)
 {
-#ifdef WINNT
-#else
   system_log = 1;
   openlog("chronyd", LOG_PID, LOG_DAEMON);
-#endif
 }
 
 /* ================================================== */
@@ -296,20 +274,6 @@ LOG_FileWrite(LOG_FileID id, const char *format, ...)
   fprintf(logfiles[id].file, "\n");
 
   fflush(logfiles[id].file);
-}
-
-/* ================================================== */
-
-void
-LOG_CreateLogFileDir(void)
-{
-  const char *logdir;
-
-  logdir = CNF_GetLogDir();
-
-  if (!mkdir_and_parents(logdir)) {
-    LOG(LOGS_ERR, LOGF_Logging, "Could not create directory %s", logdir);
-  }
 }
 
 /* ================================================== */

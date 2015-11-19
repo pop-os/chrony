@@ -30,9 +30,11 @@
 
 #include "sysincl.h"
 
+#include "array.h"
 #include "candm.h"
+#include "logging.h"
+#include "memory.h"
 #include "nameserv.h"
-#include "hash.h"
 #include "getdate.h"
 #include "cmdparse.h"
 #include "pktlength.h"
@@ -49,23 +51,45 @@
 
 /* ================================================== */
 
-union sockaddr_in46 {
+union sockaddr_all {
   struct sockaddr_in in4;
 #ifdef FEAT_IPV6
   struct sockaddr_in6 in6;
 #endif
-  struct sockaddr u;
+  struct sockaddr_un un;
+  struct sockaddr sa;
 };
 
-static int sock_fd;
-union sockaddr_in46 his_addr;
-static socklen_t his_addr_len;
+static ARR_Instance sockaddrs;
+
+static int sock_fd = -1;
+
+static int quit = 0;
 
 static int on_terminal = 0;
 
 static int no_dns = 0;
 
-static int recv_errqueue = 0;
+/* ================================================== */
+/* Log a message. This is a minimalistic replacement of the logging.c
+   implementation to avoid linking with it and other modules. */
+
+int log_debug_enabled = 0;
+
+void LOG_Message(LOG_Severity severity,
+#if DEBUG > 0
+                 LOG_Facility facility, int line_number,
+                 const char *filename, const char *function_name,
+#endif
+                 const char *format, ...)
+{
+  va_list ap;
+
+  va_start(ap, format);
+  vfprintf(stderr, format, ap);
+  putc('\n', stderr);
+  va_end(ap);
+}
 
 /* ================================================== */
 /* Read a single line of commands from standard input.  Eventually we
@@ -91,7 +115,7 @@ read_line(void)
       line[sizeof(line) - 1] = '\0';
       add_history(cmd);
       /* free the buffer allocated by readline */
-      free(cmd);
+      Free(cmd);
     } else {
       /* simulate the user has entered an empty line */
       *line = '\0';
@@ -110,55 +134,118 @@ read_line(void)
 }
 
 /* ================================================== */
-/* Initialise the socket used to talk to the daemon */
 
-static void
-open_io(const char *hostname, int port)
+#define MAX_ADDRESSES 16
+
+static ARR_Instance
+get_sockaddrs(const char *hostnames, int port)
 {
-  IPAddr ip;
-  int on_off = 1;
+  ARR_Instance addrs;
+  char *hostname, *s1, *s2;
+  IPAddr ip_addrs[MAX_ADDRESSES];
+  union sockaddr_all *addr;
+  int i;
 
-  /* Note, this call could block for a while */
-  if (DNS_Name2IPAddress(hostname, &ip, 1) != DNS_Success) {
-    fprintf(stderr, "Could not get IP address for %s\n", hostname);
-    exit(1);
+  addrs = ARR_CreateInstance(sizeof (union sockaddr_all));
+  s1 = Strdup(hostnames);
+
+  /* Parse the comma-separated list of hostnames */
+  for (hostname = s1; hostname && *hostname; hostname = s2) {
+    s2 = strchr(hostname, ',');
+    if (s2)
+      *s2++ = '\0';
+
+    /* hostname starting with / is considered a path of Unix domain socket */
+    if (hostname[0] == '/') {
+      addr = (union sockaddr_all *)ARR_GetNewElement(addrs);
+      if (snprintf(addr->un.sun_path, sizeof (addr->un.sun_path), "%s", hostname) >=
+          sizeof (addr->un.sun_path))
+        LOG_FATAL(LOGF_Client, "Unix socket path too long");
+      addr->un.sun_family = AF_UNIX;
+    } else {
+      if (DNS_Name2IPAddress(hostname, ip_addrs, MAX_ADDRESSES) != DNS_Success) {
+        DEBUG_LOG(LOGF_Client, "Could not get IP address for %s", hostname);
+        break;
+      }
+
+      for (i = 0; i < MAX_ADDRESSES && ip_addrs[i].family != IPADDR_UNSPEC; i++) {
+        addr = (union sockaddr_all *)ARR_GetNewElement(addrs);
+        UTI_IPAndPortToSockaddr(&ip_addrs[i], port, (struct sockaddr *)addr);
+        DEBUG_LOG(LOGF_Client, "Resolved %s to %s", hostname, UTI_IPToString(&ip_addrs[i]));
+      }
+    }
   }
 
-  switch (ip.family) {
-    case IPADDR_INET4:
-      sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+  Free(s1);
+  return addrs;
+}
+
+/* ================================================== */
+/* Initialise the socket used to talk to the daemon */
+
+static int
+prepare_socket(union sockaddr_all *addr)
+{
+  socklen_t addr_len;
+  char *dir;
+
+  switch (addr->sa.sa_family) {
+    case AF_UNIX:
+      addr_len = sizeof (addr->un);
+      break;
+    case AF_INET:
+      addr_len = sizeof (addr->in4);
       break;
 #ifdef FEAT_IPV6
-    case IPADDR_INET6:
-      sock_fd = socket(AF_INET6, SOCK_DGRAM, 0);
+    case AF_INET6:
+      addr_len = sizeof (addr->in6);
       break;
 #endif
     default:
       assert(0);
   }
 
-  his_addr_len = UTI_IPAndPortToSockaddr(&ip, port, &his_addr.u);
+  sock_fd = socket(addr->sa.sa_family, SOCK_DGRAM, 0);
 
   if (sock_fd < 0) {
-    perror("Can't create socket");
-    exit(1);
+    DEBUG_LOG(LOGF_Client, "Could not create socket : %s", strerror(errno));
+    return 0;
   }
 
-  /* Enable extended error reporting (e.g. ECONNREFUSED on ICMP unreachable) */
-#ifdef IP_RECVERR
-  if (ip.family == IPADDR_INET4 &&
-      !setsockopt(sock_fd, IPPROTO_IP, IP_RECVERR, &on_off, sizeof(on_off))) {
-    recv_errqueue = 1;
+  if (addr->sa.sa_family == AF_UNIX) {
+    struct sockaddr_un sa_un;
+
+    /* Construct path of our socket.  Use the same directory as the server
+       socket and include our process ID to allow multiple chronyc instances
+       running at the same time. */
+    dir = UTI_PathToDir(addr->un.sun_path);
+    if (snprintf(sa_un.sun_path, sizeof (sa_un.sun_path),
+                 "%s/chronyc.%d.sock", dir, (int)getpid()) >= sizeof (sa_un.sun_path))
+      LOG_FATAL(LOGF_Client, "Unix socket path too long");
+    Free(dir);
+
+    sa_un.sun_family = AF_UNIX;
+    unlink(sa_un.sun_path);
+
+    /* Bind the socket to the path */
+    if (bind(sock_fd, (struct sockaddr *)&sa_un, sizeof (sa_un)) < 0) {
+      DEBUG_LOG(LOGF_Client, "Could not bind socket : %s", strerror(errno));
+      return 0;
+    }
+
+    /* Allow server without root privileges to send replies to our socket */
+    if (chmod(sa_un.sun_path, 0666) < 0) {
+      DEBUG_LOG(LOGF_Client, "Could not change socket permissions : %s", strerror(errno));
+      return 0;
+    }
   }
-#endif
-#ifdef FEAT_IPV6
-#ifdef IPV6_RECVERR
-  if (ip.family == IPADDR_INET6 &&
-      !setsockopt(sock_fd, IPPROTO_IPV6, IPV6_RECVERR, &on_off, sizeof(on_off))) {
-    recv_errqueue = 1;
+
+  if (connect(sock_fd, &addr->sa, addr_len) < 0) {
+    DEBUG_LOG(LOGF_Client, "Could not connect socket : %s", strerror(errno));
+    return 0;
   }
-#endif
-#endif
+
+  return 1;
 }
 
 /* ================================================== */
@@ -166,9 +253,50 @@ open_io(const char *hostname, int port)
 static void
 close_io(void)
 {
+  union sockaddr_all addr;
+  socklen_t addr_len = sizeof (addr);
+
+  if (sock_fd < 0)
+    return;
+
+  /* Remove our Unix domain socket */
+  if (getsockname(sock_fd, &addr.sa, &addr_len) < 0)
+    LOG_FATAL(LOGF_Client, "getsockname() failed : %s", strerror(errno));
+  if (addr_len <= sizeof (addr) && addr_len > sizeof (addr.sa.sa_family) &&
+      addr.sa.sa_family == AF_UNIX)
+    unlink(addr.un.sun_path);
 
   close(sock_fd);
+  sock_fd = -1;
+}
 
+/* ================================================== */
+
+static int
+open_io(void)
+{
+  static unsigned int address_index = 0;
+  union sockaddr_all *addr;
+
+  /* If a socket is already opened, close it and try the next address */
+  if (sock_fd >= 0) {
+    close_io();
+    address_index++;
+  }
+
+  /* Find an address for which a socket can be opened and connected */
+  for (; address_index < ARR_GetSize(sockaddrs); address_index++) {
+    addr = (union sockaddr_all *)ARR_GetElement(sockaddrs, address_index);
+    DEBUG_LOG(LOGF_Client, "Opening connection to %s",
+              UTI_SockaddrToString(&addr->sa));
+
+    if (prepare_socket(addr))
+      return 1;
+
+    close_io();
+  }
+
+  return 0;
 }
 
 /* ================================================== */
@@ -237,13 +365,13 @@ read_mask_address(char *line, IPAddr *mask, IPAddr *address)
         bits_to_mask(-1, address->family, mask);
         return 1;
       } else {
-        fprintf(stderr, "Could not get address for hostname\n");
+        LOG(LOGS_ERR, LOGF_Client, "Could not get address for hostname");
         return 0;
       }
     }
   }
 
-  fprintf(stderr, "Invalid syntax for mask/address\n");
+  LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for mask/address");
   return 0;
 }
 
@@ -302,11 +430,11 @@ read_address_integer(char *line, IPAddr *address, int *value)
   line = CPS_SplitWord(line);
 
   if (sscanf(line, "%d", value) != 1) {
-    fprintf(stderr, "Invalid syntax for address value\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for address value");
     ok = 0;
   } else {
     if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
-      fprintf(stderr, "Could not get address for hostname\n");
+      LOG(LOGS_ERR, LOGF_Client, "Could not get address for hostname");
       ok = 0;
     } else {
       ok = 1;
@@ -330,11 +458,11 @@ read_address_double(char *line, IPAddr *address, double *value)
   line = CPS_SplitWord(line);
 
   if (sscanf(line, "%lf", value) != 1) {
-    fprintf(stderr, "Invalid syntax for address value\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for address value");
     ok = 0;
   } else {
     if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
-      fprintf(stderr, "Could not get address for hostname\n");
+      LOG(LOGS_ERR, LOGF_Client, "Could not get address for hostname");
       ok = 0;
     } else {
       ok = 1;
@@ -567,7 +695,7 @@ process_cmd_burst(CMD_Request *msg, char *line)
   CPS_SplitWord(s2);
 
   if (sscanf(s1, "%d/%d", &n_good_samples, &n_total_samples) != 2) {
-    fprintf(stderr, "Invalid syntax for burst command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for burst command");
     return 0;
   }
 
@@ -603,7 +731,7 @@ process_cmd_local(CMD_Request *msg, const char *line)
     msg->data.local.on_off = htonl(1);
     msg->data.local.stratum = htonl(stratum);
   } else {
-    fprintf(stderr, "Invalid syntax for local command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for local command");
     return 0;
   }
 
@@ -627,7 +755,7 @@ process_cmd_manual(CMD_Request *msg, const char *line)
   } else if (!strcmp(p, "reset")) {
     msg->data.manual.option = htonl(2);
   } else {
-    fprintf(stderr, "Invalid syntax for manual command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for manual command");
     return 0;
   }
   msg->command = htons(REQ_MANUAL);
@@ -662,7 +790,7 @@ parse_allow_deny(CMD_Request *msg, char *line)
 
       /* Try to parse as the name of a machine */
       if (DNS_Name2IPAddress(p, &ip, 1) != DNS_Success) {
-        fprintf(stderr, "Could not read address\n");
+        LOG(LOGS_ERR, LOGF_Client, "Could not read address");
         return 0;
       } else {
         UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
@@ -715,7 +843,8 @@ parse_allow_deny(CMD_Request *msg, char *line)
         if (n == 1) {
           msg->data.allow_deny.subnet_bits = htonl(specified_subnet_bits);
         } else {
-          fprintf(stderr, "Warning: badly formatted subnet size, using %ld\n", (long) ntohl(msg->data.allow_deny.subnet_bits));
+          LOG(LOGS_WARN, LOGF_Client, "Warning: badly formatted subnet size, using %d",
+              (int)ntohl(msg->data.allow_deny.subnet_bits));
         }
       } 
     }
@@ -849,7 +978,7 @@ process_cmd_accheck(CMD_Request *msg, char *line)
     UTI_IPHostToNetwork(&ip, &msg->data.ac_check.ip);
     return 1;
   } else {    
-    fprintf(stderr, "Could not read address\n");
+    LOG(LOGS_ERR, LOGF_Client, "Could not read address");
     return 0;
   }
 }
@@ -865,7 +994,7 @@ process_cmd_cmdaccheck(CMD_Request *msg, char *line)
     UTI_IPHostToNetwork(&ip, &msg->data.ac_check.ip);
     return 1;
   } else {    
-    fprintf(stderr, "Could not read address\n");
+    LOG(LOGS_ERR, LOGF_Client, "Could not read address");
     return 0;
   }
 }
@@ -937,42 +1066,42 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
   switch (status) {
     case CPS_Success:
       if (DNS_Name2IPAddress(data.name, &ip_addr, 1) != DNS_Success) {
-        fprintf(stderr, "Invalid host/IP address\n");
+        LOG(LOGS_ERR, LOGF_Client, "Invalid host/IP address");
         break;
       }
 
       if (data.params.min_stratum != SRC_DEFAULT_MINSTRATUM) {
-        fprintf(stderr, "Option minstratum not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option minstratum not supported");
         break;
       }
 
       if (data.params.poll_target != SRC_DEFAULT_POLLTARGET) {
-        fprintf(stderr, "Option polltarget not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option polltarget not supported");
         break;
       }
 
       if (data.params.max_delay_dev_ratio != SRC_DEFAULT_MAXDELAYDEVRATIO) {
-        fprintf(stderr, "Option maxdelaydevratio not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option maxdelaydevratio not supported");
         break;
       }
 
       if (data.params.version != NTP_VERSION) {
-        fprintf(stderr, "Option version not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option version not supported");
         break;
       }
 
       if (data.params.max_sources != SRC_DEFAULT_MAXSOURCES) {
-        fprintf(stderr, "Option maxsources not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option maxsources not supported");
         break;
       }
 
       if (data.params.min_samples != SRC_DEFAULT_MINSAMPLES) {
-        fprintf(stderr, "Option minsamples not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option minsamples not supported");
         break;
       }
 
       if (data.params.max_samples != SRC_DEFAULT_MAXSAMPLES) {
-        fprintf(stderr, "Option maxsamples not supported\n");
+        LOG(LOGS_WARN, LOGF_Client, "Option maxsamples not supported");
         break;
       }
 
@@ -995,7 +1124,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       break;
     default:
       CPS_StatusToString(status, str, sizeof (str));
-      fprintf(stderr, "%s\n", str);
+      LOG(LOGS_ERR, LOGF_Client, "%s", str);
       break;
   }
 
@@ -1034,11 +1163,11 @@ process_cmd_delete(CMD_Request *msg, char *line)
   CPS_SplitWord(line);
 
   if (!*hostname) {
-    fprintf(stderr, "Invalid syntax for address\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for address");
     ok = 0;
   } else {
     if (DNS_Name2IPAddress(hostname, &address, 1) != DNS_Success) {
-      fprintf(stderr, "Could not get address for hostname\n");
+      LOG(LOGS_ERR, LOGF_Client, "Could not get address for hostname");
       ok = 0;
     } else {
       UTI_IPHostToNetwork(&address, &msg->data.del_source.ip_addr);
@@ -1052,163 +1181,95 @@ process_cmd_delete(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
-static char *password = NULL;
-static int password_length;
-static int auth_hash_id;
-
-/* ================================================== */
-
-static int
-process_cmd_password(CMD_Request *msg, char *line)
-{
-  char *p;
-  struct timeval now;
-  int i, len;
-
-  /* Blank and free the old password */
-  if (password) {
-    for (i = 0; i < password_length; i++)
-      password[i] = 0;
-    free(password);
-    password = NULL;
-  }
-
-  p = line;
-
-  if (!*p) {
-    /* blank line, prompt for password */
-    p = getpass("Password: ");
-  }
-
-  if (!*p)
-    return 0;
-
-  len = strlen(p);
-  password_length = UTI_DecodePasswordFromText(p);
-
-  if (password_length > 0) {
-    password = malloc(password_length);
-    memcpy(password, p, password_length);
-  }
-
-  /* Erase the password from the input or getpass buffer */
-  for (i = 0; i < len; i++)
-    p[i] = 0;
-
-  if (password_length <= 0) {
-      fprintf(stderr, "Could not decode password\n");
-      return 0;
-  }
-
-  if (gettimeofday(&now, NULL) < 0) {
-    printf("500 - Could not read time of day\n");
-    return 0;
-  } else {
-    msg->command = htons(REQ_LOGON); /* Just force a round trip so that we get tokens etc */
-    UTI_TimevalHostToNetwork(&now, &msg->data.logon.ts);
-    return 1;
-  }
-}
-
-/* ================================================== */
-
-static int
-generate_auth(CMD_Request *msg)
-{
-  int data_len;
-
-  data_len = PKL_CommandLength(msg);
-
-  assert(auth_hash_id >= 0);
-
-  return UTI_GenerateNTPAuth(auth_hash_id, (unsigned char *)password, password_length,
-      (unsigned char *)msg, data_len, ((unsigned char *)msg) + data_len, sizeof (msg->auth));
-}
-
-/* ================================================== */
-
-static int
-check_reply_auth(CMD_Reply *msg, int len)
-{
-  int data_len;
-
-  data_len = PKL_ReplyLength(msg);
-
-  assert(auth_hash_id >= 0);
-
-  return UTI_CheckNTPAuth(auth_hash_id, (unsigned char *)password, password_length,
-      (unsigned char *)msg, data_len,
-      ((unsigned char *)msg) + data_len, len - data_len);
-}
-
-/* ================================================== */
-
 static void
 give_help(void)
 {
-  printf("Commands:\n");
-  printf("accheck <address> : Check whether NTP access is allowed to <address>\n");
-  printf("activity : Check how many NTP sources are online/offline\n");
-  printf("add peer <address> ... : Add a new NTP peer\n");
-  printf("add server <address> ... : Add a new NTP server\n");
-  printf("allow [<subnet-addr>] : Allow NTP access to that subnet as a default\n");
-  printf("allow all [<subnet-addr>] : Allow NTP access to that subnet and all children\n");
-  printf("burst <n-good>/<n-max> [<mask>/<masked-address>] : Start a rapid set of measurements\n");
-  printf("clients : Report on clients that have accessed the server\n");
-  printf("cmdaccheck <address> : Check whether command access is allowed to <address>\n");
-  printf("cmdallow [<subnet-addr>] : Allow command access to that subnet as a default\n");
-  printf("cmdallow all [<subnet-addr>] : Allow command access to that subnet and all children\n");
-  printf("cmddeny [<subnet-addr>] : Deny command access to that subnet as a default\n");
-  printf("cmddeny all [<subnet-addr>] : Deny command access to that subnet and all children\n");
-  printf("cyclelogs : Close and re-open logs files\n");
-  printf("delete <address> : Remove an NTP server or peer\n");
-  printf("deny [<subnet-addr>] : Deny NTP access to that subnet as a default\n");
-  printf("deny all [<subnet-addr>] : Deny NTP access to that subnet and all children\n");
-  printf("dump : Dump all measurements to save files\n");
-  printf("local off : Disable server capability for unsynchronised clock\n");
-  printf("local stratum <stratum> : Enable server capability for unsynchronised clock\n");
-  printf("makestep [<threshold> <updates>] : Correct clock by stepping\n");
-  printf("manual off|on|reset : Disable/enable/reset settime command and statistics\n");
-  printf("manual list : Show previous settime entries\n");
-  printf("maxdelay <address> <new-max-delay> : Modify maximum round-trip valid sample delay for source\n");
-  printf("maxdelayratio <address> <new-max-ratio> : Modify max round-trip delay ratio for source\n");
-  printf("maxdelaydevratio <address> <new-max-ratio> : Modify max round-trip delay dev ratio for source\n");
-  printf("maxpoll <address> <new-maxpoll> : Modify maximum polling interval of source\n");
-  printf("maxupdateskew <new-max-skew> : Modify maximum skew for a clock frequency update to be made\n");
-  printf("minpoll <address> <new-minpoll> : Modify minimum polling interval of source\n");
-  printf("minstratum <address> <new-min-stratum> : Modify minimum stratum of source\n");
-  printf("offline [<mask>/<masked-address>] : Set sources in subnet to offline status\n");
-  printf("online [<mask>/<masked-address>] : Set sources in subnet to online status\n");
-  printf("password [<new-password>] : Set command authentication password\n");
-  printf("polltarget <address> <new-poll-target> : Modify poll target of source\n");
-  printf("reselect : Reselect synchronisation source\n");
-  printf("rtcdata : Print current RTC performance parameters\n");
-  printf("settime <date/time (e.g. Nov 21, 1997 16:30:05 or 16:30:05)> : Manually set the daemon time\n");
-  printf("smoothing : Display current time smoothing state\n");
-  printf("smoothtime reset|activate : Reset/activate time smoothing\n");
-  printf("sources [-v] : Display information about current sources\n");
-  printf("sourcestats [-v] : Display estimation information about current sources\n");
-  printf("tracking : Display system time information\n");
-  printf("trimrtc : Correct RTC relative to system clock\n");
-  printf("waitsync [max-tries [max-correction [max-skew]]] : Wait until synchronised\n");
-  printf("writertc : Save RTC parameters to file\n");
-  printf("\n");
-  printf("authhash <name>: Set command authentication hash function\n");
-  printf("dns -n|+n : Disable/enable resolving IP addresses to hostnames\n");
-  printf("dns -4|-6|-46 : Resolve hostnames only to IPv4/IPv6/both addresses\n");
-  printf("timeout <milliseconds> : Set initial response timeout\n");
-  printf("retries <n> : Set maximum number of retries\n");
-  printf("exit|quit : Leave the program\n");
-  printf("help : Generate this help\n");
-  printf("\n");
+  int line, len;
+  const char *s, cols[] =
+    "System clock:\0\0"
+    "tracking\0Display system time information\0"
+    "makestep\0Correct clock by stepping immediately\0"
+    "makestep <threshold> <updates>\0Configure automatic clock stepping\0"
+    "maxupdateskew <skew>\0Modify maximum valid skew to update frequency\0"
+    "waitsync [max-tries [max-correction [max-skew [interval]]]]\0"
+                          "Wait until synchronised in specified limits\0"
+    "\0\0"
+    "Time sources:\0\0"
+    "sources [-v]\0Display information about current sources\0"
+    "sourcestats [-v]\0Display statistics about collected measurements\0"
+    "reselect\0Force reselecting synchronisation source\0"
+    "\0\0"
+    "NTP sources:\0\0"
+    "activity\0Check how many NTP sources are online/offline\0"
+    "add server <address> [options]\0Add new NTP server\0"
+    "add peer <address> [options]\0Add new NTP peer\0"
+    "delete <address>\0Remove server or peer\0"
+    "burst <n-good>/<n-max> [<mask>/<address>]\0Start rapid set of measurements\0"
+    "maxdelay <address> <delay>\0Modify maximum valid sample delay\0"
+    "maxdelayratio <address> <ratio>\0Modify maximum valid delay/minimum ratio\0"
+    "maxdelaydevratio <address> <ratio>\0Modify maximum valid delay/deviation ratio\0"
+    "minpoll <address> <poll>\0Modify minimum polling interval\0"
+    "maxpoll <address> <poll>\0Modify maximum polling interval\0"
+    "minstratum <address> <stratum>\0Modify minimum stratum\0"
+    "offline [<mask>/<address>]\0Set sources in subnet to offline status\0"
+    "online [<mask>/<address>]\0Set sources in subnet to online status\0"
+    "polltarget <address> <target>\0Modify poll target\0"
+    "refresh\0Refresh IP addresses\0"
+    "\0\0"
+    "Manual time input:\0\0"
+    "manual off|on|reset\0Disable/enable/reset settime command\0"
+    "manual list\0Show previous settime entries\0"
+    "manual delete <index>\0Delete previous settime entry\0"
+    "settime <time>\0Set daemon time\0"
+    "\0(e.g. Sep 25, 2015 16:30:05 or 16:30:05)\0"
+    "\0\0NTP access:\0\0"
+    "accheck <address>\0Check whether address is allowed\0"
+    "clients\0Report on clients that have accessed the server\0"
+    "allow [<subnet>]\0Allow access to subnet as a default\0"
+    "allow all [<subnet>]\0Allow access to subnet and all children\0"
+    "deny [<subnet>]\0Deny access to subnet as a default\0"
+    "deny all [<subnet>]\0Deny access to subnet and all children\0"
+    "local stratum <stratum>\0Serve time at stratum when not synchronised\0"
+    "local off\0Don't serve time when not synchronised\0"
+    "smoothtime reset|activate\0Reset/activate time smoothing\0"
+    "smoothing\0Display current time smoothing state\0"
+    "\0\0"
+    "Monitoring access:\0\0"
+    "cmdaccheck <address>\0Check whether address is allowed\0"
+    "cmdallow [<subnet>]\0Allow access to subnet as a default\0"
+    "cmdallow all [<subnet>]\0Allow access to subnet and all children\0"
+    "cmddeny [<subnet>]\0Deny access to subnet as a default\0"
+    "cmddeny all [<subnet>]\0Deny access to subnet and all children\0"
+    "\0\0"
+    "Real-time clock:\0\0"
+    "rtcdata\0Print current RTC performance parameters\0"
+    "trimrtc\0Correct RTC relative to system clock\0"
+    "writertc\0Save RTC performance parameters to file\0"
+    "\0\0"
+    "Other daemon commands:\0\0"
+    "cyclelogs\0Close and re-open log files\0"
+    "dump\0Dump all measurements to save files\0"
+    "\0\0"
+    "Client commands:\0\0"
+    "dns -n|+n\0Disable/enable resolving IP addresses to hostnames\0"
+    "dns -4|-6|-46\0Resolve hostnames only to IPv4/IPv6/both addresses\0"
+    "timeout <milliseconds>\0Set initial response timeout\0"
+    "retries <retries>\0Set maximum number of retries\0"
+    "exit|quit\0Leave the program\0"
+    "help\0Generate this help\0"
+    "\0";
+
+  /* Indent the second column */
+  for (s = cols, line = 0; s < cols + sizeof (cols); s += len + 1, line++) {
+    len = strlen(s);
+    printf(line % 2 == 0 ? (len >= 28 ? "%s\n%28s" : "%-28s%s") : "%s%s\n",
+           s, "");
+  }
 }
 
 /* ================================================== */
 
 static unsigned long sequence = 0;
-static unsigned long utoken = 0;
-static unsigned long token = 0;
-
 static int max_retries = 2;
 static int initial_timeout = 1000;
 static int proto_version = PROTO_VERSION_NUMBER;
@@ -1219,19 +1280,16 @@ static int proto_version = PROTO_VERSION_NUMBER;
    successful or not.*/
 
 static int
-submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
+submit_request(CMD_Request *request, CMD_Reply *reply)
 {
   unsigned long tx_sequence;
-  socklen_t where_from_len;
-  union sockaddr_in46 where_from;
-  int bad_length, bad_sender, bad_sequence, bad_header;
+  int bad_length, bad_sequence, bad_header;
   int select_status;
-  int recvfrom_status;
+  int recv_status;
   int read_length;
   int expected_length;
   int command_length;
   int padding_length;
-  int auth_length;
   struct timeval tv;
   int timeout;
   int n_attempts;
@@ -1243,8 +1301,8 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
   tx_sequence = sequence++;
   request->sequence = htonl(tx_sequence);
   request->attempt = 0;
-  request->utoken = htonl(utoken);
-  request->token = htonl(token);
+  request->pad1 = 0;
+  request->pad2 = 0;
 
   timeout = initial_timeout;
 
@@ -1256,42 +1314,21 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
     padding_length = PKL_CommandPaddingLength(request);
     assert(command_length > 0 && command_length > padding_length);
 
-    /* Zero the padding to avoid sending uninitialized data. This needs to be
-       done before generating auth data as it includes the padding. */
+    /* Zero the padding to avoid sending uninitialized data */
     memset(((char *)request) + command_length - padding_length, 0, padding_length);
 
-    /* Decide whether to authenticate */
-    if (password) {
-      if (!utoken || (request->command == htons(REQ_LOGON))) {
-        /* Otherwise, the daemon won't bother authenticating our
-           packet and we won't get a token back */
-        request->utoken = htonl(SPECIAL_UTOKEN);
-      }
-      auth_length = generate_auth(request);
-    } else {
-      auth_length = 0;
-    }
-
-    /* add empty MD5 auth so older servers will not drop the request
-       due to bad length */
-    if (!auth_length) {
-      memset(((char *)request) + command_length, 0, 16);
-      auth_length = 16;
-    }
-
-#if 0
-    printf("Sent command length=%d bytes auth length=%d bytes\n", command_length, auth_length);
-#endif
-
-    if (sendto(sock_fd, (void *) request, command_length + auth_length, 0,
-               &his_addr.u, his_addr_len) < 0) {
-
-
-#if 0
-      perror("Could not send packet");
-#endif
+    if (sock_fd < 0) {
+      DEBUG_LOG(LOGF_Client, "No socket to send request");
       return 0;
     }
+
+    if (send(sock_fd, (void *)request, command_length, 0) < 0) {
+      DEBUG_LOG(LOGF_Client, "Could not send %d bytes : %s",
+                command_length, strerror(errno));
+      return 0;
+    }
+
+    DEBUG_LOG(LOGF_Client, "Sent %d bytes", command_length);
 
     /* Increment this for next time */
     ++ request->attempt;
@@ -1306,12 +1343,13 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
 
     FD_SET(sock_fd, &rdfd);
 
+    if (quit)
+      return 0;
+
     select_status = select(sock_fd + 1, &rdfd, &wrfd, &exfd, &tv);
 
     if (select_status < 0) {
-#if 0
-      perror("Select returned negative status");
-#endif
+      DEBUG_LOG(LOGF_Client, "select failed : %s", strerror(errno));
     } else if (select_status == 0) {
       /* Timeout must have elapsed, try a resend? */
       n_attempts ++;
@@ -1323,36 +1361,21 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
       continue;
       
     } else {
+      recv_status = recv(sock_fd, (void *)reply, sizeof(CMD_Reply), 0);
       
-      where_from_len = sizeof(where_from);
-      recvfrom_status = recvfrom(sock_fd, (void *) reply, sizeof(CMD_Reply), 0,
-                                 &where_from.u, &where_from_len);
-      
-
-#if 0
-      printf("Received packet, status=%d\n", recvfrom_status);
-#endif
-
-      if (recvfrom_status < 0) {
+      if (recv_status < 0) {
         /* If we get connrefused here, it suggests the sendto is
-           going to a dead port - but only if the daemon machine is
-           running Linux (Solaris doesn't return anything) */
-
-#ifdef IP_RECVERR
-        /* Fetch the message from the error queue */
-        if (recv_errqueue &&
-            recvfrom(sock_fd, (void *)reply, sizeof(CMD_Reply), MSG_ERRQUEUE,
-                     &where_from.u, &where_from_len) < 0)
-          ;
-#endif
+           going to a dead port */
+        DEBUG_LOG(LOGF_Client, "Could not receive : %s", strerror(errno));
 
         n_attempts++;
         if (n_attempts > max_retries) {
           return 0;
         }
       } else {
+        DEBUG_LOG(LOGF_Client, "Received %d bytes", recv_status);
         
-        read_length = recvfrom_status;
+        read_length = recv_status;
         if (read_length >= offsetof(CMD_Reply, data)) {
           expected_length = PKL_ReplyLength(reply);
         } else {
@@ -1361,17 +1384,6 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
 
         bad_length = (read_length < expected_length ||
                       expected_length < offsetof(CMD_Reply, data));
-        bad_sender = (where_from.u.sa_family != his_addr.u.sa_family ||
-                      (where_from.u.sa_family == AF_INET &&
-                       (where_from.in4.sin_addr.s_addr != his_addr.in4.sin_addr.s_addr ||
-                        where_from.in4.sin_port != his_addr.in4.sin_port)) ||
-#ifdef FEAT_IPV6
-                      (where_from.u.sa_family == AF_INET6 &&
-                       (memcmp(where_from.in6.sin6_addr.s6_addr, his_addr.in6.sin6_addr.s6_addr,
-                               sizeof (where_from.in6.sin6_addr.s6_addr)) != 0 ||
-                        where_from.in6.sin6_port != his_addr.in6.sin6_port)) ||
-#endif
-                      0);
         
         if (!bad_length) {
           bad_sequence = (ntohl(reply->sequence) != tx_sequence);
@@ -1379,7 +1391,7 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
           bad_sequence = 0;
         }
         
-        if (bad_length || bad_sender || bad_sequence) {
+        if (bad_length || bad_sequence) {
           n_attempts++;
           if (n_attempts > max_retries) {
             return 0;
@@ -1417,38 +1429,10 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
 #endif
 
         /* Good packet received, print out results */
-#if 0
-        printf("Reply cmd=%d reply=%d stat=%d seq=%d utok=%08lx tok=%d\n",
-               ntohs(reply->command), ntohs(reply->reply),
-               ntohs(reply->status),
-               ntohl(reply->sequence),
-               ntohl(reply->utoken),
-               ntohl(reply->token));
-#endif
-
-        if (password) {
-          *reply_auth_ok = check_reply_auth(reply, read_length);
-        } else {
-          /* Assume in this case that the reply is always considered
-             to be authentic */
-          *reply_auth_ok = 1;
-        }
-            
-        utoken = ntohl(reply->utoken);
-
-        if (*reply_auth_ok) {
-          /* If we're in authenticated mode, only acquire the utoken
-             and new token values if the reply authenticated properly.
-             This protects against forged packets with bogus tokens
-             in.  We won't accept a repeat of an old message with a
-             stale token in it, due to bad_sequence processing
-             earlier. */
-          utoken = ntohl(reply->utoken);
-          token = ntohl(reply->token);
-        }
-        
+        DEBUG_LOG(LOGF_Client, "Reply cmd=%d reply=%d stat=%d seq=%d",
+                  ntohs(reply->command), ntohs(reply->reply), ntohs(reply->status),
+                  ntohl(reply->sequence));
         break;
-
       }
     }
   } while (1);
@@ -1461,10 +1445,12 @@ submit_request(CMD_Request *request, CMD_Reply *reply, int *reply_auth_ok)
 static int
 request_reply(CMD_Request *request, CMD_Reply *reply, int requested_reply, int verbose)
 {
-  int reply_auth_ok;
   int status;
 
-  if (!submit_request(request, reply, &reply_auth_ok)) {
+  while (!submit_request(request, reply)) {
+    /* Try connecting to other addresses before giving up */
+    if (open_io())
+      continue;
     printf("506 Cannot talk to daemon\n");
     return 0;
   }
@@ -1536,11 +1522,7 @@ request_reply(CMD_Request *request, CMD_Reply *reply, int requested_reply, int v
       default:
         printf("520 Got unexpected error from daemon");
     }
-    if (reply_auth_ok) {
-      printf("\n");
-    } else {
-      printf(" --- Reply not authenticated\n");
-    }
+    printf("\n");
   }
   
   if (status != STT_SUCCESS &&
@@ -2012,7 +1994,7 @@ process_cmd_smoothtime(CMD_Request *msg, const char *line)
   } else if (!strcmp(line, "activate")) {
     msg->data.smoothtime.option = htonl(REQ_SMOOTHTIME_ACTIVATE);
   } else {
-    fprintf(stderr, "Invalid syntax for smoothtime command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for smoothtime command");
     return 0;
   }
 
@@ -2190,9 +2172,8 @@ process_cmd_manual_delete(CMD_Request *msg, const char *line)
   int index;
 
   if (sscanf(line, "%d", &index) != 1) {
-    fprintf(stderr, "Bad syntax for manual delete command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Bad syntax for manual delete command");
     return 0;
-
   }
 
   msg->command = htons(REQ_MANUAL_DELETE);
@@ -2254,7 +2235,7 @@ process_cmd_makestep(CMD_Request *msg, char *line)
 
   if (*line) {
     if (sscanf(line, "%lf %d", &threshold, &limit) != 2) {
-      fprintf(stderr, "Bad syntax for makestep command\n");
+      LOG(LOGS_ERR, LOGF_Client, "Bad syntax for makestep command");
       return 0;
     }
     msg->command = htons(REQ_MODIFY_MAKESTEP);
@@ -2319,20 +2300,34 @@ process_cmd_reselect(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
+static void
+process_cmd_refresh(CMD_Request *msg, char *line)
+{
+  msg->command = htons(REQ_REFRESH);
+}
+
+/* ================================================== */
+
 static int
 process_cmd_waitsync(char *line)
 {
   CMD_Request request;
   CMD_Reply reply;
   uint32_t ref_id, a, b, c, d;
-  double correction, skew_ppm, max_correction, max_skew_ppm;
+  double correction, skew_ppm, max_correction, max_skew_ppm, interval;
   int ret = 0, max_tries, i;
+  struct timeval timeout;
 
   max_tries = 0;
   max_correction = 0.0;
   max_skew_ppm = 0.0;
+  interval = 10.0;
 
-  sscanf(line, "%d %lf %lf", &max_tries, &max_correction, &max_skew_ppm);
+  sscanf(line, "%d %lf %lf %lf", &max_tries, &max_correction, &max_skew_ppm, &interval);
+
+  /* Don't allow shorter interval than 0.1 seconds */
+  if (interval < 0.1)
+    interval = 0.1;
 
   request.command = htons(REQ_TRACKING);
 
@@ -2358,8 +2353,10 @@ process_cmd_waitsync(char *line)
       }
     }
 
-    if (!ret && (!max_tries || i < max_tries)) {
-      sleep(10);
+    if (!ret && (!max_tries || i < max_tries) && !quit) {
+      UTI_DoubleToTimeval(interval, &timeout);
+      if (select(0, NULL, NULL, NULL, &timeout))
+        break;
     } else {
       break;
     }
@@ -2383,36 +2380,9 @@ process_cmd_dns(const char *line)
   } else if (!strcmp(line, "+n")) {
     no_dns = 0;
   } else {
-    fprintf(stderr, "Unrecognized dns command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Unrecognized dns command");
     return 0;
   }
-  return 1;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_authhash(const char *line)
-{
-  const char *hash_name;
-  int new_hash_id;
-
-  assert(auth_hash_id >= 0);
-  hash_name = line;
-
-  if (!*hash_name) {
-    fprintf(stderr, "Could not parse hash name\n");
-    return 0;
-  }
-
-  new_hash_id = HSH_GetHashId(hash_name);
-  if (new_hash_id < 0) {
-    fprintf(stderr, "Unknown hash name: %s\n", hash_name);
-    return 0;
-  }
-
-  auth_hash_id = new_hash_id;
-
   return 1;
 }
 
@@ -2425,7 +2395,7 @@ process_cmd_timeout(const char *line)
 
   timeout = atoi(line);
   if (timeout < 100) {
-    fprintf(stderr, "Timeout %d is too short\n", timeout);
+    LOG(LOGS_ERR, LOGF_Client, "Timeout %d is too short", timeout);
     return 0;
   }
   initial_timeout = timeout;
@@ -2441,7 +2411,7 @@ process_cmd_retries(const char *line)
 
   retries = atoi(line);
   if (retries < 0) {
-    fprintf(stderr, "Invalid maximum number of retries\n");
+    LOG(LOGS_ERR, LOGF_Client, "Invalid maximum number of retries");
     return 0;
   }
   max_retries = retries;
@@ -2451,7 +2421,7 @@ process_cmd_retries(const char *line)
 /* ================================================== */
 
 static int
-process_line(char *line, int *quit)
+process_line(char *line)
 {
   char *command;
   int do_normal_submit;
@@ -2459,7 +2429,6 @@ process_line(char *line, int *quit)
   CMD_Request tx_message;
   CMD_Reply rx_message;
 
-  *quit = 0;
   ret = 0;
 
   do_normal_submit = 1;
@@ -2490,9 +2459,6 @@ process_line(char *line, int *quit)
     } else {
       do_normal_submit = process_cmd_allow(&tx_message, line);
     }
-  } else if (!strcmp(command, "authhash")) {
-    ret = process_cmd_authhash(line);
-    do_normal_submit = 0;
   } else if (!strcmp(command, "burst")) {
     do_normal_submit = process_cmd_burst(&tx_message, line);
   } else if (!strcmp(command, "clients")) {
@@ -2534,7 +2500,7 @@ process_line(char *line, int *quit)
     process_cmd_dump(&tx_message, line);
   } else if (!strcmp(command, "exit")) {
     do_normal_submit = 0;
-    *quit = 1;
+    quit = 1;
     ret = 1;
   } else if (!strcmp(command, "help")) {
     do_normal_submit = 0;
@@ -2571,14 +2537,14 @@ process_line(char *line, int *quit)
     do_normal_submit = process_cmd_offline(&tx_message, line);
   } else if (!strcmp(command, "online")) {
     do_normal_submit = process_cmd_online(&tx_message, line);
-  } else if (!strcmp(command, "password")) {
-    do_normal_submit = process_cmd_password(&tx_message, line);
   } else if (!strcmp(command, "polltarget")) {
     do_normal_submit = process_cmd_polltarget(&tx_message, line);
   } else if (!strcmp(command, "quit")) {
     do_normal_submit = 0;
-    *quit = 1;
+    quit = 1;
     ret = 1;
+  } else if (!strcmp(command, "refresh")) {
+    process_cmd_refresh(&tx_message, line);
   } else if (!strcmp(command, "rekey")) {
     process_cmd_rekey(&tx_message, line);
   } else if (!strcmp(command, "reselect")) {
@@ -2618,8 +2584,14 @@ process_line(char *line, int *quit)
     do_normal_submit = 0;
   } else if (!strcmp(command, "writertc")) {
     process_cmd_writertc(&tx_message, line);
+  } else if (!strcmp(command, "authhash") ||
+             !strcmp(command, "password")) {
+    /* Warn, but don't return error to not break scripts */
+    LOG(LOGS_WARN, LOGF_Client, "Authentication is no longer supported");
+    do_normal_submit = 0;
+    ret = 1;
   } else {
-    fprintf(stderr, "Unrecognized command\n");
+    LOG(LOGS_ERR, LOGF_Client, "Unrecognized command");
     do_normal_submit = 0;
   }
     
@@ -2634,80 +2606,9 @@ process_line(char *line, int *quit)
 /* ================================================== */
 
 static int
-authenticate_from_config(const char *filename)
-{
-  CMD_Request tx_message;
-  CMD_Reply rx_message;
-  char line[2048], keyfile[2048], *command, *arg, *password;
-  const char *hashname;
-  uint32_t key_id = 0, key_id2;
-  int key_id_valid = 1, ret;
-  FILE *in;
-
-  in = fopen(filename, "r");
-  if (!in) {
-    fprintf(stderr, "Could not open file %s : %s\n", filename, strerror(errno));
-    return 0;
-  }
-
-  *keyfile = '\0';
-  while (fgets(line, sizeof (line), in)) {
-    CPS_NormalizeLine(line);
-    command = line;
-    arg = CPS_SplitWord(line);
-    if (!strcasecmp(command, "keyfile")) {
-      snprintf(keyfile, sizeof (keyfile), "%s", arg);
-    } else if (!strcasecmp(command, "commandkey")) {
-      key_id_valid = sscanf(arg, "%"SCNu32, &key_id) == 1;
-    }
-  }
-  fclose(in);
-
-  if (!*keyfile || !key_id_valid) {
-    fprintf(stderr, "Could not read keyfile or commandkey in file %s\n", filename);
-    return 0;
-  }
-
-  in = fopen(keyfile, "r");
-  if (!in) {
-    fprintf(stderr, "Could not open keyfile %s : %s\n", keyfile, strerror(errno));
-    return 0;
-  }
-
-  key_id2 = key_id + 1;
-  while (fgets(line, sizeof (line), in)) {
-    CPS_NormalizeLine(line);
-    if (!*line || !CPS_ParseKey(line, &key_id2, &hashname, &password))
-      continue;
-    if (key_id == key_id2)
-      break;
-  }
-  fclose(in);
-
-  if (key_id == key_id2) {
-    if (process_cmd_authhash(hashname) &&
-        process_cmd_password(&tx_message, password)) {
-      ret = request_reply(&tx_message, &rx_message, RPY_NULL, 1);
-    } else {
-      ret = 0;
-    }
-  } else {
-    fprintf(stderr, "Could not find key %"PRIu32" in keyfile %s\n", key_id, keyfile);
-    ret = 0;
-  }
-
-  /* Erase password from stack */
-  memset(line, 0, sizeof (line));
-
-  return ret;
-}
-
-/* ================================================== */
-
-static int
 process_args(int argc, char **argv, int multi)
 {
-  int total_length, i, ret, quit;
+  int total_length, i, ret;
   char *line;
 
   total_length = 0;
@@ -2715,7 +2616,7 @@ process_args(int argc, char **argv, int multi)
     total_length += strlen(argv[i]) + 1;
   }
 
-  line = (char *) malloc((2 + total_length) * sizeof(char));
+  line = (char *) Malloc((2 + total_length) * sizeof(char));
 
   for (i = 0; i < argc; i++) {
     line[0] = '\0';
@@ -2729,14 +2630,22 @@ process_args(int argc, char **argv, int multi)
       }
     }
 
-    ret = process_line(line, &quit);
+    ret = process_line(line);
     if (!ret || quit)
       break;
   }
 
-  free(line);
+  Free(line);
 
   return ret;
+}
+
+/* ================================================== */
+
+static void
+signal_handler(int signum)
+{
+  quit = 1;
 }
 
 /* ================================================== */
@@ -2759,9 +2668,8 @@ main(int argc, char **argv)
 {
   char *line;
   const char *progname = argv[0];
-  const char *hostname = NULL;
-  const char *conf_file = DEFAULT_CONF_FILE;
-  int quit = 0, ret = 1, multi = 0, auto_auth = 0, family = IPADDR_UNSPEC;
+  const char *hostnames = NULL;
+  int ret = 1, multi = 0, family = IPADDR_UNSPEC;
   int port = DEFAULT_CANDM_PORT;
 
   /* Parse command line options */
@@ -2769,7 +2677,7 @@ main(int argc, char **argv)
     if (!strcmp(*argv, "-h")) {
       ++argv, --argc;
       if (*argv) {
-        hostname = *argv;
+        hostnames = *argv;
       }
     } else if (!strcmp(*argv, "-p")) {
       ++argv, --argc;
@@ -2778,11 +2686,11 @@ main(int argc, char **argv)
       }
     } else if (!strcmp(*argv, "-f")) {
       ++argv, --argc;
-      if (*argv) {
-        conf_file = *argv;
-      }
+      /* For compatibility */
     } else if (!strcmp(*argv, "-a")) {
-      auto_auth = 1;
+      /* For compatibility */
+    } else if (!strcmp(*argv, "-d")) {
+      log_debug_enabled = 1;
     } else if (!strcmp(*argv, "-m")) {
       multi = 1;
     } else if (!strcmp(*argv, "-n")) {
@@ -2795,8 +2703,9 @@ main(int argc, char **argv)
       printf("chronyc (chrony) version %s (%s)\n", CHRONY_VERSION, CHRONYC_FEATURES);
       return 0;
     } else if (!strncmp(*argv, "-", 1)) {
-      fprintf(stderr, "Usage: %s [-h HOST] [-p PORT] [-n] [-4|-6] [-a] [-f FILE] [-m] [COMMAND]\n",
-              progname);
+      LOG(LOGS_ERR, LOGF_Client,
+          "Usage: %s [-h HOST] [-p PORT] [-n] [-d] [-4|-6] [-m] [COMMAND]",
+          progname);
       return 1;
     } else {
       break; /* And process remainder of line as a command */
@@ -2810,38 +2719,27 @@ main(int argc, char **argv)
   if (on_terminal && (argc == 0)) {
     display_gpl();
   }
-
-  /* MD5 is the default authentication hash */
-  auth_hash_id = HSH_GetHashId("MD5");
-  if (auth_hash_id < 0) {
-    fprintf(stderr, "Could not initialize MD5\n");
-    return 1;
-  }
   
   DNS_SetAddressFamily(family);
 
-  if (!hostname) {
-    hostname = family == IPADDR_INET6 ? "::1" : "127.0.0.1";
-#ifdef FEAT_ASYNCDNS
-    initial_timeout /= 10;
-#endif
+  if (!hostnames) {
+    hostnames = DEFAULT_COMMAND_SOCKET",127.0.0.1,::1";
   }
 
-  open_io(hostname, port);
+  UTI_SetQuitSignalsHandler(signal_handler);
 
-  if (auto_auth) {
-    ret = authenticate_from_config(conf_file);
-  }
+  sockaddrs = get_sockaddrs(hostnames, port);
 
-  if (!ret) {
-    ;
-  } else if (argc > 0) {
+  if (!open_io())
+    LOG_FATAL(LOGF_Client, "Could not open connection to daemon");
+
+  if (argc > 0) {
     ret = process_args(argc, argv, multi);
   } else {
     do {
       line = read_line();
-      if (line) {
-        ret = process_line(line, &quit);
+      if (line && !quit) {
+        ret = process_line(line);
       }else {
 	/* supply the final '\n' when user exits via ^D */
         if( on_terminal ) printf("\n");
@@ -2851,7 +2749,7 @@ main(int argc, char **argv)
 
   close_io();
 
-  free(password);
+  ARR_DestroyInstance(sockaddrs);
 
   return !ret;
 }
