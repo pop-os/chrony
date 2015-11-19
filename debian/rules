@@ -11,7 +11,8 @@ override_dh_auto_configure:
 	dh_auto_configure --  --mandir=/usr/share/man \
 		--sysconfdir=/etc/chrony \
 		--without-readline \
-		--with-user=_chrony
+		--with-user=_chrony \
+		--enable-scfilter
 
 override_dh_auto_build:
 	dh_auto_build
