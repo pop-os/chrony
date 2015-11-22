@@ -9,7 +9,7 @@ Build-Depends: debhelper (>= 9),
  libedit-dev,
  libnss3-dev,
  libtomcrypt-dev,
- libcap-dev,
+ libcap-dev [linux-any],
  pps-tools (>= 0.20120406+g0deb9c7e-2),
  libseccomp-dev [amd64 arm64 armel armhf i386 mips mipsel mips64el x32],
  pkg-config
