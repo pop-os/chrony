@@ -8,6 +8,6 @@
 	sharedscripts
 	create 644
 	postrotate
-		/usr/bin/chronyc -a cyclelogs > /dev/null 2>&1 || true
+		/usr/bin/chronyc cyclelogs > /dev/null 2>&1 || true
 	endscript
 }
