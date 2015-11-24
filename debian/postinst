@@ -33,16 +33,6 @@ case "$1" in
             fi
         fi
 
-        if [ -z "$2" ]
-        then
-            # As this is a new install, generate a key.
-            # Remove any keyfile left by a failed install.
-            rm -rf /etc/chrony/chrony.keys
-            KEYFILE=`tempfile -m 640 -n /etc/chrony/chrony.keys`
-            PASSWORD=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
-            echo "1 $PASSWORD" > $KEYFILE
-        fi
-
         if `which ucf >/dev/null`
         then
           ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
