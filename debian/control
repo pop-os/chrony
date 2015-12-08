@@ -23,7 +23,7 @@ Depends: ${misc:Depends},
  ${shlibs:Depends},
  ucf, timelimit,
  install-info,
- net-tools,
+ iproute2 [linux-any],
  lsb-base,
  adduser,
  util-linux (>= 2.20.1-5)
