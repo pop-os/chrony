@@ -28,12 +28,12 @@ test -f $DAEMON || exit 0
 
 putonline ()
 { # Do we have a default route?  If so put chronyd online.
-    if timelimit -q -s9 -t5 -- ip r 2>/dev/null | grep -q '^default'; then
+    if ip r 2>/dev/null | grep -q '^default'; then
 	sleep 2  # Chronyd can take a while to start.
 	KEY=$(awk '$1 ~ /^commandkey$/ { print $2; exit}' /etc/chrony/chrony.conf)
 	PASSWORD=`awk '$1 ~ /^'$KEY'$/ {print $2; exit}' /etc/chrony/chrony.keys`
 	# Make sure chronyc can't hang us up.
-	if timelimit -q -s9 -t5 -- /usr/bin/chronyc > /dev/null << EOF
+	if /usr/bin/chronyc > /dev/null << EOF
 password $PASSWORD
 online
 burst 5/10
