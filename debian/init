@@ -19,7 +19,6 @@
 
 PATH=/bin:/usr/bin:/sbin:/usr/sbin
 DAEMON=/usr/sbin/chronyd
-FLAGS="defaults"
 NAME="chronyd"
 DESC="time daemon"
 
