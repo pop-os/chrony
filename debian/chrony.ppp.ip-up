@@ -6,6 +6,6 @@
 # Modified by Vincent Blut <vincent.debian@free.fr>
 
 /bin/pidof chronyd > /dev/null || exit 0
-/usr/bin/chronyc online > /dev/null 2>&1
+/usr/bin/chronyc -m online 'burst 4/4' > /dev/null 2>&1
 touch /var/run/chrony-ppp-up
 exit 0
