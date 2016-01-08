@@ -14,7 +14,7 @@ Build-Depends: debhelper (>= 9),
  libseccomp-dev [amd64 arm64 armel armhf i386 mips mipsel mips64el x32],
  pkg-config
 Homepage: http://chrony.tuxfamily.org
-Vcs-Git: git://anonscm.debian.org/collab-maint/chrony.git
+Vcs-Git: https://anonscm.debian.org/git/collab-maint/chrony.git
 Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/chrony.git
 
 Package: chrony
