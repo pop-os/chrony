@@ -1,0 +1,3 @@
+# The “chrony.keys” file must not be world readable as it could contain
+# symmetric keys used for NTP authentication.
+chrony: non-standard-file-perm etc/chrony/chrony.keys 0640 != 0644
