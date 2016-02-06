@@ -28,9 +28,9 @@ DESC="time daemon"
 . /lib/lsb/init-functions
 
 putonline ()
-{ # Do we have a default route?  If so put chronyd online.
+{   # Do we have a default route?  If so put chronyd online.
     if ip r 2>/dev/null | grep -q '^default'; then
-	    if chronyc -m online 'burst 4/4' > /dev/null 2>&1; then
+        if chronyc -m online 'burst 4/4' > /dev/null 2>&1; then
             touch /var/run/chrony-ppp-up
             echo "$NAME is running and online."
         else
