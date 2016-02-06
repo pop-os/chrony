@@ -4,6 +4,7 @@
 # Modified for Debian GNU/Linux by Ian Murdock <imurdock@gnu.ai.mit.edu>.
 # Modified for Debian by Christoph Lameter <clameter@debian.org>
 # Modified for chrony by John Hasler <jhasler@debian.org> 1998-2012
+# Modified for Debian by Vincent Blut <vincent.debian@free.fr>
 
 ### BEGIN INIT INFO
 # Provides:          chrony
@@ -29,21 +30,12 @@ DESC="time daemon"
 putonline ()
 { # Do we have a default route?  If so put chronyd online.
     if ip r 2>/dev/null | grep -q '^default'; then
-	KEY=$(awk '$1 ~ /^commandkey$/ { print $2; exit}' /etc/chrony/chrony.conf)
-	PASSWORD=`awk '$1 ~ /^'$KEY'$/ {print $2; exit}' /etc/chrony/chrony.keys`
-	# Make sure chronyc can't hang us up.
-	if chronyc > /dev/null << EOF
-password $PASSWORD
-online
-burst 5/10
-quit
-EOF
-        then
-                touch /var/run/chrony-ppp-up
-                echo "$NAME is running and online."
+	    if chronyc -m online 'burst 4/4' > /dev/null 2>&1; then
+            touch /var/run/chrony-ppp-up
+            echo "$NAME is running and online."
         else
-                rm -f /var/run/chrony-ppp-up
-                echo "$NAME is running and offline."    
+            rm -f /var/run/chrony-ppp-up
+            echo "$NAME is running and offline."
         fi
     else
         rm -f /var/run/chrony-ppp-up
