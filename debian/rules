@@ -12,7 +12,8 @@ override_dh_auto_configure:
 		--sysconfdir=/etc/chrony \
 		--without-readline \
 		--with-user=_chrony \
-		--enable-scfilter
+		--enable-scfilter \
+		--chronysockdir=/run/chrony
 
 override_dh_auto_build:
 	dh_auto_build
