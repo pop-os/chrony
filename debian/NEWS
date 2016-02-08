@@ -1,3 +1,15 @@
+chrony (2.2.1-1) unstable; urgency=medium
+
+  In chrony versions before 2.2, the 'chrony.keys' file contained a command
+  key used for run-time configuration via the 'chronyc' command-line tool.
+  Starting from this version, support for this authentication method has been
+  dropped in favor of a Unix domain socket accessible only *locally* by root or
+  the _chrony system user. Consequently, if you refuse to use the 'chrony.keys'
+  file template provided by the maintainers when upgrading, please don’t forget
+  to manually remove the obsolete command key (ID 1) in the aforementioned file.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 07 Feb 2016 17:02:30 +0100
+
 chrony (2.1.1-1) unstable; urgency=medium
 
   From this version, 'chronyd' will strictly act as an NTP client by default. If
