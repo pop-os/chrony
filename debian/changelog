@@ -1,3 +1,87 @@
+chrony (2.2.1-1) unstable; urgency=medium
+
+  * Import upstream versions 2.2 and 2.2.1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+    - The 2.2.1 release version fixes CVE-2016-1567. (Closes: #812923)
+
+  * debian/chrony.conf:
+    - Drop the commandkey directive. It is obsolete since the introduction of a
+    Unix domain command socket in chrony 2.2.
+    - Fix keyfile directive commentary.
+
+  * debian/chrony.keys:
+    - New file template.
+
+  * debian/chrony.lintian-overrides:
+    - New file used to force lintian to stop complaining about the “chrony.keys”
+    file modes (0640).
+
+  * debian/chrony.ppp.ip-down:
+    - Drop obsolete authentication method to the chronyd daemon. This is now
+    handled by the usage of a Unix domain command socket.
+
+  * debian/chrony.ppp.ip-up:
+    - Drop obsolete authentication method to the chronyd daemon. This is now
+    handled by the usage of a Unix domain command socket.
+    - Reinstate the “burst” chronyc command.
+
+  * debian/control:
+    - Build depend on libseccomp-dev ≥ 2.2.3-3~. We need it to provide syscall
+    filtering.
+    - Fix a typo relative to the name of an architecture.
+    - Build depend on pkg-config.
+    - Restrict libcap-dev build dependency on Linux only.
+    - Depend on iproute2 instead of net-tools.
+    - Drop timelimit dependency.
+    - Update Vcs-Git to use HTTPS.
+    - Bump standard-version to 3.9.7 (no changes required).
+
+  * debian/copyright:
+    - Update copyright year for debian/*.
+
+  * debian/init:
+    - Make use of “ip r” instead of “netstat -rn”. (Closes: #818234)
+    - Delete unused “FLAGS” variable.
+    - Do not execute ip and chronyc through timelimit.
+    - Don’t call chronyc using its absolute path.
+    - Check if the value of the DAEMON variable is executable.
+    - Drop the two seconds delay as it should be unnecessary.
+    - Drop obsolete authentication method from the putonline() function.
+    - Fix indentation issue in the putonline() function.
+
+  * debian/logrotate:
+    - Do not pass the “-a” option to chronyc, it’s no longer necessary.
+
+  * debian/NEWS:
+    - Add a comment about the command key suppression from the “chrony.keys”
+    file.
+
+  * debian/patches/:
+    - Drop 01_do-not-install-copying-file.patch, not needed anymore.
+      ↳ Remove reference to that patch from the series file.
+
+  * debian/postinst:
+    - Do not create an ID/key pair for command authentication. Configuration
+    and monitoring via chronyc is now done using Unix domain socket accessible
+    by root or by the system user to which chronyd will drop root privileges,
+    i.e. _chrony.
+
+  * debian/postrm:
+    - Remove /var/lib/chrony content only on purge. (Closes: #568492)
+
+  * debian/README.Debian:
+    - Drop obsolete statement.
+
+  * debian/rules:
+    - Build with --enable-scfilter.
+    - Install the “chrony.keys” file in /etc/chrony/ with 0640 modes.
+    - Override dh_fixperms to prevent it from modifying modes of the
+    “chrony.keys” file. By default, dh_fixperms tries to set the default modes
+    (0644).
+    - Move the “chronyd.sock” file from /var/run/chrony to /run/chrony.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 19 Mar 2016 14:42:23 +0100
+
 chrony (2.1.1-1) unstable; urgency=medium
 
   * Import upstream version 2.0 and 2.1.1:
