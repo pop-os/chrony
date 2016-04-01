@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2015
+ * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -50,15 +50,12 @@ static int parse_int(char *line, int *result);
 static int parse_double(char *line, double *result);
 static int parse_null(char *line);
 
-static void parse_allow(char *);
+static void parse_allow_deny(char *line, ARR_Instance restrictions, int allow);
 static void parse_bindacqaddress(char *);
 static void parse_bindaddress(char *);
 static void parse_bindcmdaddress(char *);
 static void parse_broadcast(char *);
 static void parse_clientloglimit(char *);
-static void parse_cmdallow(char *);
-static void parse_cmddeny(char *);
-static void parse_deny(char *);
 static void parse_fallbackdrift(char *);
 static void parse_include(char *);
 static void parse_initstepslew(char *);
@@ -68,11 +65,11 @@ static void parse_log(char *);
 static void parse_mailonchange(char *);
 static void parse_makestep(char *);
 static void parse_maxchange(char *);
-static void parse_peer(char *);
-static void parse_pool(char *);
+static void parse_ratelimit(char *line, int *enabled, int *interval,
+                            int *burst, int *leak);
 static void parse_refclock(char *);
-static void parse_server(char *);
 static void parse_smoothtime(char *);
+static void parse_source(char *line, NTP_Source_Type type, int pool);
 static void parse_tempcomp(char *);
 
 /* ================================================== */
@@ -149,10 +146,8 @@ static double max_offset;
 static int max_samples = 0; /* no limit */
 static int min_samples = 0;
 
-/* Flag set if we should log to syslog when a time adjustment
-   exceeding the threshold is initiated */
-static int do_log_change = 0;
-static double log_change_threshold = 0.0;
+/* Threshold for a time adjustment to be logged to syslog */
+static double log_change_threshold = 1.0;
 
 static char *mail_user_on_change = NULL;
 static double mail_change_threshold = 0.0;
@@ -186,6 +181,16 @@ static char *bind_cmd_path;
 /* Filename to use for storing pid of running chronyd, to prevent multiple
  * chronyds being started. */
 static char *pidfile;
+
+/* Rate limiting parameters */
+static int ntp_ratelimit_enabled = 0;
+static int ntp_ratelimit_interval = 3;
+static int ntp_ratelimit_burst = 8;
+static int ntp_ratelimit_leak = 3;
+static int cmd_ratelimit_enabled = 0;
+static int cmd_ratelimit_interval = 1;
+static int cmd_ratelimit_burst = 16;
+static int cmd_ratelimit_leak = 2;
 
 /* Smoothing constants */
 static double smooth_max_freq = 0.0; /* in ppm */
@@ -414,7 +419,7 @@ CNF_ParseLine(const char *filename, int number, char *line)
   if (!strcasecmp(command, "acquisitionport")) {
     parse_int(p, &acquisition_port);
   } else if (!strcasecmp(command, "allow")) {
-    parse_allow(p);
+    parse_allow_deny(p, ntp_restrictions, 1);
   } else if (!strcasecmp(command, "bindacqaddress")) {
     parse_bindacqaddress(p);
   } else if (!strcasecmp(command, "bindaddress")) {
@@ -426,17 +431,20 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "clientloglimit")) {
     parse_clientloglimit(p);
   } else if (!strcasecmp(command, "cmdallow")) {
-    parse_cmdallow(p);
+    parse_allow_deny(p, cmd_restrictions, 1);
   } else if (!strcasecmp(command, "cmddeny")) {
-    parse_cmddeny(p);
+    parse_allow_deny(p, cmd_restrictions, 0);
   } else if (!strcasecmp(command, "cmdport")) {
     parse_int(p, &cmd_port);
+  } else if (!strcasecmp(command, "cmdratelimit")) {
+    parse_ratelimit(p, &cmd_ratelimit_enabled, &cmd_ratelimit_interval,
+                    &cmd_ratelimit_burst, &cmd_ratelimit_leak);
   } else if (!strcasecmp(command, "combinelimit")) {
     parse_double(p, &combine_limit);
   } else if (!strcasecmp(command, "corrtimeratio")) {
     parse_double(p, &correction_time_ratio);
   } else if (!strcasecmp(command, "deny")) {
-    parse_deny(p);
+    parse_allow_deny(p, ntp_restrictions, 0);
   } else if (!strcasecmp(command, "driftfile")) {
     parse_string(p, &drift_file);
   } else if (!strcasecmp(command, "dumpdir")) {
@@ -466,7 +474,7 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "logbanner")) {
     parse_int(p, &log_banner);
   } else if (!strcasecmp(command, "logchange")) {
-    do_log_change = parse_double(p, &log_change_threshold);
+    parse_double(p, &log_change_threshold);
   } else if (!strcasecmp(command, "logdir")) {
     parse_string(p, &logdir);
   } else if (!strcasecmp(command, "mailonchange")) {
@@ -494,13 +502,16 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "noclientlog")) {
     no_client_log = parse_null(p);
   } else if (!strcasecmp(command, "peer")) {
-    parse_peer(p);
+    parse_source(p, NTP_PEER, 0);
   } else if (!strcasecmp(command, "pidfile")) {
     parse_string(p, &pidfile);
   } else if (!strcasecmp(command, "pool")) {
-    parse_pool(p);
+    parse_source(p, NTP_SERVER, 1);
   } else if (!strcasecmp(command, "port")) {
     parse_int(p, &ntp_port);
+  } else if (!strcasecmp(command, "ratelimit")) {
+    parse_ratelimit(p, &ntp_ratelimit_enabled, &ntp_ratelimit_interval,
+                    &ntp_ratelimit_burst, &ntp_ratelimit_leak);
   } else if (!strcasecmp(command, "refclock")) {
     parse_refclock(p);
   } else if (!strcasecmp(command, "reselectdist")) {
@@ -518,7 +529,7 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "sched_priority")) {
     parse_int(p, &sched_priority);
   } else if (!strcasecmp(command, "server")) {
-    parse_server(p);
+    parse_source(p, NTP_SERVER, 0);
   } else if (!strcasecmp(command, "smoothtime")) {
     parse_smoothtime(p);
   } else if (!strcasecmp(command, "stratumweight")) {
@@ -609,25 +620,30 @@ parse_source(char *line, NTP_Source_Type type, int pool)
 /* ================================================== */
 
 static void
-parse_server(char *line)
+parse_ratelimit(char *line, int *enabled, int *interval, int *burst, int *leak)
 {
-  parse_source(line, NTP_SERVER, 0);
-}
+  int n, val;
+  char *opt;
 
-/* ================================================== */
+  *enabled = 1;
 
-static void
-parse_peer(char *line)
-{
-  parse_source(line, NTP_PEER, 0);
-}
-
-/* ================================================== */
-
-static void
-parse_pool(char *line)
-{
-  parse_source(line, NTP_SERVER, 1);
+  while (*line) {
+    opt = line;
+    line = CPS_SplitWord(line);
+    if (sscanf(line, "%d%n", &val, &n) != 1) {
+      command_parse_error();
+      return;
+    }
+    line += n;
+    if (!strcasecmp(opt, "interval"))
+      *interval = val;
+    else if (!strcasecmp(opt, "burst"))
+      *burst = val;
+    else if (!strcasecmp(opt, "leak"))
+      *leak = val;
+    else
+      command_parse_error();
+  }
 }
 
 /* ================================================== */
@@ -635,12 +651,11 @@ parse_pool(char *line)
 static void
 parse_refclock(char *line)
 {
-  int n, poll, dpoll, filter_length, pps_rate, min_samples, max_samples;
+  int n, poll, dpoll, filter_length, pps_rate, min_samples, max_samples, sel_options;
   uint32_t ref_id, lock_ref_id;
   double offset, delay, precision, max_dispersion;
   char *p, *cmd, *name, *param;
   unsigned char ref[5];
-  SRC_SelectOption sel_option;
   RefclockParameters *refclock;
 
   poll = 4;
@@ -649,13 +664,13 @@ parse_refclock(char *line)
   pps_rate = 0;
   min_samples = SRC_DEFAULT_MINSAMPLES;
   max_samples = SRC_DEFAULT_MAXSAMPLES;
+  sel_options = 0;
   offset = 0.0;
   delay = 1e-9;
   precision = 0.0;
   max_dispersion = 0.0;
   ref_id = 0;
   lock_ref_id = 0;
-  sel_option = SRC_SelectNormal;
 
   if (!*line) {
     command_parse_error();
@@ -682,11 +697,11 @@ parse_refclock(char *line)
     if (!strcasecmp(cmd, "refid")) {
       if (sscanf(line, "%4s%n", (char *)ref, &n) != 1)
         break;
-      ref_id = ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
+      ref_id = (uint32_t)ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
     } else if (!strcasecmp(cmd, "lock")) {
       if (sscanf(line, "%4s%n", (char *)ref, &n) != 1)
         break;
-      lock_ref_id = ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
+      lock_ref_id = (uint32_t)ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
     } else if (!strcasecmp(cmd, "poll")) {
       if (sscanf(line, "%d%n", &poll, &n) != 1) {
         break;
@@ -722,18 +737,25 @@ parse_refclock(char *line)
         break;
     } else if (!strcasecmp(cmd, "noselect")) {
       n = 0;
-      sel_option = SRC_SelectNoselect;
+      sel_options |= SRC_SELECT_NOSELECT;
     } else if (!strcasecmp(cmd, "prefer")) {
       n = 0;
-      sel_option = SRC_SelectPrefer;
+      sel_options |= SRC_SELECT_PREFER;
+    } else if (!strcasecmp(cmd, "trust")) {
+      n = 0;
+      sel_options |= SRC_SELECT_TRUST;
+    } else if (!strcasecmp(cmd, "require")) {
+      n = 0;
+      sel_options |= SRC_SELECT_REQUIRE;
     } else {
-      break;
+      other_parse_error("Invalid refclock option");
+      return;
     }
     line += n;
   }
 
   if (*line) {
-    other_parse_error("Invalid/unreadable refclock parameter");
+    command_parse_error();
     return;
   }
 
@@ -746,11 +768,11 @@ parse_refclock(char *line)
   refclock->pps_rate = pps_rate;
   refclock->min_samples = min_samples;
   refclock->max_samples = max_samples;
+  refclock->sel_options = sel_options;
   refclock->offset = offset;
   refclock->delay = delay;
   refclock->precision = precision;
   refclock->max_dispersion = max_dispersion;
-  refclock->sel_option = sel_option;
   refclock->ref_id = ref_id;
   refclock->lock_ref_id = lock_ref_id;
 }
@@ -860,11 +882,6 @@ parse_clientloglimit(char *line)
   check_number_of_args(line, 1);
   if (sscanf(line, "%lu", &client_log_limit) != 1) {
     command_parse_error();
-  }
-
-  if (client_log_limit == 0) {
-    /* unlimited */
-    client_log_limit = (unsigned long)-1;
   }
 }
 
@@ -1027,41 +1044,6 @@ parse_allow_deny(char *line, ARR_Instance restrictions, int allow)
   }
 }
   
-
-/* ================================================== */
-
-static void
-parse_allow(char *line)
-{
-  parse_allow_deny(line, ntp_restrictions, 1);
-}
-
-
-/* ================================================== */
-
-static void
-parse_deny(char *line)
-{
-  parse_allow_deny(line, ntp_restrictions, 0);
-}
-
-/* ================================================== */
-
-static void
-parse_cmdallow(char *line)
-{
-  parse_allow_deny(line, cmd_restrictions, 1);
-}
-
-
-/* ================================================== */
-
-static void
-parse_cmddeny(char *line)
-{
-  parse_allow_deny(line, cmd_restrictions, 0);
-}
-
 /* ================================================== */
 
 static void
@@ -1623,11 +1605,10 @@ CNF_GetMaxChange(int *delay, int *ignore, double *offset)
 
 /* ================================================== */
 
-void
-CNF_GetLogChange(int *enabled, double *threshold)
+double
+CNF_GetLogChange(void)
 {
-  *enabled = do_log_change;
-  *threshold = log_change_threshold;
+  return log_change_threshold;
 }
 
 /* ================================================== */
@@ -1785,6 +1766,26 @@ int
 CNF_GetLockMemory(void)
 {
   return lock_memory;
+}
+
+/* ================================================== */
+
+int CNF_GetNTPRateLimit(int *interval, int *burst, int *leak)
+{
+  *interval = ntp_ratelimit_interval;
+  *burst = ntp_ratelimit_burst;
+  *leak = ntp_ratelimit_leak;
+  return ntp_ratelimit_enabled;
+}
+
+/* ================================================== */
+
+int CNF_GetCommandRateLimit(int *interval, int *burst, int *leak)
+{
+  *interval = cmd_ratelimit_interval;
+  *burst = cmd_ratelimit_burst;
+  *leak = cmd_ratelimit_leak;
+  return cmd_ratelimit_enabled;
 }
 
 /* ================================================== */

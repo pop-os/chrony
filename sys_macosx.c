@@ -31,25 +31,18 @@
 
 #ifdef MACOSX
 
-#include <sys/sysctl.h>
-#include <sys/time.h>
-
-#include <nlist.h>
-#include <fcntl.h>
-#include <assert.h>
-#include <sys/time.h>
-
-#include <stdio.h>
-#include <signal.h>
+#include "sysincl.h"
 
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <pthread.h>
 
 #include "sys_macosx.h"
+#include "conf.h"
 #include "localp.h"
-#include "sched.h"
 #include "logging.h"
+#include "sched.h"
+#include "privops.h"
 #include "util.h"
 
 /* ================================================== */
@@ -96,6 +89,11 @@ static struct timeval Tdrift;
 
 #define NANOS_PER_MSEC (1000000ULL)
 
+/* RTC synchronisation - once an hour */
+
+static struct timeval last_rtc_sync;
+#define RTC_SYNC_INTERVAL (60 * 60.0)
+
 /* ================================================== */
 
 static void
@@ -113,11 +111,12 @@ clock_initialise(void)
     LOG_FATAL(LOGF_SysMacOSX, "gettimeofday() failed");
   }
   Tdrift = T0;
+  last_rtc_sync = T0;
 
   newadj.tv_sec = 0;
   newadj.tv_usec = 0;
 
-  if (adjtime(&newadj, &oldadj) < 0) {
+  if (PRV_AdjustTime(&newadj, &oldadj) < 0) {
     LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
   }
 }
@@ -169,7 +168,7 @@ start_adjust(void)
   UTI_TimevalToDouble(&newadj, &adjustment_requested);
   rounding_error = adjust_required - adjustment_requested;
 
-  if (adjtime(&newadj, &oldadj) < 0) {
+  if (PRV_AdjustTime(&newadj, &oldadj) < 0) {
     LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
   }
 
@@ -193,7 +192,7 @@ stop_adjust(void)
   zeroadj.tv_sec = 0;
   zeroadj.tv_usec = 0;
 
-  if (adjtime(&zeroadj, &remadj) < 0) {
+  if (PRV_AdjustTime(&zeroadj, &remadj) < 0) {
     LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
   }
 
@@ -244,12 +243,12 @@ apply_step_offset(double offset)
 
   UTI_AddDoubleToTimeval(&old_time, -offset, &new_time);
 
-  if (settimeofday(&new_time, NULL) < 0) {
+  if (PRV_SetTime(&new_time, NULL) < 0) {
     DEBUG_LOG(LOGF_SysMacOSX, "settimeofday() failed");
     return 0;
   }
 
-  UTI_AddDoubleToTimeval(&T0, offset, &T1);
+  UTI_AddDoubleToTimeval(&T0, -offset, &T1);
   T0 = T1;
 
   start_adjust();
@@ -294,7 +293,6 @@ get_offset_correction(struct timeval *raw,
 
 /* Cancel systematic drift */
 
-static int drift_removal_running = 0;
 static SCH_TimeoutID drift_removal_id;
 
 /* ================================================== */
@@ -326,7 +324,8 @@ drift_removal_timeout(SCH_ArbitraryArgument not_used)
 
 /* ================================================== */
 
-/* use est_error to calculate the drift_removal_interval */
+/* use est_error to calculate the drift_removal_interval and
+   update the RTC */
 
 static void
 set_sync_status(int synchronised, double est_error, double max_error)
@@ -336,6 +335,20 @@ set_sync_status(int synchronised, double est_error, double max_error)
   if (!synchronised) {
     drift_removal_interval = MAX(drift_removal_interval, DRIFT_REMOVAL_INTERVAL);
   } else {
+    if (CNF_GetRtcSync()) {
+      struct timeval now;
+      double rtc_sync_elapsed;
+
+      SCH_GetLastEventTime(NULL, NULL, &now);
+      UTI_DiffTimevalsToDouble(&rtc_sync_elapsed, &now, &last_rtc_sync);
+      if (fabs(rtc_sync_elapsed) >= RTC_SYNC_INTERVAL) {
+        /* update the RTC by applying a step of 0.0 secs */
+        apply_step_offset(0.0);
+        last_rtc_sync = now;
+        DEBUG_LOG(LOGF_SysMacOSX, "rtc synchronised");
+      }
+    }
+
     interval = ERROR_WEIGHT * est_error / (fabs(current_freq) + FREQUENCY_RES);
     drift_removal_interval = MAX(interval, DRIFT_REMOVAL_INTERVAL_MIN);
 
@@ -401,6 +414,17 @@ SYS_MacOSX_SetScheduler(int SchedPriority)
 
 /* ================================================== */
 
+#ifdef FEAT_PRIVDROP
+void SYS_MacOSX_DropRoot(uid_t uid, gid_t gid)
+{
+  PRV_StartHelper();
+
+  UTI_DropRoot(uid, gid);
+}
+#endif
+
+/* ================================================== */
+
 void
 SYS_MacOSX_Initialise(void)
 {
@@ -414,7 +438,6 @@ SYS_MacOSX_Initialise(void)
 
 
   drift_removal_id = SCH_AddTimeoutByDelay(drift_removal_interval, drift_removal_timeout, NULL);
-  drift_removal_running = 1;
 }
 
 /* ================================================== */
@@ -422,9 +445,7 @@ SYS_MacOSX_Initialise(void)
 void
 SYS_MacOSX_Finalise(void)
 {
-  if (drift_removal_running) {
-    SCH_RemoveTimeout(drift_removal_id);
-  }
+  SCH_RemoveTimeout(drift_removal_id);
 
   clock_finalise();
 }

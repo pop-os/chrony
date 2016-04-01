@@ -339,9 +339,16 @@ for C-family shells.
 If the software cannot (yet) be built on your system, an error message
 will be shown.  Otherwise, @file{Makefile} will be generated.
 
-If editline or readline library is available, chronyc will be built with line
-editing support.  If you don't want this, specify the --disable-readline flag
-to configure.  Please refer to @pxref{line editing support} for more information.
+On Linux, if development files for the libcap library are available,
+@code{chronyd} will be built with support for dropping root privileges.
+On other systems no extra library is needed.  The default user which
+@code{chronyd} should run as can be specified with the @code{--with-user}
+option of the configure script.
+
+If development files for the editline or readline library are available,
+@code{chronyc} will be built with line editing support.  If you don't want
+this, specify the --disable-readline flag to configure.  Please refer to
+@pxref{line editing support} for more information.
 
 If a @file{timepps.h} header is available (e.g. from the
 @uref{http://linuxpps.org/, LinuxPPS project}), @code{chronyd} will be built with PPS API
@@ -407,7 +414,11 @@ makestep 1.0 3
 rtcsync
 @end example
 
-Then, @code{chronyd} can be run.
+Then, @code{chronyd} can be run.  For security reasons, it's recommended to
+create an unprivileged user for @code{chronyd} and specify it with the
+@code{-u} command-line option or the @code{user} directive in the configuration
+file, or set the default user with the @code{--with-user} configure option
+before building.
 @c }}}
 @menu
 * line editing support::        If libraries are in a non-standard place
@@ -976,14 +987,25 @@ no RTC or the RTC is broken (e.g. it has no battery).
 @item -u <user>
 This option sets the name of the system user to which @code{chronyd} will
 switch after start in order to drop root privileges.  It overrides the
-@code{user} directive (default @code{@DEFAULT_USER@}).  It may be set to a
-non-root user only when @code{chronyd} is compiled with support for Linux
-capabilities (libcap) or on NetBSD with the @code{/dev/clockctl} device.
+@code{user} directive (default @code{@DEFAULT_USER@}).
+
+On Linux, @code{chronyd} needs to be compiled with support for the
+@code{libcap} library.  On Mac OS X, FreeBSD, NetBSD and Solaris @code{chronyd}
+forks into two processes.  The child process retains root privileges, but can
+only perform a very limited range of privileged system calls on behalf of the
+parent.
 @item -F <level>
 This option configures a system call filter when @code{chronyd} is compiled with
 support for the Linux secure computing (seccomp) facility. In level 1 the
 process is killed when a forbidden system call is made, in level -1 the SYSSIG
 signal is thrown instead and in level 0 the filter is disabled (default 0).
+
+It's recommended to enable the filter only when it's known to work on the
+version of the system where @code{chrony} is installed as the filter needs to
+allow also system calls made from libraries that @code{chronyd} is using (e.g.
+libc) and different versions or implementations of the libraries may make
+different system calls.  If the filter is missing some system call,
+@code{chronyd} could be killed even in normal operation.
 @item -q
 When run in this mode, @code{chronyd} will set the system clock once
 and exit.  It will not detach from the terminal.
@@ -1083,6 +1105,7 @@ the configuration file is ignored.
 * cmdallow directive::          Give monitoring access to chronyc on other computers
 * cmddeny directive::           Deny monitoring access to chronyc on other computers
 * cmdport directive::           Set port to use for runtime monitoring
+* cmdratelimit directive::      Limit command response rate
 * combinelimit directive::      Limit sources included in combining algorithm
 * corrtimeratio directive::     Set correction time ratio
 * deny directive::              Deny access to NTP clients
@@ -1118,6 +1141,7 @@ the configuration file is ignored.
 * pidfile directive::           Specify the file where chronyd's pid is written
 * pool directive::              Specify an NTP pool
 * port directive::              Set NTP server port
+* ratelimit directive::         Limit NTP response rate
 * refclock directive::          Specify a reference clock
 * reselectdist directive::      Set improvement in distance needed to reselect a source
 * rtcautotrim directive::       Specify threshold at which RTC is trimmed automatically
@@ -1347,11 +1371,13 @@ directive}).
 @c {{{ clientloglimit
 @node clientloglimit directive
 @subsection clientloglimit
-This directive specifies the maximum size of the memory allocated to
-log client accesses.  When the limit is reached, only information for
-clients that have already been logged will be updated.  If 0 is
-specified, the memory size will be unlimited.  The default is 524288
-bytes.
+This directive specifies the maximum amount of memory that @code{chronyd} is
+allowed to allocate for logging of client accesses.  The default limit is
+524288 bytes, which allows monitoring of several thousands of addresses at the
+same time.
+
+In older @code{chrony} versions if the limit was set to 0, the memory
+allocation was unlimited.
 
 An example of the use of this directive is
 
@@ -1411,6 +1437,20 @@ cmdport 257
 This would make @code{chronyd} use 257/udp as its command port.
 (@code{chronyc} would need to be run with the @code{-p 257} switch to
 inter-operate correctly).
+@c }}}
+@c {{{ cmdratelimit
+@node cmdratelimit directive
+@subsection cmdratelimit
+This directive enables response rate limiting for command packets.  It's
+similar to the @code{ratelimit} directive (@pxref{ratelimit directive}), except
+responses to the localhost are never limited and the default interval is 1 (2
+seconds), default burst is 16, and default leak rate is 2.
+
+An example of use of the command is
+
+@example
+cmdratelimit interval 2
+@end example
 @c }}}
 @c {{{ combinelimit
 @node combinelimit directive
@@ -1694,28 +1734,25 @@ pairs.  The format of the file is shown below
  ...
 @end example
 
-Each line consists of an ID, a name of authentication hash function (optional)
+Each line consists of an ID, name of an authentication hash function (optional)
 and a password.  The ID can be any unsigned integer in the range 1 through
-2**32-1.  The hash function is MD5 by default, depending on how was
-@code{chronyd} compiled, other allowed hash functions may be SHA1, SHA256,
-SHA384, SHA512, RMD128, RMD160, RMD256, RMD320, TIGER and WHIRLPOOL.  The
-password can be encoded as a string of characters not containing a space with
-optional @code{ASCII:} prefix or as a hexadecimal number with @code{HEX:}
-prefix.
+2**32-1.  The default hash function is MD5.  Depending on how @code{chronyd}
+was compiled, other supported functions may be SHA1, SHA256, SHA384, SHA512,
+RMD128, RMD160, RMD256, RMD320, TIGER and WHIRLPOOL.  The password can be
+specified as a string of characters not containing white space with an optional
+@code{ASCII:} prefix, or as a hexadecimal number with the @code{HEX:} prefix.
+The maximum length of the line is 2047 characters.
 
 The password is used with the hash function to generate and verify a message
-authentication code (MAC) in NTP packets.
-For maximum security, it's recommended to use SHA1 or stronger hash function.
-The passwords should be random and they should be as long as the output size of
-the configured hash function, e.g. 160 bits with SHA1.
+authentication code (MAC) in NTP packets.  It's recommended to use SHA1 or a
+stronger hash function with random passwords specified in the hexadecimal
+format that have at least 128 bits.  @code{chronyd} will log a warning to
+syslog on start if a source is specified in the configuration file with a key
+that has password shorter than 80 bits.
 
-These shell commands can be used to generate random MD5 and SHA1 keys on
-systems which have the @code{/dev/urandom} device:
-
-@example
-echo "1 MD5 HEX:$(tr -d -c '[:xdigit:]' < /dev/urandom | head -c 32)"
-echo "1 SHA1 HEX:$(tr -d -c '[:xdigit:]' < /dev/urandom | head -c 40)"
-@end example
+The @code{keygen} command of @code{chronyc} (@pxref{keygen command}) can be
+used to generate random keys for the key file.  By default, it generates
+160-bit MD5 or SHA1 keys.
 @c }}}
 @c {{{ leapsecmode
 @node leapsecmode directive
@@ -2238,24 +2275,22 @@ used to disable it entirely.
 @c {{{ logchange
 @node logchange directive
 @subsection logchange
-This directive forces @code{chronyd} to send a message to syslog if it
-makes a system clock adjustment larger than a threshold value.  An
-example of use is
+This directive sets the threshold for the adjustment of the system clock
+that will generate a syslog message.
+
+By default, the threshold is 1 second.
+
+An example of use is
 
 @example
-logchange 0.5
+logchange 0.1
 @end example
 
 which would cause a syslog message to be generated a system clock error
-of over 0.5 seconds starts to be compensated.
+of over 0.1 seconds starts to be compensated.
 
-Clock errors detected either via NTP packets or via timestamps entered
+Clock errors detected via NTP packets, reference clocks, or timestamps entered
 via the @code{settime} command of @code{chronyc} are logged.
-
-This directive assumes that syslog messages are appearing where somebody
-can see them.  This allows that person to see if a large error has
-arisen, e.g. because of a fault, or because of faulty timezone handling,
-for example when summer time (daylight saving) starts or ends.
 @c }}}
 @c {{{ logdir
 @node logdir directive
@@ -2583,6 +2618,54 @@ port 11123
 This would change the NTP port served by @code{chronyd} on the computer to
 udp/11123.
 @c }}}
+@c {{{ ratelimit
+@node ratelimit directive
+@subsection ratelimit
+This directive enables response rate limiting for NTP packets.  Its purpose is
+to reduce network traffic with misconfigured or broken NTP clients that are
+polling the server too frequently.  The limits are applied to individual IP
+addresses.  If multiple clients share one IP address (e.g. multiple hosts
+behind NAT), the sum of their traffic will be limited.  If a client that
+increases its polling rate when it doesn't receive a reply is detected, its
+rate limiting will be temporarily suspended to avoid increasing the overall
+amount of traffic.  The maximum number of IP addresses which can be monitored
+at the same time depends on the memory limit set by the @code{clientloglimit}
+directive.
+
+The @code{ratelimit} directive supports a number of subfields (which
+may be defined in any order):
+
+@table @code
+@item interval
+This option sets the minimum interval between responses.  It is defined as a
+power of 2 in seconds.  The default value is 3 (8 seconds).  The minimum value
+is -4 and the maximum value is 12.
+@item burst
+This option sets the maximum number of responses that can be send in a burst,
+temporarily exceeding the limit specified by the @code{interval} option.  This
+is useful for clients that make rapid measurements on start (e.g.
+@code{chronyd} with the @code{iburst} option).  The default value is 8.  The
+minimum value is 1 and the maximum value is 255.
+@item leak
+This option sets the rate at which responses are randomly allowed even if the
+limits specified by the @code{interval} and @code{burst} options are exceeded.
+This is necessary to prevent an attacker who is sending requests with a spoofed
+source address from completely blocking responses to that address.  The leak
+rate is defined as a power of 1/2 and it is 3 by default, i.e. on average at
+least every eighth request has a response.  The minimum value is 1 and the
+maximum value is 4.
+@end table
+
+An example use of the command is
+
+@example
+ratelimit interval 4 burst 4
+@end example
+
+This would reduce the response rate for IP addresses that send packets on
+average more frequently than once per 16 seconds and/or send packets in bursts
+with more than 4 packets.
+@c }}}
 @c {{{ refclock
 @node refclock directive
 @subsection refclock
@@ -2717,6 +2800,18 @@ Prefer this source over sources without prefer option.
 @item noselect
 Never select this source.  This is useful for monitoring or with sources
 which are not very accurate, but are locked with a PPS refclock.
+@item trust
+Assume time from this source is always true.  It can be rejected as a
+falseticker in the source selection only if another source with this option
+doesn't agree with it.
+@item require
+Require that at least one of the sources specified with this option is
+selectable (i.e. recently reachable and not a falseticker) before updating the
+clock.  Together with the @code{trust} option this may be useful to allow a
+trusted, but not very precise, reference clock to be safely combined with
+unauthenticated NTP sources in order to improve the accuracy of the clock.
+They can be selected and used for synchronisation only if they agree with
+the trusted and required source.
 @item minsamples
 Set the minimum number of samples kept for this source.  This overrides the
 @code{minsamples} directive (@pxref{minsamples directive}).
@@ -2839,12 +2934,17 @@ Note that this setting is overriden when the @code{hwclockfile} directive
 @node rtcsync directive
 @subsection rtcsync
 
-The @code{rtcsync} directive will enable a kernel mode where the
-system time is copied to the real time clock (RTC) every 11 minutes.
+The @code{rtcsync} directive enables a mode where the system time is
+periodically copied to the real time clock (RTC).
 
-This directive is supported only on Linux and cannot be used when the
-normal RTC tracking is enabled, i.e. when the @code{rtcfile} directive
-is used.  On other systems this directive does nothing.
+On Linux the RTC copy is performed by the kernel every 11 minutes. This
+directive cannot be used when the normal RTC tracking is enabled,
+i.e. when the @code{rtcfile} directive is used.
+
+On Mac OS X, chronyd will perform the RTC copy every 60 minutes when the
+system clock is in a synchronised state.
+
+On other systems this directive does nothing.
 @c }}}
 @c {{{ sched_priority
 @node sched_priority directive
@@ -3016,6 +3116,19 @@ Prefer this source over sources without prefer option.
 @item noselect
 Never select this source.  This is particularly useful for monitoring.
 
+@item trust
+Assume time from this source is always true.  It can be rejected as a
+falseticker in the source selection only if another source with this option
+doesn't agree with it.
+
+@item require
+Require that at least one of the sources specified with this option is
+selectable (i.e. recently reachable and not a falseticker) before updating the
+clock.  Together with the @code{trust} option this may be useful to allow a
+trusted authenticated source to be safely combined with unauthenticated sources
+in order to improve the accuracy of the clock.  They can be selected and used
+for synchronisation only if they agree with the trusted and required source.
+
 @item minsamples
 Set the minimum number of samples kept for this source.  This overrides the
 @code{minsamples} directive (@pxref{minsamples directive}).
@@ -3171,11 +3284,15 @@ Valid measurements with corresponding compensations are logged to the
 @subsection user
 The @code{user} directive sets the name of the system user to which
 @code{chronyd} will switch after start in order to drop root privileges.
-It may be set to a non-root user only when @code{chronyd} is compiled with
-support for Linux capabilities (libcap) or on NetBSD with the
-@code{/dev/clockctl} device.
 
-The default value is @code{@DEFAULT_USER@}.
+On Linux, @code{chronyd} needs to be compiled with support for the
+@code{libcap} library.  On Mac OS X, FreeBSD, NetBSD and Solaris @code{chronyd}
+forks into two processes.  The child process retains root privileges, but can
+only perform a very limited range of privileged system calls on behalf of the
+parent.
+
+The default value is @code{@DEFAULT_USER@}.  The configure script has a
+@code{--with-user} option, which sets the default value.
 @c }}}
 @c }}}
 @c {{{ S:Running chronyc
@@ -3329,6 +3446,7 @@ interface.
 * dump command::                Dump measurement histories to files
 * exit command::                Exit from chronyc
 * help command::                Generate help summary
+* keygen command::              Generate key for key file
 * local command::               Let computer be a server when it is unsynchronised
 * makestep command::            Correct the system clock by stepping instead of slewing
 * manual command::              Enable/disable/configure options for settime
@@ -3348,6 +3466,7 @@ interface.
 * reselectdist command::        Set improvement in distance needed to reselect a source
 * retries command::             Set maximum number of retries
 * rtcdata command::             Display RTC parameters
+* serverstats command::         Display statistics of the server
 * settime command::             Provide a manual input of the current time
 * smoothing command::           Display current time smoothing state
 * smoothtime command::          Reset/activate server time smoothing
@@ -3562,24 +3681,24 @@ burst 2/10 foo.example.net
 @node clients command
 @comment  node-name,  next,  previous,  up
 @subsubsection clients
-This command shows a list of all clients that have accessed the server,
+This command shows a list of clients that have accessed the server,
 through either the NTP or command/monitoring ports.  It doesn't include
-access to the Unix domain comamnd socket.  There are no arguments.
+accesses over the Unix domain comamnd socket.  There are no arguments.
 
 An example of the output is
 
 @example
-Hostname                   Client    Peer CmdAuth CmdNorm  CmdBad  LstN  LstC
-=========================  ======  ======  ======  ======  ======  ====  ====
-localhost                       0       0       0       1       0   29y     0
-aardvark.xxx                    4       0       0       0       0    49   29y
-badger.xxx                      4       0       0       0       0     6   29y
+Hostname                      NTP   Drop Int IntL Last     Cmd   Drop Int  Last
+===============================================================================
+localhost                       2      0   2   -   133      15      0  -1     7
+foo.example.net                12      0   6   -    23       0      0   -     -
 @end example
 
 Each row shows the data for a single host.  Only hosts that have passed
 the host access checks (set with the @code{allow}, @code{deny},
 @code{cmdallow} and @code{cmddeny} commands or configuration file
-directives) are logged.
+directives) are logged.  The intervals are displayed as a power of 2 in
+seconds.
 
 The columns are as follows:
 
@@ -3587,29 +3706,24 @@ The columns are as follows:
 @item
 The hostname of the client
 @item
-The number of times the client has accessed the server using an NTP
-client mode packet.
+The number of NTP packets received from the client.
 @item
-The number of times the client has accessed the server using an NTP
-symmetric active mode packet.
+The number of NTP packets dropped to limit the response rate.
 @item
-The number of authenticated command packets that have been processed from the
-client.  Authentication is no longer supported in command packets, so the
-number should be always zero.
+The average interval between NTP packets.
 @item
-The number of unauthenticated command packets that have been processed
-from the client.
-@item
-The number of bad command packets received from the client (not all
-forms of bad packet are logged).
+The average interval between NTP packets after limiting the response rate.
 @item
 Time since the last NTP packet was received
 @item
-Time since the last command packet was received
+The number of command packets received from the client.
+@item
+The number of command packets dropped to limit the response rate.
+@item
+The average interval between command packets.
+@item
+Time since the last command packet was received.
 @end enumerate
-
-The last two entries will be shown as the time since 1970 if no packet
-of that type has ever been received.
 @c }}}
 @c {{{ cmdaccheck
 @node cmdaccheck command
@@ -3762,6 +3876,31 @@ The exit command exits from chronyc and returns the user to the shell
 @node help command
 @subsubsection help
 The help command displays a summary of the commands and their arguments.
+@c }}}
+@c {{{ keygen
+@node keygen command
+@subsubsection keygen
+The @code{keygen} command generates a key that can be added to the
+key file (@pxref{keyfile directive}) to allow NTP authentication between
+server and client, or peers.  The key is generated from the @code{/dev/urandom}
+device and it's printed to standard output.
+
+The command has three optional arguments.  The first argument is the key number
+(by default 1), which will be specified with the @code{key} option of the
+@code{server} or @code{peer} directives in the configuration file.  The second
+argument is the hash function (by default SHA1 or MD5 if SHA1 is not available)
+and the third argument is the number of bits the key should have, between 80
+and 4096 bits (by default 160 bits).
+
+An example is
+
+@example
+keygen 73 SHA1 256
+@end example
+
+which generates a 256-bit SHA-1 key with number 73.  The printed line would
+then be securely transferred and added to key files on both server and client,
+or peers.
 @c }}}
 @c {{{ local
 @node local command
@@ -4047,8 +4186,8 @@ next measurement has been made.
 @node offline command
 @subsubsection offline
 The @code{offline} command is used to warn @code{chronyd} that the network
-connection to a particular host or hosts is about to be lost.  It should
-be used on computers with a dial-up or similar connection to their time
+connection to a particular host or hosts is about to be lost.  It can
+be used on computers with intermittent connection to their time
 sources, to warn @code{chronyd} that the connection is about to be broken.
 
 An example of how to use @code{offline} in this case is shown in
@@ -4084,14 +4223,6 @@ achieve this.  The situation is shown in the figure below.
 @end group
 @end example
 
-
-
-If the source to which @code{chronyd} is currently synchronised is indicated
-offline in this way, @code{chronyd} will continue to treat it as the
-synchronisation source.  If the network connection were broken without
-the @code{offline} command being used, @code{chronyd} would assume that the
-source had failed and would attempt to pick another synchronisation
-source.
 
 There are four forms of the @code{offline} command.  The first form is a
 wildcard, meaning all sources.  The second form allows an IP address mask
@@ -4248,6 +4379,24 @@ per million.  So if the value shown was +1, suppose the RTC was exactly
 right when it crosses a particular second boundary.  Then it would be 1
 microsecond fast when it crosses its next second boundary.
 @end table
+@c }}}
+@c {{{ serverstats command
+@node serverstats command
+@subsubsection serverstats command
+The @code{serverstats} command displays how many valid NTP and command requests
+@code{chronyd} as a server received from clients, how many of them were dropped
+to limit the response rate as configured by the @code{ratelimit} and
+@code{cmdratelimit} directives, and how many client log records were dropped
+due to the memory limit configured by the @code{clientloglimit} directive.  An
+example of the output is shown below.
+
+@example
+NTP packets received       : 1598
+NTP packets dropped        : 8
+Command packets received   : 19
+Command packets dropped    : 0
+Client log records dropped : 0
+@end example
 @c }}}
 @c {{{ settime
 @node settime command

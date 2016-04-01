@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2015
+ * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -135,14 +135,12 @@ read_line(void)
 
 /* ================================================== */
 
-#define MAX_ADDRESSES 16
-
 static ARR_Instance
 get_sockaddrs(const char *hostnames, int port)
 {
   ARR_Instance addrs;
   char *hostname, *s1, *s2;
-  IPAddr ip_addrs[MAX_ADDRESSES];
+  IPAddr ip_addrs[DNS_MAX_ADDRESSES];
   union sockaddr_all *addr;
   int i;
 
@@ -163,12 +161,12 @@ get_sockaddrs(const char *hostnames, int port)
         LOG_FATAL(LOGF_Client, "Unix socket path too long");
       addr->un.sun_family = AF_UNIX;
     } else {
-      if (DNS_Name2IPAddress(hostname, ip_addrs, MAX_ADDRESSES) != DNS_Success) {
+      if (DNS_Name2IPAddress(hostname, ip_addrs, DNS_MAX_ADDRESSES) != DNS_Success) {
         DEBUG_LOG(LOGF_Client, "Could not get IP address for %s", hostname);
         break;
       }
 
-      for (i = 0; i < MAX_ADDRESSES && ip_addrs[i].family != IPADDR_UNSPEC; i++) {
+      for (i = 0; i < DNS_MAX_ADDRESSES && ip_addrs[i].family != IPADDR_UNSPEC; i++) {
         addr = (union sockaddr_all *)ARR_GetNewElement(addrs);
         UTI_IPAndPortToSockaddr(&ip_addrs[i], port, (struct sockaddr *)addr);
         DEBUG_LOG(LOGF_Client, "Resolved %s to %s", hostname, UTI_IPToString(&ip_addrs[i]));
@@ -1117,8 +1115,10 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
           (data.params.online ? REQ_ADDSRC_ONLINE : 0) |
           (data.params.auto_offline ? REQ_ADDSRC_AUTOOFFLINE : 0) |
           (data.params.iburst ? REQ_ADDSRC_IBURST : 0) |
-          (data.params.sel_option == SRC_SelectPrefer ? REQ_ADDSRC_PREFER : 0) |
-          (data.params.sel_option == SRC_SelectNoselect ? REQ_ADDSRC_NOSELECT : 0));
+          (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
+          (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
+          (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
+          (data.params.sel_options & SRC_SELECT_REQUIRE ? REQ_ADDSRC_REQUIRE : 0));
       result = 1;
 
       break;
@@ -1191,7 +1191,7 @@ give_help(void)
     "makestep\0Correct clock by stepping immediately\0"
     "makestep <threshold> <updates>\0Configure automatic clock stepping\0"
     "maxupdateskew <skew>\0Modify maximum valid skew to update frequency\0"
-    "waitsync [max-tries [max-correction [max-skew [interval]]]]\0"
+    "waitsync [<max-tries> [<max-correction> [<max-skew> [<interval>]]]]\0"
                           "Wait until synchronised in specified limits\0"
     "\0\0"
     "Time sources:\0\0"
@@ -1225,6 +1225,7 @@ give_help(void)
     "\0\0NTP access:\0\0"
     "accheck <address>\0Check whether address is allowed\0"
     "clients\0Report on clients that have accessed the server\0"
+    "serverstats\0Display statistics of the server\0"
     "allow [<subnet>]\0Allow access to subnet as a default\0"
     "allow all [<subnet>]\0Allow access to subnet and all children\0"
     "deny [<subnet>]\0Deny access to subnet as a default\0"
@@ -1255,6 +1256,7 @@ give_help(void)
     "dns -4|-6|-46\0Resolve hostnames only to IPv4/IPv6/both addresses\0"
     "timeout <milliseconds>\0Set initial response timeout\0"
     "retries <retries>\0Set maximum number of retries\0"
+    "keygen [<id> [<type> [<bits>]]]\0Generate key for key file\0"
     "exit|quit\0Leave the program\0"
     "help\0Generate this help\0"
     "\0";
@@ -1544,7 +1546,10 @@ static void
 print_seconds(unsigned long s)
 {
   unsigned long d;
-  if (s <= 1024) {
+
+  if (s == (uint32_t)-1) {
+    printf("   -");
+  } else if (s <= 1024) {
     printf("%4ld", s);
   } else if (s < 36000) {
     printf("%3ldm", s / 60);
@@ -1639,6 +1644,18 @@ print_signed_freq_ppm(double f)
     printf("%+10.3f", f);
   } else {
     printf("%+10.0f", f);
+  }
+}
+
+/* ================================================== */
+
+static void
+print_clientlog_interval(int rate)
+{
+  if (rate >= 127) {
+    printf(" -");
+  } else {
+    printf("%2d", rate);
   }
 }
 
@@ -1946,6 +1963,29 @@ process_cmd_tracking(char *line)
   }
   return 0;
 }
+
+/* ================================================== */
+
+static int
+process_cmd_serverstats(char *line)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+
+  request.command = htons(REQ_SERVER_STATS);
+
+  if (!request_reply(&request, &reply, RPY_SERVER_STATS, 0))
+    return 0;
+
+  printf("NTP packets received       : %"PRIu32"\n", ntohl(reply.data.server_stats.ntp_hits));
+  printf("NTP packets dropped        : %"PRIu32"\n", ntohl(reply.data.server_stats.ntp_drops));
+  printf("Command packets received   : %"PRIu32"\n", ntohl(reply.data.server_stats.cmd_hits));
+  printf("Command packets dropped    : %"PRIu32"\n", ntohl(reply.data.server_stats.cmd_drops));
+  printf("Client log records dropped : %"PRIu32"\n", ntohl(reply.data.server_stats.log_drops));
+
+  return 1;
+}
+
 /* ================================================== */
 
 static int
@@ -2047,87 +2087,65 @@ process_cmd_clients(char *line)
 {
   CMD_Request request;
   CMD_Reply reply;
-  unsigned long next_index;
-  int j;
   IPAddr ip;
-  unsigned long client_hits;
-  unsigned long peer_hits;
-  unsigned long cmd_hits_auth;
-  unsigned long cmd_hits_normal;
-  unsigned long cmd_hits_bad;
-  unsigned long last_ntp_hit_ago;
-  unsigned long last_cmd_hit_ago;
-  char hostname_buf[50];
-
-  int n_replies;
-  int n_indices_in_table;
+  uint32_t i, n_clients, next_index, n_indices;
+  RPY_ClientAccesses_Client *client;
+  char hostname[26];
 
   next_index = 0;
 
-  printf("Hostname                   Client    Peer CmdAuth CmdNorm  CmdBad  LstN  LstC\n"
-         "=========================  ======  ======  ======  ======  ======  ====  ====\n");
+  printf("Hostname                      NTP   Drop Int IntL Last     Cmd   Drop Int  Last\n"
+         "===============================================================================\n");
 
-  do {
-
-    request.command = htons(REQ_CLIENT_ACCESSES_BY_INDEX);
+  while (1) {
+    request.command = htons(REQ_CLIENT_ACCESSES_BY_INDEX2);
     request.data.client_accesses_by_index.first_index = htonl(next_index);
-    request.data.client_accesses_by_index.n_indices = htonl(MAX_CLIENT_ACCESSES);
+    request.data.client_accesses_by_index.n_clients = htonl(MAX_CLIENT_ACCESSES);
 
-    if (request_reply(&request, &reply, RPY_CLIENT_ACCESSES_BY_INDEX, 0)) {
-          n_replies = ntohl(reply.data.client_accesses_by_index.n_clients);
-          n_indices_in_table = ntohl(reply.data.client_accesses_by_index.n_indices);
-          if (n_replies == 0) {
-            goto finished;
-          }
-          for (j=0; j<n_replies; j++) {
-            UTI_IPNetworkToHost(&reply.data.client_accesses_by_index.clients[j].ip, &ip);
-            if (ip.family != IPADDR_UNSPEC) {
-              /* UNSPEC implies that the node could not be found in
-                 the daemon's tables; we shouldn't ever generate this
-                 case, but ignore it if we do.  (In future there might
-                 be a protocol to reset the client logging; if another
-                 administrator runs that while we're doing the clients
-                 command, there will be a race condition that could
-                 cause this). */
-              
-              client_hits = ntohl(reply.data.client_accesses_by_index.clients[j].client_hits);
-              peer_hits = ntohl(reply.data.client_accesses_by_index.clients[j].peer_hits);
-              cmd_hits_auth = ntohl(reply.data.client_accesses_by_index.clients[j].cmd_hits_auth);
-              cmd_hits_normal = ntohl(reply.data.client_accesses_by_index.clients[j].cmd_hits_normal);
-              cmd_hits_bad = ntohl(reply.data.client_accesses_by_index.clients[j].cmd_hits_bad);
-              last_ntp_hit_ago = ntohl(reply.data.client_accesses_by_index.clients[j].last_ntp_hit_ago);
-              last_cmd_hit_ago = ntohl(reply.data.client_accesses_by_index.clients[j].last_cmd_hit_ago);
-
-              if (no_dns) {
-                snprintf(hostname_buf, sizeof(hostname_buf),
-                         "%s", UTI_IPToString(&ip));
-              } else {
-                DNS_IPAddress2Name(&ip, hostname_buf, sizeof(hostname_buf));
-                hostname_buf[25] = 0;
-              }
-              printf("%-25s  %6ld  %6ld  %6ld  %6ld  %6ld  ",
-                     hostname_buf,
-                     client_hits, peer_hits,
-                     cmd_hits_auth, cmd_hits_normal, cmd_hits_bad);
-              print_seconds(last_ntp_hit_ago);
-              printf("  ");
-              print_seconds(last_cmd_hit_ago);
-              printf("\n");
-            }
-          }              
-
-          /* Set the next index to probe based on what the server tells us */
-          next_index = ntohl(reply.data.client_accesses_by_index.next_index);
-          if (next_index >= n_indices_in_table) {
-            goto finished;
-          }
-    } else {
+    if (!request_reply(&request, &reply, RPY_CLIENT_ACCESSES_BY_INDEX2, 0))
       return 0;
-    }
-  } while (1); /* keep going until all subnets have been expanded,
-                  down to single nodes */
 
-finished:
+    n_clients = ntohl(reply.data.client_accesses_by_index.n_clients);
+    n_indices = ntohl(reply.data.client_accesses_by_index.n_indices);
+
+    for (i = 0; i < n_clients && i < MAX_CLIENT_ACCESSES; i++) {
+      client = &reply.data.client_accesses_by_index.clients[i];
+
+      UTI_IPNetworkToHost(&client->ip, &ip);
+
+      /* UNSPEC means the record could not be found in the daemon's tables.
+         We shouldn't ever generate this case, but ignore it if we do. */
+      if (ip.family == IPADDR_UNSPEC)
+        continue;
+
+      if (no_dns)
+        snprintf(hostname, sizeof (hostname), "%s", UTI_IPToString(&ip));
+      else
+        DNS_IPAddress2Name(&ip, hostname, sizeof (hostname));
+
+      printf("%-25s", hostname);
+      printf("  %6"PRIu32"  %5"PRIu32"  ",
+             ntohl(client->ntp_hits), ntohl(client->ntp_drops));
+      print_clientlog_interval(client->ntp_interval);
+      printf("  ");
+      print_clientlog_interval(client->ntp_timeout_interval);
+      printf("  ");
+      print_seconds(ntohl(client->last_ntp_hit_ago));
+      printf("  %6"PRIu32"  %5"PRIu32"  ",
+             ntohl(client->cmd_hits), ntohl(client->cmd_drops));
+      print_clientlog_interval(client->cmd_interval);
+      printf("  ");
+      print_seconds(ntohl(client->last_cmd_hit_ago));
+      printf("\n");
+    }
+
+    /* Set the next index to probe based on what the server tells us */
+    next_index = ntohl(reply.data.client_accesses_by_index.next_index);
+
+    if (next_index >= n_indices || n_clients < MAX_CLIENT_ACCESSES)
+      break;
+  }
+
   return 1;
 }
 
@@ -2421,6 +2439,39 @@ process_cmd_retries(const char *line)
 /* ================================================== */
 
 static int
+process_cmd_keygen(char *line)
+{
+  char hash_name[17];
+  unsigned char key[512];
+  unsigned int i, length, id = 1, bits = 160;
+
+#ifdef FEAT_SECHASH
+  snprintf(hash_name, sizeof (hash_name), "SHA1");
+#else
+  snprintf(hash_name, sizeof (hash_name), "MD5");
+#endif
+
+  sscanf(line, "%u %16s %d", &id, hash_name, &bits);
+
+  length = CLAMP(10, (bits + 7) / 8, sizeof (key));
+  if (HSH_GetHashId(hash_name) < 0) {
+    LOG(LOGS_ERR, LOGF_Client, "Unknown hash function %s", hash_name);
+    return 0;
+  }
+
+  UTI_GetRandomBytesUrandom(key, length);
+
+  printf("%u %s HEX:", id, hash_name);
+  for (i = 0; i < length; i++)
+    printf("%02hhX", key[i]);
+  printf("\n");
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
 process_line(char *line)
 {
   char *command;
@@ -2506,6 +2557,9 @@ process_line(char *line)
     do_normal_submit = 0;
     give_help();
     ret = 1;
+  } else if (!strcmp(command, "keygen")) {
+    ret = process_cmd_keygen(line);
+    do_normal_submit = 0;
   } else if (!strcmp(command, "local")) {
     do_normal_submit = process_cmd_local(&tx_message, line);
   } else if (!strcmp(command, "makestep")) {
@@ -2557,6 +2611,9 @@ process_line(char *line)
   } else if (!strcmp(command, "rtcdata")) {
     do_normal_submit = 0;
     ret = process_cmd_rtcreport(line);
+  } else if (!strcmp(command, "serverstats")) {
+    do_normal_submit = 0;
+    ret = process_cmd_serverstats(line);
   } else if (!strcmp(command, "settime")) {
     do_normal_submit = 0;
     ret = process_cmd_settime(line);
@@ -2654,7 +2711,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2015 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2016 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",

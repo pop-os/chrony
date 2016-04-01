@@ -57,7 +57,8 @@ typedef struct {
                                    sources from the pool respond first */
 } SourceRecord;
 
-/* Hash table of SourceRecord, the size should be a power of two */
+/* Hash table of SourceRecord, its size is a power of two and it's never
+   more than half full */
 static ARR_Instance records;
 
 /* Number of sources in the hash table */
@@ -202,26 +203,16 @@ find_slot(NTP_Remote_Address *remote_addr, int *slot, int *found)
   uint32_t hash;
   unsigned int i, size;
   unsigned short port;
-  uint8_t *ip6;
 
   size = ARR_GetSize(records);
   
-  switch (remote_addr->ip_addr.family) {
-    case IPADDR_INET6:
-      ip6 = remote_addr->ip_addr.addr.in6;
-      hash = (ip6[0] ^ ip6[4] ^ ip6[8] ^ ip6[12]) |
-           (ip6[1] ^ ip6[5] ^ ip6[9] ^ ip6[13]) << 8 |
-           (ip6[2] ^ ip6[6] ^ ip6[10] ^ ip6[14]) << 16 |
-           (ip6[3] ^ ip6[7] ^ ip6[11] ^ ip6[15]) << 24;
-      break;
-    case IPADDR_INET4:
-      hash = remote_addr->ip_addr.addr.in4;
-      break;
-    default:
-      *found = *slot = 0;
-      return;
+  if (remote_addr->ip_addr.family != IPADDR_INET4 &&
+      remote_addr->ip_addr.family != IPADDR_INET6) {
+    *found = *slot = 0;
+    return;
   }
 
+  hash = UTI_IPToHash(&remote_addr->ip_addr);
   port = remote_addr->port;
 
   for (i = 0; i < size / 2; i++) {
@@ -243,12 +234,12 @@ find_slot(NTP_Remote_Address *remote_addr, int *slot, int *found)
 }
 
 /* ================================================== */
-
 /* Check if hash table of given size is sufficient to contain sources */
+
 static int
 check_hashtable_size(unsigned int sources, unsigned int size)
 {
-  return sources * 2 + 1 < size;
+  return sources * 2 <= size;
 }
 
 /* ================================================== */
@@ -266,7 +257,7 @@ rehash_records(void)
   memcpy(temp_records, ARR_GetElements(records), old_size * sizeof (SourceRecord));
 
   /* The size of the hash table is always a power of two */
-  for (new_size = 4; !check_hashtable_size(n_sources, new_size); new_size *= 2)
+  for (new_size = 1; !check_hashtable_size(n_sources, new_size); new_size *= 2)
     ;
 
   ARR_SetSize(records, new_size);

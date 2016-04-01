@@ -91,7 +91,9 @@
 #define REQ_SMOOTHING 51
 #define REQ_SMOOTHTIME 52
 #define REQ_REFRESH 53
-#define N_REQUEST_TYPES 54
+#define REQ_SERVER_STATS 54
+#define REQ_CLIENT_ACCESSES_BY_INDEX2 55
+#define N_REQUEST_TYPES 56
 
 /* Special utoken value used to log on with first exchange being the
    password.  (This time value has long since gone by) */
@@ -243,6 +245,8 @@ typedef struct {
 #define REQ_ADDSRC_IBURST 0x4
 #define REQ_ADDSRC_PREFER 0x8
 #define REQ_ADDSRC_NOSELECT 0x10
+#define REQ_ADDSRC_TRUST 0x20
+#define REQ_ADDSRC_REQUIRE 0x40
 
 typedef struct {
   IPAddr ip_addr;
@@ -284,7 +288,7 @@ typedef struct {
 
 typedef struct {
   uint32_t first_index;
-  uint32_t n_indices;
+  uint32_t n_clients;
   int32_t EOR;
 } REQ_ClientAccessesByIndex;
 
@@ -335,9 +339,15 @@ typedef struct {
 
    Version 6 : added padding to requests to prevent amplification attack,
    changed maximum number of samples in manual list to 16, new commands: modify
-   makestep, smoothing report, smoothtime command
+   makestep, smoothing, smoothtime
 
-   Authentication was removed later in version 6.
+   Support for authentication was removed later in version 6 of the protocol
+   and commands that required authentication are allowed only locally over Unix
+   domain socket.
+
+   Version 6 (no authentication) : changed format of client accesses by index
+   (using new request/reply types), new flags in NTP source request and report,
+   new commands: refresh, serverstats
  */
 
 #define PROTO_VERSION_NUMBER 6
@@ -351,7 +361,7 @@ typedef struct {
 #define PROTO_VERSION_PADDING 6
 
 /* The maximum length of padding in request packet, currently
-   defined by CLIENT_ACCESSES_BY_INDEX and MANUAL_LIST */
+   defined by MANUAL_LIST */
 #define MAX_PADDING_LENGTH 396
 
 /* ================================================== */
@@ -431,7 +441,9 @@ typedef struct {
 #define RPY_MANUAL_LIST 11
 #define RPY_ACTIVITY 12
 #define RPY_SMOOTHING 13
-#define N_REPLY_TYPES 14
+#define RPY_SERVER_STATS 14
+#define RPY_CLIENT_ACCESSES_BY_INDEX2 15
+#define N_REPLY_TYPES 16
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -478,6 +490,8 @@ typedef struct {
 
 #define RPY_SD_FLAG_NOSELECT 0x1
 #define RPY_SD_FLAG_PREFER 0x2
+#define RPY_SD_FLAG_TRUST 0x4
+#define RPY_SD_FLAG_REQUIRE 0x8
 
 typedef struct {
   IPAddr ip_addr;
@@ -545,11 +559,14 @@ typedef struct {
 
 typedef struct {
   IPAddr ip;
-  uint32_t client_hits;
-  uint32_t peer_hits;
-  uint32_t cmd_hits_auth;
-  uint32_t cmd_hits_normal;
-  uint32_t cmd_hits_bad;
+  uint32_t ntp_hits;
+  uint32_t cmd_hits;
+  uint32_t ntp_drops;
+  uint32_t cmd_drops;
+  int8_t ntp_interval;
+  int8_t cmd_interval;
+  int8_t ntp_timeout_interval;
+  int8_t pad;
   uint32_t last_ntp_hit_ago;
   uint32_t last_cmd_hit_ago;
 } RPY_ClientAccesses_Client;
@@ -561,6 +578,15 @@ typedef struct {
   RPY_ClientAccesses_Client clients[MAX_CLIENT_ACCESSES];
   int32_t EOR;
 } RPY_ClientAccessesByIndex;
+
+typedef struct {
+  uint32_t ntp_hits;
+  uint32_t cmd_hits;
+  uint32_t ntp_drops;
+  uint32_t cmd_drops;
+  uint32_t log_drops;
+  int32_t EOR;
+} RPY_ServerStats;
 
 #define MAX_MANUAL_LIST_SAMPLES 16
 
@@ -623,6 +649,7 @@ typedef struct {
     RPY_Sourcestats sourcestats;
     RPY_Rtc rtc;
     RPY_ClientAccessesByIndex client_accesses_by_index;
+    RPY_ServerStats server_stats;
     RPY_ManualList manual_list;
     RPY_Activity activity;
     RPY_Smoothing smoothing;

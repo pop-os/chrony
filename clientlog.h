@@ -33,32 +33,15 @@
 
 extern void CLG_Initialise(void);
 extern void CLG_Finalise(void);
-extern void CLG_LogNTPClientAccess(IPAddr *client, time_t now);
-extern void CLG_LogNTPPeerAccess(IPAddr *client, time_t now);
-
-/* When logging command packets, there are several subtypes */
-
-typedef enum {
-  CLG_CMD_AUTH,                 /* authenticated */
-  CLG_CMD_NORMAL,               /* normal */
-  CLG_CMD_BAD_PKT               /* bad version or packet length */
-} CLG_Command_Type;
-
-extern void CLG_LogCommandAccess(IPAddr *client, CLG_Command_Type type, time_t now);
+extern int CLG_LogNTPAccess(IPAddr *client, struct timeval *now);
+extern int CLG_LogCommandAccess(IPAddr *client, struct timeval *now);
+extern int CLG_LimitNTPResponseRate(int index);
+extern int CLG_LimitCommandResponseRate(int index);
 
 /* And some reporting functions, for use by chronyc. */
-/* TBD */
 
-typedef enum {
-  CLG_SUCCESS,                  /* All is well */
-  CLG_EMPTYSUBNET,              /* No hosts logged in requested subnet */
-  CLG_BADSUBNET,                /* Subnet requested is not 0, 8, 16 or 24 bits */
-  CLG_INACTIVE,                 /* Facility not active */
-  CLG_INDEXTOOLARGE             /* Node index is higher than number of nodes present */
-} CLG_Status;
-
-CLG_Status
-CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report,
-                                 time_t now, unsigned long *n_indices);
+extern int CLG_GetNumberOfIndices(void);
+extern int CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timeval *now);
+extern void CLG_GetServerStatsReport(RPT_ServerStatsReport *report);
 
 #endif /* GOT_CLIENTLOG_H */

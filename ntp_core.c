@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2015
+ * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -71,10 +71,8 @@ struct NCR_Instance_Record {
                                    (client/server or symmetric active peer) */
   OperatingMode opmode;         /* Whether we are sampling this source
                                    or not and in what way */
-  int timer_running;            /* Boolean indicating whether we have a timeout
-                                   pending to transmit to the source */
-  SCH_TimeoutID timeout_id;     /* Scheduler's timeout ID, if we are
-                                   running on a timer. */
+  SCH_TimeoutID rx_timeout_id;  /* Timeout ID for latest received response */
+  SCH_TimeoutID tx_timeout_id;  /* Timeout ID for next transmission */
   int tx_suspended;             /* Boolean indicating we can't transmit yet */
 
   int auto_offline;             /* If 1, automatically go offline if server/peer
@@ -217,6 +215,9 @@ static ARR_Instance broadcasts;
 /* Invalid stratum number */
 #define NTP_INVALID_STRATUM 0
 
+/* Maximum allowed time for server to process client packet */
+#define MAX_SERVER_INTERVAL 4.0
+
 /* Minimum and maximum allowed poll interval */
 #define MIN_POLL 0
 #define MAX_POLL 24
@@ -285,8 +286,8 @@ do_time_checks(void)
   NTP_int64 ntv1, ntv2;
   int r;
 
-  UTI_TimevalToInt64(&tv1, &ntv1, 0);
-  UTI_TimevalToInt64(&tv2, &ntv2, 0);
+  UTI_TimevalToInt64(&tv1, &ntv1, NULL);
+  UTI_TimevalToInt64(&tv2, &ntv2, NULL);
   UTI_Int64ToTimeval(&ntv1, &tv1);
   UTI_Int64ToTimeval(&ntv2, &tv2);
 
@@ -353,20 +354,20 @@ restart_timeout(NCR_Instance inst, double delay)
 {
   /* Check if we can transmit */
   if (inst->tx_suspended) {
-    assert(!inst->timer_running);
+    assert(!inst->tx_timeout_id);
     return;
   }
 
-  /* Stop old timer if running */
-  if (inst->timer_running)
-    SCH_RemoveTimeout(inst->timeout_id);
+  /* Stop both rx and tx timers if running */
+  SCH_RemoveTimeout(inst->rx_timeout_id);
+  inst->rx_timeout_id = 0;
+  SCH_RemoveTimeout(inst->tx_timeout_id);
 
   /* Start new timer for transmission */
-  inst->timeout_id = SCH_AddTimeoutInClass(delay, SAMPLING_SEPARATION,
-                                           SAMPLING_RANDOMNESS,
-                                           SCH_NtpSamplingClass,
-                                           transmit_timeout, (void *)inst);
-  inst->timer_running = 1;
+  inst->tx_timeout_id = SCH_AddTimeoutInClass(delay, SAMPLING_SEPARATION,
+                                              SAMPLING_RANDOMNESS,
+                                              SCH_NtpSamplingClass,
+                                              transmit_timeout, (void *)inst);
 }
 
 /* ================================================== */
@@ -374,14 +375,28 @@ restart_timeout(NCR_Instance inst, double delay)
 static void
 start_initial_timeout(NCR_Instance inst)
 {
-  if (!inst->timer_running) {
+  double delay, last_tx;
+  struct timeval now;
+
+  if (!inst->tx_timeout_id) {
     /* This will be the first transmission after mode change */
 
     /* Mark source active */
     SRC_SetActive(inst->source);
   }
 
-  restart_timeout(inst, INITIAL_DELAY);
+  /* In case the offline period was too short, adjust the delay to keep
+     the interval between packets at least as long as the current polling
+     interval */
+  SCH_GetLastEventTime(&now, NULL, NULL);
+  UTI_DiffTimevalsToDouble(&last_tx, &now, &inst->local_tx);
+  if (last_tx < 0.0)
+    last_tx = 0.0;
+  delay = get_transmit_delay(inst, 0, 0.0) - last_tx;
+  if (delay < INITIAL_DELAY)
+    delay = INITIAL_DELAY;
+
+  restart_timeout(inst, delay);
 }
 
 /* ================================================== */
@@ -393,6 +408,9 @@ close_client_socket(NCR_Instance inst)
     NIO_CloseClientSocket(inst->local_addr.sock_fd);
     inst->local_addr.sock_fd = INVALID_SOCK_FD;
   }
+
+  SCH_RemoveTimeout(inst->rx_timeout_id);
+  inst->rx_timeout_id = 0;
 }
 
 /* ================================================== */
@@ -401,10 +419,9 @@ static void
 take_offline(NCR_Instance inst)
 {
   inst->opmode = MD_OFFLINE;
-  if (inst->timer_running) {
-    SCH_RemoveTimeout(inst->timeout_id);
-    inst->timer_running = 0;
-  }
+
+  SCH_RemoveTimeout(inst->tx_timeout_id);
+  inst->tx_timeout_id = 0;
 
   /* Mark source unreachable */
   SRC_ResetReachability(inst->source);
@@ -480,22 +497,29 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
     result->do_auth = 1;
     result->auth_key_id = params->authkey;
     if (!KEY_KeyKnown(result->auth_key_id)) {
-      LOG(LOGS_WARN, LOGF_NtpCore, "Source %s added with unknown key %"PRIu32,
-          UTI_IPToString(&result->remote_addr.ip_addr), result->auth_key_id);
+      LOG(LOGS_WARN, LOGF_NtpCore, "Key %"PRIu32" used by source %s is %s",
+          result->auth_key_id, UTI_IPToString(&result->remote_addr.ip_addr),
+          "missing");
+    } else if (!KEY_CheckKeyLength(result->auth_key_id)) {
+      LOG(LOGS_WARN, LOGF_NtpCore, "Key %"PRIu32" used by source %s is %s",
+          result->auth_key_id, UTI_IPToString(&result->remote_addr.ip_addr),
+          "too short");
     }
   }
 
   /* Create a source instance for this NTP source */
   result->source = SRC_CreateNewInstance(UTI_IPToRefid(&remote_addr->ip_addr),
-                                         SRC_NTP, params->sel_option,
+                                         SRC_NTP, params->sel_options,
                                          &result->remote_addr.ip_addr,
                                          params->min_samples, params->max_samples);
 
-  result->timer_running = 0;
-  result->timeout_id = 0;
+  result->rx_timeout_id = 0;
+  result->tx_timeout_id = 0;
   result->tx_suspended = 1;
   result->opmode = params->online ? MD_ONLINE : MD_OFFLINE;
   result->local_poll = result->minpoll;
+  result->local_tx.tv_sec = 0;
+  result->local_tx.tv_usec = 0;
   
   NCR_ResetInstance(result);
 
@@ -553,8 +577,6 @@ NCR_ResetInstance(NCR_Instance instance)
   instance->remote_orig.lo = 0;
   instance->local_rx.tv_sec = 0;
   instance->local_rx.tv_usec = 0;
-  instance->local_tx.tv_sec = 0;
-  instance->local_tx.tv_usec = 0;
   instance->local_ntp_tx.hi = 0;
   instance->local_ntp_tx.lo = 0;
 
@@ -562,7 +584,7 @@ NCR_ResetInstance(NCR_Instance instance)
     instance->local_poll = instance->minpoll;
 
     /* The timer was set with a longer poll interval, restart it */
-    if (instance->timer_running)
+    if (instance->tx_timeout_id)
       restart_timeout(instance, get_transmit_delay(instance, 0, 0.0));
   }
 }
@@ -739,6 +761,22 @@ get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx)
 }
 
 /* ================================================== */
+/* Timeout handler for closing the client socket when no acceptable
+   reply can be received from the server */
+
+static void
+receive_timeout(void *arg)
+{
+  NCR_Instance inst = (NCR_Instance)arg;
+
+  DEBUG_LOG(LOGF_NtpCore, "Receive timeout for [%s:%d]",
+            UTI_IPToString(&inst->remote_addr.ip_addr), inst->remote_addr.port);
+
+  inst->rx_timeout_id = 0;
+  close_client_socket(inst);
+}
+
+/* ================================================== */
 
 static int
 transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
@@ -762,13 +800,14 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
                 )
 {
   NTP_Packet message;
-  int leap, auth_len, length, ret;
+  int leap, auth_len, length, ret, precision;
   struct timeval local_receive, local_transmit;
+  NTP_int64 ts_fuzz;
 
   /* Parameters read from reference module */
   int are_we_synchronised, our_stratum, smooth_time;
   NTP_Leap leap_status;
-  uint32_t our_ref_id, ts_fuzz;
+  uint32_t our_ref_id;
   struct timeval our_ref_time;
   double our_root_delay, our_root_dispersion, smooth_offset;
 
@@ -777,28 +816,38 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     version = NTP_VERSION;
   }
 
-  /* This is accurate enough and cheaper than calling LCL_ReadCookedTime.
-     A more accurate time stamp will be taken later in this function. */
-  SCH_GetLastEventTime(&local_transmit, NULL, NULL);
+  smooth_time = 0;
+  smooth_offset = 0.0;
 
-  REF_GetReferenceParams(&local_transmit,
-                         &are_we_synchronised, &leap_status,
-                         &our_stratum,
-                         &our_ref_id, &our_ref_time,
-                         &our_root_delay, &our_root_dispersion);
-
-  /* Get current smoothing offset when sending packet to a client */
-  if (SMT_IsEnabled() && (my_mode == MODE_SERVER || my_mode == MODE_BROADCAST)) {
-    smooth_offset = SMT_GetOffset(&local_transmit);
-    smooth_time = fabs(smooth_offset) > LCL_GetSysPrecisionAsQuantum();
-
-    /* Suppress leap second when smoothing and slew mode are enabled */
-    if (REF_GetLeapMode() == REF_LeapModeSlew &&
-        (leap_status == LEAP_InsertSecond || leap_status == LEAP_DeleteSecond))
-      leap_status = LEAP_Normal;
+  if (my_mode == MODE_CLIENT) {
+    /* Don't reveal local time or state of the clock in client packets */
+    precision = 32;
+    are_we_synchronised = leap_status = our_stratum = our_ref_id = 0;
+    our_ref_time.tv_sec = our_ref_time.tv_usec = 0;
+    our_root_delay = our_root_dispersion = 0.0;
   } else {
-    smooth_time = 0;
-    smooth_offset = 0.0;
+    /* This is accurate enough and cheaper than calling LCL_ReadCookedTime.
+       A more accurate timestamp will be taken later in this function. */
+    SCH_GetLastEventTime(&local_transmit, NULL, NULL);
+
+    REF_GetReferenceParams(&local_transmit,
+                           &are_we_synchronised, &leap_status,
+                           &our_stratum,
+                           &our_ref_id, &our_ref_time,
+                           &our_root_delay, &our_root_dispersion);
+
+    /* Get current smoothing offset when sending packet to a client */
+    if (SMT_IsEnabled() && (my_mode == MODE_SERVER || my_mode == MODE_BROADCAST)) {
+      smooth_offset = SMT_GetOffset(&local_transmit);
+      smooth_time = fabs(smooth_offset) > LCL_GetSysPrecisionAsQuantum();
+
+      /* Suppress leap second when smoothing and slew mode are enabled */
+      if (REF_GetLeapMode() == REF_LeapModeSlew &&
+          (leap_status == LEAP_InsertSecond || leap_status == LEAP_DeleteSecond))
+        leap_status = LEAP_Normal;
+    }
+
+    precision = LCL_GetSysPrecisionAsLog();
   }
 
   if (smooth_time) {
@@ -825,7 +874,7 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
   }
  
   message.poll = my_poll;
-  message.precision = LCL_GetSysPrecisionAsLog();
+  message.precision = precision;
 
   /* If we're sending a client mode packet and we aren't synchronized yet, 
      we might have to set up artificial values for some of these parameters */
@@ -836,19 +885,22 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
 
   /* Now fill in timestamps */
 
-  UTI_TimevalToInt64(&our_ref_time, &message.reference_ts, 0);
+  UTI_TimevalToInt64(&our_ref_time, &message.reference_ts, NULL);
 
   /* Originate - this comes from the last packet the source sent us */
   message.originate_ts = *orig_ts;
+
+  /* Prepare random bits which will be added to the receive timestamp */
+  UTI_GetInt64Fuzz(&ts_fuzz, precision);
 
   /* Receive - this is when we received the last packet from the source.
      This timestamp will have been adjusted so that it will now look to
      the source like we have been running on our latest estimate of
      frequency all along */
-  UTI_TimevalToInt64(&local_receive, &message.receive_ts, 0);
+  UTI_TimevalToInt64(&local_receive, &message.receive_ts, &ts_fuzz);
 
   /* Prepare random bits which will be added to the transmit timestamp. */
-  ts_fuzz = UTI_GetNTPTsFuzz(message.precision);
+  UTI_GetInt64Fuzz(&ts_fuzz, precision);
 
   /* Transmit - this our local time right now!  Also, we might need to
      store this for our own use later, next time we receive a message
@@ -866,7 +918,7 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
        take to generate the authentication data. */
     local_transmit.tv_usec += KEY_GetAuthDelay(key_id);
     UTI_NormaliseTimeval(&local_transmit);
-    UTI_TimevalToInt64(&local_transmit, &message.transmit_ts, ts_fuzz);
+    UTI_TimevalToInt64(&local_transmit, &message.transmit_ts, &ts_fuzz);
 
     auth_len = KEY_GenerateAuth(key_id, (unsigned char *) &message,
         offsetof(NTP_Packet, auth_keyid),
@@ -886,7 +938,7 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
       message.auth_keyid = 0;
       length += sizeof (message.auth_keyid);
     }
-    UTI_TimevalToInt64(&local_transmit, &message.transmit_ts, ts_fuzz);
+    UTI_TimevalToInt64(&local_transmit, &message.transmit_ts, &ts_fuzz);
   }
 
   ret = NIO_SendPacket(&message, where_to, from, length);
@@ -911,7 +963,7 @@ transmit_timeout(void *arg)
   NCR_Instance inst = (NCR_Instance) arg;
   int sent;
 
-  inst->timer_running = 0;
+  inst->tx_timeout_id = 0;
 
   switch (inst->opmode) {
     case MD_BURST_WAS_ONLINE:
@@ -1008,8 +1060,14 @@ transmit_timeout(void *arg)
 
   /* Restart timer for this message */
   restart_timeout(inst, get_transmit_delay(inst, 1, 0.0));
-}
 
+  /* If a client packet was just sent, schedule a timeout to close the socket
+     at the time when all server replies would fail the delay test, so the
+     socket is not open for longer than necessary */
+  if (inst->mode == MODE_CLIENT)
+    inst->rx_timeout_id = SCH_AddTimeoutByDelay(inst->max_delay + MAX_SERVER_INTERVAL,
+                                                receive_timeout, (void *)inst);
+}
 
 /* ================================================== */
 
@@ -1273,9 +1331,10 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
     
     /* Additional tests required to pass before accumulating the sample */
 
-    /* Test A requires that the round trip delay is less than an
-       administrator-defined value */ 
-    testA = delay <= inst->max_delay;
+    /* Test A requires that the peer delay is not larger than the configured
+       maximum and in client mode also that the server processing time is sane */
+    testA = delay <= inst->max_delay &&
+            (inst->mode != MODE_CLIENT || remote_interval <= MAX_SERVER_INTERVAL);
 
     /* Test B requires that the ratio of the round trip delay to the
        minimum one currently in the stats data register is less than an
@@ -1328,24 +1387,6 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
 
   /* Reduce polling rate if KoD RATE was received */
   if (kod_rate) {
-    if (message->poll > inst->minpoll) {
-      /* Set our minpoll to message poll, but use a reasonable maximum */
-      if (message->poll <= MAX_KOD_RATE_POLL)
-        inst->minpoll = message->poll;
-      else if (inst->minpoll < MAX_KOD_RATE_POLL)
-        inst->minpoll = MAX_KOD_RATE_POLL;
-
-      if (inst->minpoll > inst->maxpoll)
-        inst->maxpoll = inst->minpoll;
-      if (inst->minpoll > inst->local_poll)
-        inst->local_poll = inst->minpoll;
-
-      LOG(LOGS_WARN, LOGF_NtpCore,
-          "Received KoD RATE with poll %d from %s, minpoll set to %d",
-          message->poll, UTI_IPToString(&inst->remote_addr.ip_addr),
-          inst->minpoll);
-    }
-
     /* Stop ongoing burst */
     if (inst->opmode == MD_BURST_WAS_OFFLINE || inst->opmode == MD_BURST_WAS_ONLINE) {
       inst->burst_good_samples_to_go = 0;
@@ -1370,8 +1411,7 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
                            &sample_time,
                            offset, delay, dispersion,
                            root_delay, root_dispersion,
-                           message->stratum > inst->min_stratum ?
-                             message->stratum : inst->min_stratum,
+                           MAX(message->stratum, inst->min_stratum),
                            (NTP_Leap) pkt_leap);
 
       SRC_SelectSource(inst->source);
@@ -1423,7 +1463,7 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
     }
 
     /* Get rid of old timeout and start a new one */
-    assert(inst->timer_running);
+    assert(inst->tx_timeout_id);
     restart_timeout(inst, delay_time);
   }
 
@@ -1483,7 +1523,7 @@ NCR_ProcessKnown
  int length                     /* the length of the received packet */
  )
 {
-  int pkt_mode, proc_packet, proc_as_unknown, log_peer_access;
+  int pkt_mode, proc_packet, proc_as_unknown;
 
   if (!check_packet_format(message, length))
     return 0;
@@ -1491,7 +1531,6 @@ NCR_ProcessKnown
   pkt_mode = NTP_LVM_TO_MODE(message->lvm);
   proc_packet = 0;
   proc_as_unknown = 0;
-  log_peer_access = 0;
 
   /* Now, depending on the mode we decide what to do */
   switch (pkt_mode) {
@@ -1499,7 +1538,6 @@ NCR_ProcessKnown
       switch (inst->mode) {
         case MODE_ACTIVE:
           /* Ordinary symmetric peering */
-          log_peer_access = 1;
           proc_packet = 1;
           break;
         case MODE_PASSIVE:
@@ -1522,7 +1560,6 @@ NCR_ProcessKnown
         case MODE_ACTIVE:
           /* This would arise if we have the remote configured as a peer and
              he does not have us configured */
-          log_peer_access = 1;
           proc_packet = 1;
           break;
         case MODE_PASSIVE:
@@ -1576,9 +1613,6 @@ NCR_ProcessKnown
       break;
   }
 
-  if (log_peer_access)
-    CLG_LogNTPPeerAccess(&inst->remote_addr.ip_addr, now->tv_sec);
-
   if (proc_packet) {
     /* Check if the reply was received by the socket that sent the request */
     if (local_addr->sock_fd != inst->local_addr.sock_fd) {
@@ -1622,7 +1656,7 @@ NCR_ProcessUnknown
  )
 {
   NTP_Mode pkt_mode, my_mode;
-  int has_auth, valid_auth;
+  int has_auth, valid_auth, log_index;
   uint32_t key_id;
 
   /* Ignore the packet if it wasn't received by server socket */
@@ -1648,16 +1682,22 @@ NCR_ProcessUnknown
     case MODE_ACTIVE:
       /* We are symmetric passive, even though we don't ever lock to him */
       my_mode = MODE_PASSIVE;
-      CLG_LogNTPPeerAccess(&remote_addr->ip_addr, now->tv_sec);
       break;
     case MODE_CLIENT:
       /* Reply with server packet */
       my_mode = MODE_SERVER;
-      CLG_LogNTPClientAccess(&remote_addr->ip_addr, now->tv_sec);
       break;
     default:
       /* Discard */
       DEBUG_LOG(LOGF_NtpCore, "NTP packet discarded pkt_mode=%d", pkt_mode);
+      return;
+  }
+
+  log_index = CLG_LogNTPAccess(&remote_addr->ip_addr, now);
+
+  /* Don't reply to all requests if the rate is excessive */
+  if (log_index >= 0 && CLG_LimitNTPResponseRate(log_index)) {
+      DEBUG_LOG(LOGF_NtpCore, "NTP packet discarded to limit response rate");
       return;
   }
 

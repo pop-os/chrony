@@ -80,8 +80,7 @@ static int max_offset_delay;
 static int max_offset_ignore;
 static double max_offset;
 
-/* Flag and threshold for logging clock changes to syslog */
-static int do_log_change;
+/* Threshold for logging clock changes to syslog */
 static double log_change_threshold;
 
 /* Flag, threshold and user for sending mail notification on large clock changes */
@@ -106,7 +105,6 @@ static REF_LeapMode leap_mode;
 static int leap_in_progress;
 
 /* Timer for the leap second handler */
-static int leap_timer_running;
 static SCH_TimeoutID leap_timeout_id;
 
 /* Name of a system timezone containing leap seconds occuring at midnight */
@@ -234,7 +232,7 @@ REF_Initialise(void)
 
   enable_local_stratum = CNF_AllowLocalReference(&local_stratum);
 
-  leap_timer_running = 0;
+  leap_timeout_id = 0;
   leap_in_progress = 0;
   leap_mode = CNF_GetLeapSecMode();
   /* Switch to step mode if the system driver doesn't support leap */
@@ -255,8 +253,8 @@ REF_Initialise(void)
 
   CNF_GetMakeStep(&make_step_limit, &make_step_threshold);
   CNF_GetMaxChange(&max_offset_delay, &max_offset_ignore, &max_offset);
-  CNF_GetLogChange(&do_log_change, &log_change_threshold);
   CNF_GetMailOnChange(&do_mail_change, &mail_change_threshold, &mail_change_user);
+  log_change_threshold = CNF_GetLogChange();
 
   CNF_GetFallbackDrifts(&fb_drift_min, &fb_drift_max);
 
@@ -264,7 +262,7 @@ REF_Initialise(void)
     fb_drifts = MallocArray(struct fb_drift, fb_drift_max - fb_drift_min + 1);
     memset(fb_drifts, 0, sizeof (struct fb_drift) * (fb_drift_max - fb_drift_min + 1));
     next_fb_drift = 0;
-    fb_drift_timeout_id = -1;
+    fb_drift_timeout_id = 0;
   }
 
   last_ref_update.tv_sec = 0;
@@ -272,11 +270,6 @@ REF_Initialise(void)
   last_ref_update_interval = 0.0;
 
   LCL_AddParameterChangeHandler(handle_slew, NULL);
-
-  /* And just to prevent anything wierd ... */
-  if (do_log_change) {
-    log_change_threshold = fabs(log_change_threshold);
-  }
 
   /* Make first entry in tracking log */
   REF_SetUnsynchronised();
@@ -428,10 +421,8 @@ update_fb_drifts(double freq_ppm, double update_interval)
     next_fb_drift = 0;
   }
 
-  if (fb_drift_timeout_id != -1) {
-    SCH_RemoveTimeout(fb_drift_timeout_id);
-    fb_drift_timeout_id = -1;
-  }
+  SCH_RemoveTimeout(fb_drift_timeout_id);
+  fb_drift_timeout_id = 0;
 
   if (update_interval < 1.0 || update_interval > last_ref_update_interval * 4.0)
     return;
@@ -464,7 +455,7 @@ fb_drift_timeout(void *arg)
 {
   assert(next_fb_drift >= fb_drift_min && next_fb_drift <= fb_drift_max);
 
-  fb_drift_timeout_id = -1;
+  fb_drift_timeout_id = 0;
 
   DEBUG_LOG(LOGF_Reference, "Fallback drift %d active: %f ppm",
             next_fb_drift, fb_drifts[next_fb_drift - fb_drift_min].freq);
@@ -481,7 +472,7 @@ schedule_fb_drift(struct timeval *now)
   double unsynchronised;
   struct timeval when;
 
-  if (fb_drift_timeout_id != -1)
+  if (fb_drift_timeout_id)
     return; /* already scheduled */
 
   UTI_DiffTimevalsToDouble(&unsynchronised, now, &last_ref_update);
@@ -539,8 +530,7 @@ maybe_log_offset(double offset, time_t now)
 
   abs_offset = fabs(offset);
 
-  if (do_log_change &&
-      (abs_offset > log_change_threshold)) {
+  if (abs_offset > log_change_threshold) {
     LOG(LOGS_WARN, LOGF_Reference,
         "System clock wrong by %.6f seconds, adjustment started",
         -offset);
@@ -686,7 +676,7 @@ get_tz_leap(time_t when)
 static void
 leap_end_timeout(void *arg)
 {
-  leap_timer_running = 0;
+  leap_timeout_id = 0;
   leap_in_progress = 0;
   our_leap_sec = 0;
 
@@ -738,11 +728,9 @@ set_leap_timeout(time_t now)
   struct timeval when;
 
   /* Stop old timer if there is one */
-  if (leap_timer_running) {
-    SCH_RemoveTimeout(leap_timeout_id);
-    leap_timer_running = 0;
-    leap_in_progress = 0;
-  }
+  SCH_RemoveTimeout(leap_timeout_id);
+  leap_timeout_id = 0;
+  leap_in_progress = 0;
 
   if (!our_leap_sec)
     return;
@@ -760,7 +748,6 @@ set_leap_timeout(time_t now)
   }
 
   leap_timeout_id = SCH_AddTimeout(&when, leap_start_timeout, NULL);
-  leap_timer_running = 1;
 }
 
 /* ================================================== */

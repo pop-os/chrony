@@ -49,6 +49,7 @@
 #include "refclock.h"
 #include "clientlog.h"
 #include "nameserv.h"
+#include "privops.h"
 #include "smooth.h"
 #include "tempcomp.h"
 #include "util.h"
@@ -65,6 +66,18 @@ static int exit_status = 0;
 static int reload = 0;
 
 static REF_Mode ref_mode = REF_ModeNormal;
+
+/* ================================================== */
+
+static void
+do_platform_checks(void)
+{
+  /* Require at least 32-bit integers, two's complement representation and
+     the usual implementation of conversion of unsigned integers */
+  assert(sizeof (int) >= 4);
+  assert(-1 == ~0);
+  assert((int32_t)4294967295U == (int32_t)-1);
+}
 
 /* ================================================== */
 
@@ -107,6 +120,7 @@ MAI_CleanupAndExit(void)
   SYS_Finalise();
   SCH_Finalise();
   LCL_Finalise();
+  PRV_Finalise();
 
   delete_pidfile();
   
@@ -351,6 +365,8 @@ int main
   int system_log = 1;
   int config_args = 0;
 
+  do_platform_checks();
+
   LOG_Initialise();
 
   /* Parse command line options */
@@ -463,6 +479,7 @@ int main
    * be done *AFTER* the daemon-creation fork() */
   write_lockfile();
 
+  PRV_Initialise();
   LCL_Initialise();
   SCH_Initialise();
   SYS_Initialise();

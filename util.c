@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009, 2012-2015
+ * Copyright (C) Miroslav Lichvar  2009, 2012-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -352,9 +352,37 @@ UTI_IPToRefid(IPAddr *ip)
         assert(0);
         return 0;
       };
-      return buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3];
+      return (uint32_t)buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3];
   }
   return 0;
+}
+
+/* ================================================== */
+
+uint32_t
+UTI_IPToHash(IPAddr *ip)
+{
+  unsigned char *addr;
+  unsigned int i, len;
+  uint32_t hash;
+
+  switch (ip->family) {
+    case IPADDR_INET4:
+      addr = (unsigned char *)&ip->addr.in4;
+      len = sizeof (ip->addr.in4);
+      break;
+    case IPADDR_INET6:
+      addr = ip->addr.in6;
+      len = sizeof (ip->addr.in6);
+      break;
+    default:
+      return 0;
+  }
+
+  for (i = 0, hash = 0; i < len; i++)
+    hash = 71 * hash + addr[i];
+
+  return hash;
 }
 
 /* ================================================== */
@@ -566,16 +594,21 @@ UTI_AdjustTimeval(struct timeval *old_tv, struct timeval *when, struct timeval *
 
 /* ================================================== */
 
-uint32_t
-UTI_GetNTPTsFuzz(int precision)
+void
+UTI_GetInt64Fuzz(NTP_int64 *ts, int precision)
 {
-  uint32_t fuzz;
-  int fuzz_bits;
-  
-  fuzz_bits = 32 - 1 + precision;
-  fuzz = random() % (1 << fuzz_bits);
+  int start, bits;
 
-  return fuzz;
+  assert(precision >= -32 && precision <= 32);
+
+  start = sizeof (*ts) - (precision + 32 + 7) / 8;
+  ts->hi = ts->lo = 0;
+
+  UTI_GetRandomBytes((unsigned char *)ts + start, sizeof (*ts) - start);
+
+  bits = (precision + 32) % 8;
+  if (bits)
+    ((unsigned char *)ts)[start] %= 1U << bits;
 }
 
 /* ================================================== */
@@ -608,9 +641,9 @@ UTI_DoubleToInt32(double x)
 
 void
 UTI_TimevalToInt64(struct timeval *src,
-                   NTP_int64 *dest, uint32_t fuzz)
+                   NTP_int64 *dest, NTP_int64 *fuzz)
 {
-  uint32_t lo, sec, usec;
+  uint32_t hi, lo, sec, usec;
 
   sec = (uint32_t)src->tv_sec;
   usec = (uint32_t)src->tv_usec;
@@ -618,18 +651,22 @@ UTI_TimevalToInt64(struct timeval *src,
   /* Recognize zero as a special case - it always signifies
      an 'unknown' value */
   if (!usec && !sec) {
-    dest->hi = dest->lo = 0;
+    hi = lo = 0;
   } else {
-    dest->hi = htonl(sec + JAN_1970);
+    hi = htonl(sec + JAN_1970);
 
     /* This formula gives an error of about 0.1us worst case */
-    lo = 4295 * usec - (usec>>5) - (usec>>9);
+    lo = htonl(4295 * usec - (usec >> 5) - (usec >> 9));
 
     /* Add the fuzz */
-    lo ^= fuzz;
-
-    dest->lo = htonl(lo);
+    if (fuzz) {
+      hi ^= fuzz->hi;
+      lo ^= fuzz->lo;
+    }
   }
+
+  dest->hi = hi;
+  dest->lo = lo;
 }
 
 /* ================================================== */
@@ -759,11 +796,19 @@ UTI_TimevalHostToNetwork(struct timeval *src, Timeval *dest)
 double
 UTI_FloatNetworkToHost(Float f)
 {
-  int32_t exp, coef, x;
+  int32_t exp, coef;
+  uint32_t x;
 
   x = ntohl(f.f);
+
   exp = (x >> FLOAT_COEF_BITS) - FLOAT_COEF_BITS;
-  coef = x << FLOAT_EXP_BITS >> FLOAT_EXP_BITS;
+  if (exp >= 1 << (FLOAT_EXP_BITS - 1))
+      exp -= 1 << FLOAT_EXP_BITS;
+
+  coef = x % (1U << FLOAT_COEF_BITS);
+  if (coef >= 1 << (FLOAT_COEF_BITS - 1))
+      coef -= 1 << FLOAT_COEF_BITS;
+
   return coef * pow(2.0, exp);
 }
 
@@ -820,7 +865,7 @@ UTI_FloatHostToNetwork(double x)
   if (neg)
     coef = (uint32_t)-coef << FLOAT_EXP_BITS >> FLOAT_EXP_BITS;
 
-  f.f = htonl(exp << FLOAT_COEF_BITS | coef);
+  f.f = htonl((uint32_t)exp << FLOAT_COEF_BITS | coef);
   return f;
 }
 
@@ -1069,4 +1114,53 @@ UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid)
   }
 
   return 1;
+}
+
+/* ================================================== */
+
+void
+UTI_DropRoot(uid_t uid, gid_t gid)
+{
+  /* Drop supplementary groups */
+  if (setgroups(0, NULL))
+    LOG_FATAL(LOGF_Util, "setgroups() failed : %s", strerror(errno));
+
+  /* Set effective, saved and real group ID */
+  if (setgid(gid))
+    LOG_FATAL(LOGF_Util, "setgid(%d) failed : %s", gid, strerror(errno));
+
+  /* Set effective, saved and real user ID */
+  if (setuid(uid))
+    LOG_FATAL(LOGF_Util, "setuid(%d) failed : %s", uid, strerror(errno));
+
+  DEBUG_LOG(LOGF_Util, "Dropped root privileges: UID %d GID %d", uid, gid);
+}
+
+/* ================================================== */
+
+#define DEV_URANDOM "/dev/urandom"
+
+void
+UTI_GetRandomBytesUrandom(void *buf, unsigned int len)
+{
+  static FILE *f = NULL;
+
+  if (!f)
+    f = fopen(DEV_URANDOM, "r");
+  if (!f)
+    LOG_FATAL(LOGF_Util, "Can't open %s : %s", DEV_URANDOM, strerror(errno));
+  if (fread(buf, 1, len, f) != len)
+    LOG_FATAL(LOGF_Util, "Can't read from %s", DEV_URANDOM);
+}
+
+/* ================================================== */
+
+void
+UTI_GetRandomBytes(void *buf, unsigned int len)
+{
+#ifdef HAVE_ARC4RANDOM
+  arc4random_buf(buf, len);
+#else
+  UTI_GetRandomBytesUrandom(buf, len);
+#endif
 }

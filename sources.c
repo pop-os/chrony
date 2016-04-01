@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2014
+ * Copyright (C) Miroslav Lichvar  2011-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -118,7 +118,7 @@ struct SRC_Instance_Record {
   SRC_Type type;
 
   /* Options used when selecting sources */ 
-  SRC_SelectOption sel_option;
+  int sel_options;
 
   /* Score against currently selected source */
   double sel_score;
@@ -209,7 +209,7 @@ void SRC_Finalise(void)
 /* Function to create a new instance.  This would be called by one of
    the individual source-type instance creation routines. */
 
-SRC_Instance SRC_CreateNewInstance(uint32_t ref_id, SRC_Type type, SRC_SelectOption sel_option, IPAddr *addr, int min_samples, int max_samples)
+SRC_Instance SRC_CreateNewInstance(uint32_t ref_id, SRC_Type type, int sel_options, IPAddr *addr, int min_samples, int max_samples)
 {
   SRC_Instance result;
 
@@ -241,7 +241,7 @@ SRC_Instance SRC_CreateNewInstance(uint32_t ref_id, SRC_Type type, SRC_SelectOpt
 
   result->index = n_sources;
   result->type = type;
-  result->sel_option = sel_option;
+  result->sel_options = sel_options;
 
   SRC_SetRefid(result, ref_id, addr);
   SRC_ResetInstance(result);
@@ -414,7 +414,7 @@ SRC_UpdateReachability(SRC_Instance inst, int reachable)
 {
   inst->reachability <<= 1;
   inst->reachability |= !!reachable;
-  inst->reachability &= ~(-1 << SOURCE_REACH_BITS);
+  inst->reachability %= 1U << SOURCE_REACH_BITS;
 
   if (inst->reachability_size < SOURCE_REACH_BITS)
       inst->reachability_size++;
@@ -602,8 +602,9 @@ SRC_SelectSource(SRC_Instance updated_inst)
   struct SelectInfo *si;
   struct timeval now, ref_time;
   int i, j, j1, j2, index, sel_prefer, n_endpoints, n_sel_sources;
-  int n_badstats_sources, max_sel_reach, max_badstat_reach;
-  int depth, best_depth, combined, stratum, min_stratum, max_score_index;
+  int n_badstats_sources, max_sel_reach, max_badstat_reach, sel_req_source;
+  int depth, best_depth, trust_depth, best_trust_depth;
+  int combined, stratum, min_stratum, max_score_index;
   double src_offset, src_offset_sd, src_frequency, src_skew;
   double src_root_delay, src_root_dispersion;
   double best_lo, best_hi, distance, sel_src_distance, max_score;
@@ -630,14 +631,20 @@ SRC_SelectSource(SRC_Instance updated_inst)
   n_endpoints = 0;
   n_sel_sources = 0;
   n_badstats_sources = 0;
+  sel_req_source = 0;
   max_sel_reach = max_badstat_reach = 0;
   max_reach_sample_ago = 0.0;
 
   for (i = 0; i < n_sources; i++) {
     assert(sources[i]->status != SRC_OK);
 
+    /* If some sources are specified with the require option, at least one
+       of them will have to be selectable in order to update the clock */
+    if (sources[i]->sel_options & SRC_SELECT_REQUIRE)
+      sel_req_source = 1;
+
     /* Ignore sources which were added with the noselect option */
-    if (sources[i]->sel_option == SRC_SelectNoselect) {
+    if (sources[i]->sel_options & SRC_SELECT_NOSELECT) {
       sources[i]->status = SRC_UNSELECTABLE;
       continue;
     }
@@ -736,22 +743,27 @@ SRC_SelectSource(SRC_Instance updated_inst)
      If we get a case like
 
      <----------------------->
-     <-->
-     <-->
-     <===========>
+         <-->
+                  <-->
+         <===========>
 
      we will build the interval as shown with '=', whereas with an extra source we get
+
      <----------------------->
-     <------->
-     <-->
-     <-->
-     <==>
+        <------->
+         <-->
+                  <-->
+         <==>
 
      The first case is just bad luck - we need extra sources to
      detect the falseticker, so just make an arbitrary choice based
      on stratum & stability etc.
+
+     Intervals from sources specified with the trust option have higher
+     priority in the search.
      */
 
+  trust_depth = best_trust_depth = 0;
   depth = best_depth = 0;
   best_lo = best_hi = 0.0;
 
@@ -759,14 +771,20 @@ SRC_SelectSource(SRC_Instance updated_inst)
     switch (sort_list[i].tag) {
       case LOW:
         depth++;
-        if (depth > best_depth) {
+        if (sources[sort_list[i].index]->sel_options & SRC_SELECT_TRUST)
+          trust_depth++;
+        if (trust_depth > best_trust_depth ||
+            (trust_depth == best_trust_depth && depth > best_depth)) {
+          best_trust_depth = trust_depth;
           best_depth = depth;
           best_lo = sort_list[i].offset;
         }
         break;
       case HIGH:
-        if (depth == best_depth)
+        if (trust_depth == best_trust_depth && depth == best_depth)
           best_hi = sort_list[i].offset;
+        if (sources[sort_list[i].index]->sel_options & SRC_SELECT_TRUST)
+          trust_depth--;
         depth--;
         break;
       default:
@@ -774,9 +792,9 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
   }
 
-  if (best_depth <= n_sel_sources / 2) {
-    /* Could not even get half the reachable sources to agree -
-       clearly we can't synchronise. */
+  if (best_depth <= n_sel_sources / 2 && !best_trust_depth) {
+    /* Could not even get half the reachable sources to agree and there
+       are no trusted sources - clearly we can't synchronise */
 
     if (selected_source_index != INVALID_SOURCE) {
       log_selection_message("Can't synchronise: no majority", NULL);
@@ -797,28 +815,35 @@ SRC_SelectSource(SRC_Instance updated_inst)
   n_sel_sources = 0;
 
   for (i = 0; i < n_sources; i++) {
+    /* This should be the same condition to get into the endpoint
+       list */
     if (sources[i]->status != SRC_OK)
       continue;
 
-    /* This should be the same condition to get into the endpoint
-       list */
-    /* Check if source's interval contains the best interval, or
-       is wholly contained within it */
-    if ((sources[i]->sel_info.lo_limit <= best_lo &&
+    /* Check if source's interval contains the best interval, or is wholly
+       contained within it.  If there are any trusted sources the first
+       condition is applied only to them to not allow non-trusted sources to
+       move the final offset outside the interval. */
+    if (((!best_trust_depth || sources[i]->sel_options & SRC_SELECT_TRUST) &&
+         sources[i]->sel_info.lo_limit <= best_lo &&
          sources[i]->sel_info.hi_limit >= best_hi) ||
         (sources[i]->sel_info.lo_limit >= best_lo &&
          sources[i]->sel_info.hi_limit <= best_hi)) {
 
       sel_sources[n_sel_sources++] = i;
+
+      if (sources[i]->sel_options & SRC_SELECT_REQUIRE)
+        sel_req_source = 0;
     } else {
       sources[i]->status = SRC_FALSETICKER;
     }
   }
 
-  if (n_sel_sources == 0 || n_sel_sources < CNF_GetMinSources()) {
+  if (!n_sel_sources || sel_req_source || n_sel_sources < CNF_GetMinSources()) {
     if (selected_source_index != INVALID_SOURCE) {
       log_selection_message("Can't synchronise: %s selectable sources",
-                            n_sel_sources ? "not enough" : "no");
+                            !n_sel_sources ? "no" :
+                            sel_req_source ? "no required source in" : "not enough");
       selected_source_index = INVALID_SOURCE;
     }
     mark_ok_sources(SRC_WAITS_SOURCES);
@@ -844,12 +869,12 @@ SRC_SelectSource(SRC_Instance updated_inst)
   /* If there are any sources with prefer option, reduce the list again
      only to the preferred sources */
   for (i = 0; i < n_sel_sources; i++) {
-    if (sources[sel_sources[i]]->sel_option == SRC_SelectPrefer)
+    if (sources[sel_sources[i]]->sel_options & SRC_SELECT_PREFER)
       break;
   }
   if (i < n_sel_sources) {
     for (i = j = 0; i < n_sel_sources; i++) {
-      if (sources[sel_sources[i]]->sel_option != SRC_SelectPrefer)
+      if (!(sources[sel_sources[i]]->sel_options & SRC_SELECT_PREFER))
         sources[sel_sources[i]]->status = SRC_NONPREFERRED;
       else
         sel_sources[j++] = sel_sources[i];
@@ -885,7 +910,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
   for (i = 0; i < n_sources; i++) {
     /* Reset score for non-selectable sources */
     if (sources[i]->status != SRC_OK ||
-        (sel_prefer && sources[i]->sel_option != SRC_SelectPrefer)) {
+        (sel_prefer && !(sources[i]->sel_options & SRC_SELECT_PREFER))) {
       sources[i]->sel_score = 1.0;
       sources[i]->distant = DISTANT_PENALTY;
       continue;
@@ -1255,20 +1280,7 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
         break;
     }
 
-    switch (src->sel_option) {
-      case SRC_SelectNormal:
-        report->sel_option = RPT_NORMAL;
-        break;
-      case SRC_SelectPrefer:
-        report->sel_option = RPT_PREFER;
-        break;
-      case SRC_SelectNoselect:
-        report->sel_option = RPT_NOSELECT;
-        break;
-      default:
-        assert(0);
-    }
-
+    report->sel_options = src->sel_options;
     report->reachability = src->reachability;
 
     /* Call stats module to fill out estimates */

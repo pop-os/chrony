@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2015
+ * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -130,6 +130,8 @@ static const char permissions[] = {
   PERMIT_OPEN, /* SMOOTHING */
   PERMIT_AUTH, /* SMOOTHTIME */
   PERMIT_AUTH, /* REFRESH */
+  PERMIT_AUTH, /* SERVER_STATS */
+  PERMIT_AUTH, /* CLIENT_ACCESSES_BY_INDEX2 */
 };
 
 /* ================================================== */
@@ -265,7 +267,20 @@ CAM_Initialise(int family)
     command_length = PKL_CommandLength(&r);
     padding_length = PKL_CommandPaddingLength(&r);
     assert(padding_length <= MAX_PADDING_LENGTH && padding_length <= command_length);
-    assert(command_length == 0 || command_length >= offsetof(CMD_Reply, data));
+    assert((command_length >= offsetof(CMD_Request, data) &&
+            command_length <= sizeof (CMD_Request)) || command_length == 0);
+  }
+
+  for (i = 1; i < N_REPLY_TYPES; i++) {
+    CMD_Reply r;
+    int reply_length;
+
+    r.reply = htons(i);
+    r.status = STT_SUCCESS;
+    r.data.manual_list.n_samples = htonl(MAX_MANUAL_LIST_SAMPLES);
+    reply_length = PKL_ReplyLength(&r);
+    assert((reply_length >= offsetof(CMD_Reply, data) &&
+            reply_length <= sizeof (CMD_Reply)) || reply_length == 0);
   }
 
   sock_fdu = -1;
@@ -661,17 +676,11 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
         tx_message->data.source_data.mode    = htons(RPY_SD_MD_REF);
         break;
     }
-    switch (report.sel_option) {
-      case RPT_NORMAL:
-        tx_message->data.source_data.flags = htons(0);
-        break;
-      case RPT_PREFER:
-        tx_message->data.source_data.flags = htons(RPY_SD_FLAG_PREFER);
-        break;
-      case RPT_NOSELECT:
-        tx_message->data.source_data.flags = htons(RPY_SD_FLAG_NOSELECT);
-        break;
-    }
+    tx_message->data.source_data.flags =
+                  htons((report.sel_options & SRC_SELECT_PREFER ? RPY_SD_FLAG_PREFER : 0) |
+                        (report.sel_options & SRC_SELECT_NOSELECT ? RPY_SD_FLAG_NOSELECT : 0) |
+                        (report.sel_options & SRC_SELECT_TRUST ? RPY_SD_FLAG_TRUST : 0) |
+                        (report.sel_options & SRC_SELECT_REQUIRE ? RPY_SD_FLAG_REQUIRE : 0));
     tx_message->data.source_data.reachability = htons(report.reachability);
     tx_message->data.source_data.since_sample = htonl(report.latest_meas_ago);
     tx_message->data.source_data.orig_latest_meas = UTI_FloatHostToNetwork(report.orig_latest_meas);
@@ -764,8 +773,11 @@ handle_add_source(NTP_Source_Type type, CMD_Request *rx_message, CMD_Reply *tx_m
   params.online  = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_ONLINE ? 1 : 0;
   params.auto_offline = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_AUTOOFFLINE ? 1 : 0;
   params.iburst = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_IBURST ? 1 : 0;
-  params.sel_option = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_PREFER ? SRC_SelectPrefer :
-                      ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_NOSELECT ? SRC_SelectNoselect : SRC_SelectNormal;
+  params.sel_options =
+    (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_PREFER ? SRC_SELECT_PREFER : 0) |
+    (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_NOSELECT ? SRC_SELECT_NOSELECT : 0) |
+    (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_TRUST ? SRC_SELECT_TRUST : 0) |
+    (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_REQUIRE ? SRC_SELECT_REQUIRE : 0);
   params.max_delay = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay);
   params.max_delay_ratio = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay_ratio);
 
@@ -1017,50 +1029,50 @@ handle_cyclelogs(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  CLG_Status result;
   RPT_ClientAccessByIndex_Report report;
-  unsigned long first_index, n_indices, n_indices_in_table;
-  int i, j;
+  RPY_ClientAccesses_Client *client;
+  int n_indices;
+  uint32_t i, j, req_first_index, req_n_clients;
   struct timeval now;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
 
-  first_index = ntohl(rx_message->data.client_accesses_by_index.first_index);
-  n_indices = ntohl(rx_message->data.client_accesses_by_index.n_indices);
-  if (n_indices > MAX_CLIENT_ACCESSES)
-    n_indices = MAX_CLIENT_ACCESSES;
+  req_first_index = ntohl(rx_message->data.client_accesses_by_index.first_index);
+  req_n_clients = ntohl(rx_message->data.client_accesses_by_index.n_clients);
+  if (req_n_clients > MAX_CLIENT_ACCESSES)
+    req_n_clients = MAX_CLIENT_ACCESSES;
 
-  tx_message->reply = htons(RPY_CLIENT_ACCESSES_BY_INDEX);
-
-  for (i = 0, j = 0; i < n_indices; i++) {
-    result = CLG_GetClientAccessReportByIndex(first_index + i, &report,
-                                              now.tv_sec, &n_indices_in_table);
-    tx_message->data.client_accesses_by_index.n_indices = htonl(n_indices_in_table);
-
-    switch (result) {
-      case CLG_SUCCESS:
-        UTI_IPHostToNetwork(&report.ip_addr, &tx_message->data.client_accesses_by_index.clients[j].ip);
-        tx_message->data.client_accesses_by_index.clients[j].client_hits = htonl(report.client_hits);
-        tx_message->data.client_accesses_by_index.clients[j].peer_hits = htonl(report.peer_hits);
-        tx_message->data.client_accesses_by_index.clients[j].cmd_hits_auth = htonl(report.cmd_hits_auth);
-        tx_message->data.client_accesses_by_index.clients[j].cmd_hits_normal = htonl(report.cmd_hits_normal);
-        tx_message->data.client_accesses_by_index.clients[j].cmd_hits_bad = htonl(report.cmd_hits_bad);
-        tx_message->data.client_accesses_by_index.clients[j].last_ntp_hit_ago = htonl(report.last_ntp_hit_ago);
-        tx_message->data.client_accesses_by_index.clients[j].last_cmd_hit_ago = htonl(report.last_cmd_hit_ago);
-        j++;
-        break;
-      case CLG_INDEXTOOLARGE:
-        break; /* ignore this index */
-      case CLG_INACTIVE:
-        tx_message->status = htons(STT_INACTIVE);
-        return;
-      default:
-        assert(0);
-        break;
-    }
+  n_indices = CLG_GetNumberOfIndices();
+  if (n_indices < 0) {
+    tx_message->status = htons(STT_INACTIVE);
+    return;
   }
 
-  tx_message->data.client_accesses_by_index.next_index = htonl(first_index + i);
+  tx_message->reply = htons(RPY_CLIENT_ACCESSES_BY_INDEX2);
+  tx_message->data.client_accesses_by_index.n_indices = htonl(n_indices);
+
+  memset(tx_message->data.client_accesses_by_index.clients, 0,
+         sizeof (tx_message->data.client_accesses_by_index.clients));
+
+  for (i = req_first_index, j = 0; i < (uint32_t)n_indices && j < req_n_clients; i++) {
+    if (!CLG_GetClientAccessReportByIndex(i, &report, &now))
+      continue;
+
+    client = &tx_message->data.client_accesses_by_index.clients[j++];
+
+    UTI_IPHostToNetwork(&report.ip_addr, &client->ip);
+    client->ntp_hits = htonl(report.ntp_hits);
+    client->cmd_hits = htonl(report.cmd_hits);
+    client->ntp_drops = htonl(report.ntp_drops);
+    client->cmd_drops = htonl(report.cmd_drops);
+    client->ntp_interval = report.ntp_interval;
+    client->cmd_interval = report.cmd_interval;
+    client->ntp_timeout_interval = report.ntp_timeout_interval;
+    client->last_ntp_hit_ago = htonl(report.last_ntp_hit_ago);
+    client->last_cmd_hit_ago = htonl(report.last_cmd_hit_ago);
+  }
+
+  tx_message->data.client_accesses_by_index.next_index = htonl(i);
   tx_message->data.client_accesses_by_index.n_clients = htonl(j);
 }
 
@@ -1150,35 +1162,42 @@ handle_refresh(CMD_Request *rx_message, CMD_Reply *tx_message)
 }
 
 /* ================================================== */
+
+static void
+handle_server_stats(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_ServerStatsReport report;
+
+  CLG_GetServerStatsReport(&report);
+  tx_message->reply = htons(RPY_SERVER_STATS);
+  tx_message->data.server_stats.ntp_hits = htonl(report.ntp_hits);
+  tx_message->data.server_stats.cmd_hits = htonl(report.cmd_hits);
+  tx_message->data.server_stats.ntp_drops = htonl(report.ntp_drops);
+  tx_message->data.server_stats.cmd_drops = htonl(report.cmd_drops);
+  tx_message->data.server_stats.log_drops = htonl(report.log_drops);
+}
+
+/* ================================================== */
 /* Read a packet and process it */
 
 static void
 read_from_cmd_socket(void *anything)
 {
-  int status;
-  int read_length; /* Length of packet read */
-  int expected_length; /* Expected length of packet without auth data */
-  unsigned long flags;
   CMD_Request rx_message;
   CMD_Reply tx_message;
-  int rx_message_length;
-  int sock_fd;
+  int status, read_length, expected_length, rx_message_length;
+  int localhost, allowed, sock_fd, log_index;
   union sockaddr_all where_from;
   socklen_t from_length;
   IPAddr remote_ip;
-  unsigned short remote_port;
-  int localhost;
-  int allowed;
-  unsigned short rx_command;
-  struct timeval now;
-  struct timeval cooked_now;
+  unsigned short remote_port, rx_command;
+  struct timeval now, cooked_now;
 
-  flags = 0;
   rx_message_length = sizeof(rx_message);
   from_length = sizeof(where_from);
 
   sock_fd = (long)anything;
-  status = recvfrom(sock_fd, (char *)&rx_message, rx_message_length, flags,
+  status = recvfrom(sock_fd, (char *)&rx_message, rx_message_length, 0,
                     &where_from.sa, &from_length);
 
   if (status < 0) {
@@ -1235,25 +1254,19 @@ read_from_cmd_socket(void *anything)
     return;
   }
 
-  /* Message size sanity check */
-  if (read_length >= offsetof(CMD_Request, data)) {
-    expected_length = PKL_CommandLength(&rx_message);
-  } else {
-    expected_length = 0;
-  }
-
-  if (expected_length < offsetof(CMD_Request, data) ||
+  if (read_length < offsetof(CMD_Request, data) ||
       read_length < offsetof(CMD_Reply, data) ||
       rx_message.pkt_type != PKT_TYPE_CMD_REQUEST ||
       rx_message.res1 != 0 ||
       rx_message.res2 != 0) {
 
-    /* We don't know how to process anything like this */
-    CLG_LogCommandAccess(&remote_ip, CLG_CMD_BAD_PKT, cooked_now.tv_sec);
-    
+    /* We don't know how to process anything like this or an error reply
+       would be larger than the request */
+    DEBUG_LOG(LOGF_CmdMon, "Command packet dropped");
     return;
   }
 
+  expected_length = PKL_CommandLength(&rx_message);
   rx_command = ntohs(rx_message.command);
 
   tx_message.version = PROTO_VERSION_NUMBER;
@@ -1271,10 +1284,8 @@ read_from_cmd_socket(void *anything)
   tx_message.pad5 = 0;
 
   if (rx_message.version != PROTO_VERSION_NUMBER) {
-    DEBUG_LOG(LOGF_CmdMon, "Read command packet with protocol version %d (expected %d) from %s",
-              rx_message.version, PROTO_VERSION_NUMBER, UTI_SockaddrToString(&where_from.sa));
-
-    CLG_LogCommandAccess(&remote_ip, CLG_CMD_BAD_PKT, cooked_now.tv_sec);
+    DEBUG_LOG(LOGF_CmdMon, "Command packet has invalid version (%d != %d)",
+              rx_message.version, PROTO_VERSION_NUMBER);
 
     if (rx_message.version >= PROTO_VERSION_MISMATCH_COMPAT_SERVER) {
       tx_message.status = htons(STT_BADPKTVERSION);
@@ -1283,11 +1294,9 @@ read_from_cmd_socket(void *anything)
     return;
   }
 
-  if (rx_command >= N_REQUEST_TYPES) {
-    DEBUG_LOG(LOGF_CmdMon, "Read command packet with invalid command %d from %s",
-              rx_command, UTI_SockaddrToString(&where_from.sa));
-
-    CLG_LogCommandAccess(&remote_ip, CLG_CMD_BAD_PKT, cooked_now.tv_sec);
+  if (rx_command >= N_REQUEST_TYPES ||
+      expected_length < (int)offsetof(CMD_Request, data)) {
+    DEBUG_LOG(LOGF_CmdMon, "Command packet has invalid command %d", rx_command);
 
     tx_message.status = htons(STT_INVALID);
     transmit_reply(&tx_message, &where_from);
@@ -1295,10 +1304,8 @@ read_from_cmd_socket(void *anything)
   }
 
   if (read_length < expected_length) {
-    DEBUG_LOG(LOGF_CmdMon, "Read incorrectly sized command packet from %s",
-              UTI_SockaddrToString(&where_from.sa));
-
-    CLG_LogCommandAccess(&remote_ip, CLG_CMD_BAD_PKT, cooked_now.tv_sec);
+    DEBUG_LOG(LOGF_CmdMon, "Command packet is too short (%d < %d)", read_length,
+              expected_length);
 
     tx_message.status = htons(STT_BADPKTLENGTH);
     transmit_reply(&tx_message, &where_from);
@@ -1307,7 +1314,14 @@ read_from_cmd_socket(void *anything)
 
   /* OK, we have a valid message.  Now dispatch on message type and process it. */
 
-  CLG_LogCommandAccess(&remote_ip, CLG_CMD_NORMAL, cooked_now.tv_sec);
+  log_index = CLG_LogCommandAccess(&remote_ip, &cooked_now);
+
+  /* Don't reply to all requests from hosts other than localhost if the rate
+     is excessive */
+  if (!localhost && log_index >= 0 && CLG_LimitCommandResponseRate(log_index)) {
+      DEBUG_LOG(LOGF_CmdMon, "Command packet discarded to limit response rate");
+      return;
+  }
 
   if (rx_command >= N_REQUEST_TYPES) {
     /* This should be already handled */
@@ -1507,7 +1521,7 @@ read_from_cmd_socket(void *anything)
           handle_cyclelogs(&rx_message, &tx_message);
           break;
 
-        case REQ_CLIENT_ACCESSES_BY_INDEX:
+        case REQ_CLIENT_ACCESSES_BY_INDEX2:
           handle_client_accesses_by_index(&rx_message, &tx_message);
           break;
 
@@ -1547,8 +1561,13 @@ read_from_cmd_socket(void *anything)
           handle_refresh(&rx_message, &tx_message);
           break;
 
+        case REQ_SERVER_STATS:
+          handle_server_stats(&rx_message, &tx_message);
+          break;
+
         default:
-          assert(0);
+          DEBUG_LOG(LOGF_CmdMon, "Unhandled command %d", rx_command);
+          tx_message.status = htons(STT_FAILED);
           break;
       }
     } else {
