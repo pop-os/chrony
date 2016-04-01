@@ -45,7 +45,6 @@
 #ifdef FEAT_PRIVDROP
 #include <sys/prctl.h>
 #include <sys/capability.h>
-#include <grp.h>
 #endif
 
 #ifdef FEAT_SCFILTER
@@ -66,6 +65,8 @@
 #include "sys_timex.h"
 #include "conf.h"
 #include "logging.h"
+#include "privops.h"
+#include "util.h"
 
 /* Frequency scale to convert from ppm to the timex freq */
 #define FREQ_SCALE (double)(1 << 16)
@@ -403,25 +404,20 @@ SYS_Linux_Finalise(void)
 void
 SYS_Linux_DropRoot(uid_t uid, gid_t gid)
 {
+  const char *cap_text;
   cap_t cap;
 
   if (prctl(PR_SET_KEEPCAPS, 1)) {
     LOG_FATAL(LOGF_SysLinux, "prctl() failed");
   }
   
-  if (setgroups(0, NULL)) {
-    LOG_FATAL(LOGF_SysLinux, "setgroups() failed");
-  }
+  UTI_DropRoot(uid, gid);
 
-  if (setgid(gid)) {
-    LOG_FATAL(LOGF_SysLinux, "setgid(%d) failed", gid);
-  }
+  /* Keep CAP_NET_BIND_SERVICE only if NTP port can be opened */
+  cap_text = CNF_GetNTPPort() ?
+             "cap_net_bind_service,cap_sys_time=ep" : "cap_sys_time=ep";
 
-  if (setuid(uid)) {
-    LOG_FATAL(LOGF_SysLinux, "setuid(%d) failed", uid);
-  }
-
-  if ((cap = cap_from_text("cap_net_bind_service,cap_sys_time=ep")) == NULL) {
+  if ((cap = cap_from_text(cap_text)) == NULL) {
     LOG_FATAL(LOGF_SysLinux, "cap_from_text() failed");
   }
 
@@ -430,8 +426,6 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid)
   }
 
   cap_free(cap);
-
-  DEBUG_LOG(LOGF_SysLinux, "Root dropped to uid %d gid %d", uid, gid);
 }
 #endif
 
@@ -460,15 +454,17 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(adjtimex), SCMP_SYS(gettimeofday), SCMP_SYS(settimeofday),
     SCMP_SYS(time),
     /* Process */
-    SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group),
-    SCMP_SYS(rt_sigreturn), SCMP_SYS(sigreturn),
+    SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getrlimit),
+    SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn), SCMP_SYS(rt_sigprocmask),
+    SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn), SCMP_SYS(wait4),
     /* Memory */
     SCMP_SYS(brk), SCMP_SYS(madvise), SCMP_SYS(mmap), SCMP_SYS(mmap2),
-    SCMP_SYS(mprotect), SCMP_SYS(munmap), SCMP_SYS(shmdt),
+    SCMP_SYS(mprotect), SCMP_SYS(mremap), SCMP_SYS(munmap), SCMP_SYS(shmdt),
     /* Filesystem */
-    SCMP_SYS(chmod), SCMP_SYS(chown), SCMP_SYS(chown32), SCMP_SYS(fstat),
-    SCMP_SYS(fstat64), SCMP_SYS(lseek), SCMP_SYS(rename), SCMP_SYS(stat),
-    SCMP_SYS(stat64), SCMP_SYS(unlink),
+    SCMP_SYS(access), SCMP_SYS(chmod), SCMP_SYS(chown), SCMP_SYS(chown32),
+    SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(lseek), SCMP_SYS(rename),
+    SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs), SCMP_SYS(statfs64),
+    SCMP_SYS(unlink),
     /* Socket */
     SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname),
     SCMP_SYS(recvfrom), SCMP_SYS(recvmsg), SCMP_SYS(sendmmsg),
@@ -502,7 +498,7 @@ SYS_Linux_EnableSystemCallFilter(int level)
   const static int fcntls[] = { F_GETFD, F_SETFD };
 
   const static unsigned long ioctls[] = {
-    FIONREAD,
+    FIONREAD, TCGETS,
 #ifdef FEAT_PPS
     PTP_SYS_OFFSET,
 #endif
@@ -519,6 +515,12 @@ SYS_Linux_EnableSystemCallFilter(int level)
 
   /* Check if the chronyd configuration is supported */
   check_seccomp_applicability();
+
+  /* Start the helper process, which will run without any seccomp filter.  It
+     will be used for getaddrinfo(), for which it's difficult to maintain a
+     list of required system calls (with glibc it depends on what NSS modules
+     are installed and enabled on the system). */
+  PRV_StartHelper();
 
   ctx = seccomp_init(level > 0 ? SCMP_ACT_KILL : SCMP_ACT_TRAP);
   if (ctx == NULL)

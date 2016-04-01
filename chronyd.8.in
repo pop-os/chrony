@@ -1,4 +1,4 @@
-.TH CHRONYD 8 "January 2016" "chrony 2.2.1" "System Administration"
+.TH CHRONYD 8 "February 2016" "chrony 2.3" "System Administration"
 .SH NAME
 chronyd \- chrony background daemon
 
@@ -101,15 +101,25 @@ RTC or the RTC is broken (e.g. it has no battery).
 \fB\-u\fR \fIuser\fR
 This option sets the name of the system user to which \fBchronyd\fR will switch
 after start in order to drop root privileges.  It overrides the \fBuser\fR
-directive (default \fB@DEFAULT_USER@\fR).  It may be set to a non-root user
-only when \fBchronyd\fR is compiled with support for Linux capabilities
-(libcap) or on NetBSD with the \fB/dev/clockctl\fR device.
+directive from the configuration file (default \fB@DEFAULT_USER@\fR).
+
+On Linux, \fBchronyd\fR needs to be compiled with support for the \fBlibcap\fR
+library.  On Mac OS X, FreeBSD, NetBSD and Solaris \fBchronyd\fR forks into two
+processes.  The child process retains root privileges, but can only perform a
+very limited range of privileged system calls on behalf of the parent.
 .TP
 \fB\-F\fR \fIlevel\fR
 This option configures a system call filter when \fBchronyd\fR is compiled with
 support for the Linux secure computing (seccomp) facility. In level 1 the
 process is killed when a forbidden system call is made, in level -1 the SYSSIG
 signal is thrown instead and in level 0 the filter is disabled (default 0).
+
+It's recommended to enable the filter only when it's known to work on the
+version of the system where \fBchrony\fR is installed as the filter needs to
+allow also system calls made from libraries that \fBchronyd\fR is using (e.g.
+libc) and different versions or implementations of the libraries may make
+different system calls.  If the filter is missing some system call,
+\fBchronyd\fR could be killed even in normal operation.
 .TP
 .B \-q
 When run in this mode, chronyd will set the system clock once

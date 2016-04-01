@@ -121,22 +121,26 @@
    domain socket since version 2.2), you can disable the internet command
    sockets completely by adding cmdport 0 to the configuration file.
 
-   On Linux, if chronyd is compiled with support for Linux capabilities
-   (available in the libcap library), or on NetBSD with the /dev/clockctl
-   device, you can specify an unprivileged user with the -u option or user
-   directive in the chrony.conf file to drop root privileges after start.
-   The configure option --with-user can be used to drop the privileges by
-   default.
+   You can specify an unprivileged user with the -u option, or the user
+   directive in the chrony.conf file, to which chronyd will switch after
+   start in order to drop root privileges. The configure script has a
+   --with-user option, which sets the default user. On Linux, chronyd
+   needs to be compiled with support for the libcap library. On other
+   systems, chronyd forks into two processes. The child process retains
+   root privileges, but can only perform a very limited range of
+   privileged system calls on behalf of the parent.
 
    Also, if chronyd is compiled with support for the Linux secure
    computing (seccomp) facility, you can enable a system call filter with
    the -F option. It will significantly reduce the kernel attack surface
-   and possibly prevent kernel exploits from the chronyd process if
-   compromised. The filter shouldn’t be enabled without testing that it
-   allows all system calls needed with the specific configuration and
-   libraries that chronyd is using (e.g. libc and its NSS configuration).
-   If chronyd is getting killed, some system call is missing and the
-   filter has to be disabled until it’s patched to allow that call.
+   and possibly prevent kernel exploits from the chronyd process if it’s
+   compromised. It’s recommended to enable the filter only when it’s known
+   to work on the version of the system where chrony is installed as the
+   filter needs to allow also system calls made from libraries that
+   chronyd is using (e.g. libc) and different versions or implementations
+   of the libraries may make different system calls. If the filter is
+   missing some system call, chronyd could be killed even in normal
+   operation.
 
   2.6. How can I improve the accuracy of the system clock with NTP sources?
 
@@ -375,7 +379,7 @@
    contribute it back to the project.
      __________________________________________________________________
 
-   Last updated 2016-01-18 17:37:21 CET
+   Last updated 2016-02-16 14:25:38 CET
 
 References
 

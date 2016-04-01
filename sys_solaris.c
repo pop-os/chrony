@@ -28,8 +28,10 @@
 
 #include "sysincl.h"
 
+#include "privops.h"
 #include "sys_solaris.h"
 #include "sys_timex.h"
+#include "util.h"
 
 /* ================================================== */
 
@@ -37,7 +39,8 @@ void
 SYS_Solaris_Initialise(void)
 {
   /* The kernel allows the frequency to be set in the full range off int32_t */
-  SYS_Timex_InitialiseWithFunctions(32500, 1.0 / 100, NULL, NULL, NULL);
+  SYS_Timex_InitialiseWithFunctions(32500, 1.0 / 100, NULL, NULL, NULL,
+                                    0.0, 0.0, NULL, NULL);
 }
 
 /* ================================================== */
@@ -47,3 +50,14 @@ SYS_Solaris_Finalise(void)
 {
   SYS_Timex_Finalise();
 }
+
+/* ================================================== */
+
+#ifdef FEAT_PRIVDROP
+void
+SYS_Solaris_DropRoot(uid_t uid, gid_t gid)
+{
+  PRV_StartHelper();
+  UTI_DropRoot(uid, gid);
+}
+#endif

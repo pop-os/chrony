@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2012-2014
+ * Copyright (C) Miroslav Lichvar  2012-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -39,6 +39,8 @@
 #include "local.h"
 #include "logging.h"
 
+/* Consider 80 bits as the absolute minimum for a secure key */
+#define MIN_SECURE_KEY_LENGTH 10
 
 typedef struct {
   uint32_t id;
@@ -286,6 +288,21 @@ KEY_GetAuthDelay(uint32_t key_id)
     return 0;
 
   return key->auth_delay;
+}
+
+/* ================================================== */
+
+int
+KEY_CheckKeyLength(uint32_t key_id)
+{
+  Key *key;
+
+  key = get_key_by_id(key_id);
+
+  if (!key)
+    return 0;
+
+  return key->len >= MIN_SECURE_KEY_LENGTH;
 }
 
 /* ================================================== */

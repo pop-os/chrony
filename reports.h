@@ -38,7 +38,7 @@ typedef struct {
   int poll;
   enum {RPT_NTP_CLIENT, RPT_NTP_PEER, RPT_LOCAL_REFERENCE} mode;
   enum {RPT_SYNC, RPT_UNREACH, RPT_FALSETICKER, RPT_JITTERY, RPT_CANDIDATE, RPT_OUTLIER} state;
-  enum {RPT_NORMAL, RPT_PREFER, RPT_NOSELECT} sel_option;
+  int sel_options;
 
   int reachability;
   unsigned long latest_meas_ago; /* seconds */
@@ -88,14 +88,24 @@ typedef struct {
 
 typedef struct {
   IPAddr ip_addr;
-  unsigned long client_hits;
-  unsigned long peer_hits;
-  unsigned long cmd_hits_auth;
-  unsigned long cmd_hits_normal;
-  unsigned long cmd_hits_bad;
-  unsigned long last_ntp_hit_ago;
-  unsigned long last_cmd_hit_ago;
+  uint32_t ntp_hits;
+  uint32_t cmd_hits;
+  uint16_t ntp_drops;
+  uint16_t cmd_drops;
+  int8_t ntp_interval;
+  int8_t cmd_interval;
+  int8_t ntp_timeout_interval;
+  uint32_t last_ntp_hit_ago;
+  uint32_t last_cmd_hit_ago;
 } RPT_ClientAccessByIndex_Report;
+
+typedef struct {
+  uint32_t ntp_hits;
+  uint32_t cmd_hits;
+  uint32_t ntp_drops;
+  uint32_t cmd_drops;
+  uint32_t log_drops;
+} RPT_ServerStatsReport;
 
 typedef struct {
   struct timeval when;

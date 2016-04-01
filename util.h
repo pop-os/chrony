@@ -82,6 +82,7 @@ extern char *UTI_IPToString(IPAddr *ip);
 
 extern int UTI_StringToIP(const char *addr, IPAddr *ip);
 extern uint32_t UTI_IPToRefid(IPAddr *ip);
+extern uint32_t UTI_IPToHash(IPAddr *ip);
 extern void UTI_IPHostToNetwork(IPAddr *src, IPAddr *dest);
 extern void UTI_IPNetworkToHost(IPAddr *src, IPAddr *dest);
 extern int UTI_CompareIPs(IPAddr *a, IPAddr *b, IPAddr *mask);
@@ -96,13 +97,13 @@ extern char *UTI_TimeToLogForm(time_t t);
 /* Adjust time following a frequency/offset change */
 extern void UTI_AdjustTimeval(struct timeval *old_tv, struct timeval *when, struct timeval *new_tv, double *delta, double dfreq, double doffset);
 
-/* Get a random value to fuzz an NTP timestamp in the given precision */
-extern uint32_t UTI_GetNTPTsFuzz(int precision);
+/* Get zero NTP timestamp with random bits below precision */
+extern void UTI_GetInt64Fuzz(NTP_int64 *ts, int precision);
 
 extern double UTI_Int32ToDouble(NTP_int32 x);
 extern NTP_int32 UTI_DoubleToInt32(double x);
 
-extern void UTI_TimevalToInt64(struct timeval *src, NTP_int64 *dest, uint32_t fuzz);
+extern void UTI_TimevalToInt64(struct timeval *src, NTP_int64 *dest, NTP_int64 *fuzz);
 
 extern void UTI_Int64ToTimeval(NTP_int64 *src, struct timeval *dest);
 
@@ -143,5 +144,29 @@ extern int UTI_CreateDirAndParents(const char *path, mode_t mode, uid_t uid, gid
 /* Check if a directory is secure.  It must not have other than the specified
    permissions and its uid/gid must match the specified values. */
 extern int UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid);
+
+/* Set process user/group IDs and drop supplementary groups */
+extern void UTI_DropRoot(uid_t uid, gid_t gid);
+
+/* Fill buffer with random bytes from /dev/urandom */
+extern void UTI_GetRandomBytesUrandom(void *buf, unsigned int len);
+
+/* Fill buffer with random bytes from /dev/urandom or a faster source if it's
+   available (e.g. arc4random()), which may not necessarily be suitable for
+   generating long-term keys */
+extern void UTI_GetRandomBytes(void *buf, unsigned int len);
+
+/* Macros to get maximum and minimum of two values */
+#ifdef MAX
+#undef MAX
+#endif
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#ifdef MIN
+#undef MIN
+#endif
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
+/* Macro to clamp a value between two values */
+#define CLAMP(min, x, max) (MAX((min), MIN((x), (max))))
 
 #endif /* GOT_UTIL_H */

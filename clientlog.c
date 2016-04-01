@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009
+ * Copyright (C) Miroslav Lichvar  2009, 2015-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -34,6 +34,8 @@
 #include "config.h"
 
 #include "sysincl.h"
+
+#include "array.h"
 #include "clientlog.h"
 #include "conf.h"
 #include "memory.h"
@@ -41,110 +43,240 @@
 #include "util.h"
 #include "logging.h"
 
-/* Number of bits of address per layer of the table.  This value has
-   been chosen on the basis that a server will predominantly be serving
-   a lot of hosts in a few subnets, rather than a few hosts scattered
-   across many subnets. */
-
-#define NBITS 8
-
-/* Number of entries in each subtable */
-#define TABLE_SIZE (1UL<<NBITS)
-
-typedef struct _Node {
+typedef struct {
   IPAddr ip_addr;
-  unsigned long client_hits;
-  unsigned long peer_hits;
-  unsigned long cmd_hits_bad;
-  unsigned long cmd_hits_normal;
-  unsigned long cmd_hits_auth;
-  time_t last_ntp_hit;
-  time_t last_cmd_hit;
-} Node;
+  uint32_t last_ntp_hit;
+  uint32_t last_cmd_hit;
+  uint32_t ntp_hits;
+  uint32_t cmd_hits;
+  uint16_t ntp_drops;
+  uint16_t cmd_drops;
+  uint16_t ntp_tokens;
+  uint16_t cmd_tokens;
+  int8_t ntp_rate;
+  int8_t cmd_rate;
+  int8_t ntp_timeout_rate;
+  uint8_t flags;
+} Record;
 
-typedef struct _Subnet {
-  void *entry[TABLE_SIZE];
-} Subnet;
+/* Hash table of records, there is a fixed number of records per slot */
+static ARR_Instance records;
 
-/* ================================================== */
+#define SLOT_BITS 4
 
-/* Table for the IPv4 class A subnet */
-static Subnet top_subnet4;
-/* Table for IPv6 */
-static Subnet top_subnet6;
+/* Number of records in one slot of the hash table */
+#define SLOT_SIZE (1U << SLOT_BITS)
 
-/* Table containing pointers directly to all nodes that have been
-   allocated. */
-static Node **nodes = NULL;
+/* Minimum number of slots */
+#define MIN_SLOTS 1
 
-/* Number of nodes actually in the table. */
-static int n_nodes = 0;
+/* Maximum number of slots, this is a hard limit */
+#define MAX_SLOTS (1U << (24 - SLOT_BITS))
 
-/* Number of entries for which the table has been sized. */
-static int max_nodes = 0;
+/* Number of slots in the hash table */
+static unsigned int slots;
+
+/* Maximum number of slots given memory allocation limit */
+static unsigned int max_slots;
+
+/* Times of last hits are saved as 32-bit fixed point values */
+#define TS_FRAC 4
+#define INVALID_TS 0
+
+/* Request rates are saved in the record as 8-bit scaled log2 values */
+#define RATE_SCALE 4
+#define MIN_RATE (-14 * RATE_SCALE)
+#define INVALID_RATE -128
+
+/* Response rates are controlled by token buckets.  The capacity and
+   number of tokens spent on response are determined from configured
+   minimum inverval between responses (in log2) and burst length. */
+
+#define MIN_LIMIT_INTERVAL (-TS_FRAC)
+#define MAX_LIMIT_INTERVAL 12
+#define MIN_LIMIT_BURST 1
+#define MAX_LIMIT_BURST 255
+
+static uint16_t max_ntp_tokens;
+static uint16_t max_cmd_tokens;
+static uint16_t ntp_tokens_per_packet;
+static uint16_t cmd_tokens_per_packet;
+
+/* Reduction of token rates to avoid overflow of 16-bit counters */
+static int ntp_token_shift;
+static int cmd_token_shift;
+
+/* Rates at which responses are randomly allowed (in log2) when the
+   buckets don't have enough tokens.  This is necessary in order to
+   prevent an attacker sending requests with spoofed source address
+   from blocking responses to the address completely. */
+
+#define MIN_LEAK_RATE 1
+#define MAX_LEAK_RATE 4
+
+static int ntp_leak_rate;
+static int cmd_leak_rate;
+
+/* Flag indicating whether the last response was dropped */
+#define FLAG_NTP_DROPPED 0x1
 
 /* Flag indicating whether facility is turned on or not */
-static int active = 0;
+static int active;
 
-/* Flag indicating whether memory allocation limit has been reached
-   and no new nodes or subnets should be allocated */
-static int alloc_limit_reached;
-
-static unsigned long alloc_limit;
-static unsigned long alloced;
+/* Global statistics */
+static uint32_t total_ntp_hits;
+static uint32_t total_cmd_hits;
+static uint32_t total_ntp_drops;
+static uint32_t total_cmd_drops;
+static uint32_t total_record_drops;
 
 /* ================================================== */
 
-static void
-split_ip6(IPAddr *ip, uint32_t *dst)
-{
-  int i;
+static int expand_hashtable(void);
 
-  for (i = 0; i < 4; i++)
-    dst[i] = ip->addr.in6[i * 4 + 0] << 24 |
-             ip->addr.in6[i * 4 + 1] << 16 |
-             ip->addr.in6[i * 4 + 2] << 8 |
-             ip->addr.in6[i * 4 + 3];
+/* ================================================== */
+
+static int
+compare_ts(uint32_t x, uint32_t y)
+{
+  if (x == y)
+    return 0;
+  if (y == INVALID_TS)
+    return 1;
+  return (int32_t)(x - y) > 0 ? 1 : -1;
 }
 
 /* ================================================== */
 
-inline static uint32_t
-get_subnet(uint32_t *addr, unsigned int where)
+static Record *
+get_record(IPAddr *ip)
 {
-  int off;
+  unsigned int first, i;
+  time_t last_hit, oldest_hit = 0;
+  Record *record, *oldest_record;
 
-  off = where / 32;
-  where %= 32;
+  if (ip->family != IPADDR_INET4 && ip->family != IPADDR_INET6)
+    return NULL;
 
-  return (addr[off] >> (32 - NBITS - where)) & ((1UL << NBITS) - 1);
-}
+  while (1) {
+    /* Get index of the first record in the slot */
+    first = UTI_IPToHash(ip) % slots * SLOT_SIZE;
 
-/* ================================================== */
+    for (i = 0, oldest_record = NULL; i < SLOT_SIZE; i++) {
+      record = ARR_GetElement(records, first + i);
 
+      if (!UTI_CompareIPs(ip, &record->ip_addr, NULL))
+        return record;
 
-static void
-clear_subnet(Subnet *subnet)
-{
-  int i;
+      if (record->ip_addr.family == IPADDR_UNSPEC)
+        break;
 
-  for (i=0; i<TABLE_SIZE; i++) {
-    subnet->entry[i] = NULL;
+      last_hit = compare_ts(record->last_ntp_hit, record->last_cmd_hit) > 0 ?
+                 record->last_ntp_hit : record->last_cmd_hit;
+
+      if (!oldest_record || compare_ts(oldest_hit, last_hit) > 0 ||
+          (oldest_hit == last_hit && record->ntp_hits + record->cmd_hits <
+           oldest_record->ntp_hits + oldest_record->cmd_hits)) {
+        oldest_record = record;
+        oldest_hit = last_hit;
+      }
+    }
+
+    /* If the slot still has an empty record, use it */
+    if (record->ip_addr.family == IPADDR_UNSPEC)
+      break;
+
+    /* Resize the table if possible and try again as the new slot may
+       have some empty records */
+    if (expand_hashtable())
+      continue;
+
+    /* There is no other option, replace the oldest record */
+    record = oldest_record;
+    total_record_drops++;
+    break;
   }
+
+  record->ip_addr = *ip;
+  record->last_ntp_hit = record->last_cmd_hit = INVALID_TS;
+  record->ntp_hits = record->cmd_hits = 0;
+  record->ntp_drops = record->cmd_drops = 0;
+  record->ntp_tokens = max_ntp_tokens;
+  record->cmd_tokens = max_cmd_tokens;
+  record->ntp_rate = record->cmd_rate = INVALID_RATE;
+  record->ntp_timeout_rate = INVALID_RATE;
+  record->flags = 0;
+
+  return record;
+}
+
+/* ================================================== */
+
+static int
+expand_hashtable(void)
+{
+  ARR_Instance old_records;
+  Record *old_record, *new_record;
+  unsigned int i;
+
+  old_records = records;
+
+  if (2 * slots > max_slots)
+    return 0;
+
+  records = ARR_CreateInstance(sizeof (Record));
+
+  slots = MAX(MIN_SLOTS, 2 * slots);
+  assert(slots <= max_slots);
+
+  ARR_SetSize(records, slots * SLOT_SIZE);
+
+  /* Mark all new records as empty */
+  for (i = 0; i < slots * SLOT_SIZE; i++) {
+    new_record = ARR_GetElement(records, i);
+    new_record->ip_addr.family = IPADDR_UNSPEC;
+  }
+
+  if (!old_records)
+    return 1;
+
+  /* Copy old records to the new hash table */
+  for (i = 0; i < ARR_GetSize(old_records); i++) {
+    old_record = ARR_GetElement(old_records, i);
+    if (old_record->ip_addr.family == IPADDR_UNSPEC)
+      continue;
+
+    new_record = get_record(&old_record->ip_addr);
+
+    assert(new_record);
+    *new_record = *old_record;
+  }
+
+  ARR_DestroyInstance(old_records);
+
+  return 1;
 }
 
 /* ================================================== */
 
 static void
-clear_node(Node *node)
+set_bucket_params(int interval, int burst, uint16_t *max_tokens,
+                  uint16_t *tokens_per_packet, int *token_shift)
 {
-  node->client_hits = 0;
-  node->peer_hits = 0;
-  node->cmd_hits_auth = 0;
-  node->cmd_hits_normal = 0;
-  node->cmd_hits_bad = 0;
-  node->last_ntp_hit = (time_t) 0;
-  node->last_cmd_hit = (time_t) 0;
+  interval = CLAMP(MIN_LIMIT_INTERVAL, interval, MAX_LIMIT_INTERVAL);
+  burst = CLAMP(MIN_LIMIT_BURST, burst, MAX_LIMIT_BURST);
+
+  /* Find smallest shift with which the maximum number fits in 16 bits */
+  for (*token_shift = 0; *token_shift < interval + TS_FRAC; (*token_shift)++) {
+    if (burst << (TS_FRAC + interval - *token_shift) < 1U << 16)
+      break;
+  }
+
+  *tokens_per_packet = 1U << (TS_FRAC + interval - *token_shift);
+  *max_tokens = *tokens_per_packet * burst;
+
+  DEBUG_LOG(LOGF_ClientLog, "Tokens max %d packet %d shift %d",
+            *max_tokens, *tokens_per_packet, *token_shift);
 }
 
 /* ================================================== */
@@ -152,21 +284,42 @@ clear_node(Node *node)
 void
 CLG_Initialise(void)
 {
-  clear_subnet(&top_subnet4);
-  clear_subnet(&top_subnet6);
-  if (CNF_GetNoClientLog()) {
-    active = 0;
-  } else {
-    active = 1;
+  int interval, burst, leak_rate;
+
+  max_ntp_tokens = max_cmd_tokens = 0;
+  ntp_tokens_per_packet = cmd_tokens_per_packet = 0;
+  ntp_token_shift = cmd_token_shift = 0;
+  ntp_leak_rate = cmd_leak_rate = 0;
+
+  if (CNF_GetNTPRateLimit(&interval, &burst, &leak_rate)) {
+    set_bucket_params(interval, burst, &max_ntp_tokens, &ntp_tokens_per_packet,
+                      &ntp_token_shift);
+    ntp_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
   }
 
-  nodes = NULL;
-  max_nodes = 0;
-  n_nodes = 0;
+  if (CNF_GetCommandRateLimit(&interval, &burst, &leak_rate)) {
+    set_bucket_params(interval, burst, &max_cmd_tokens, &cmd_tokens_per_packet,
+                      &cmd_token_shift);
+    cmd_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
+  }
 
-  alloced = 0;
-  alloc_limit = CNF_GetClientLogLimit();
-  alloc_limit_reached = 0;
+  active = !CNF_GetNoClientLog();
+  if (!active) {
+    if (ntp_leak_rate || cmd_leak_rate)
+      LOG_FATAL(LOGF_ClientLog, "ratelimit cannot be used with noclientlog");
+    return;
+  }
+
+  /* Calculate the maximum number of slots that can be allocated in the
+     configured memory limit.  Take into account expanding of the hash
+     table where two copies exist at the same time. */
+  max_slots = CNF_GetClientLogLimit() / (sizeof (Record) * SLOT_SIZE * 3 / 2);
+  max_slots = CLAMP(MIN_SLOTS, max_slots, MAX_SLOTS);
+
+  slots = 0;
+  records = NULL;
+
+  expand_hashtable();
 }
 
 /* ================================================== */
@@ -174,208 +327,302 @@ CLG_Initialise(void)
 void
 CLG_Finalise(void)
 {
-  int i;
-  
-  for (i = 0; i < n_nodes; i++)
-    Free(nodes[i]);
-  Free(nodes);
-}
-
-/* ================================================== */
-
-static void check_alloc_limit() {
-  if (alloc_limit_reached)
+  if (!active)
     return;
 
-  if (alloced >= alloc_limit) {
-    LOG(LOGS_WARN, LOGF_ClientLog, "Client log memory limit reached");
-    alloc_limit_reached = 1;
-  }
+  ARR_DestroyInstance(records);
+}
+
+/* ================================================== */
+
+static uint32_t
+get_ts_from_timeval(struct timeval *tv)
+{
+  uint32_t sec = tv->tv_sec, usec = tv->tv_usec;
+
+  return sec << TS_FRAC | (4295U * usec - (usec >> 5)) >> (32 - TS_FRAC);
 }
 
 /* ================================================== */
 
 static void
-create_subnet(Subnet *parent_subnet, int the_entry)
+update_record(struct timeval *now, uint32_t *last_hit, uint32_t *hits,
+              uint16_t *tokens, uint32_t max_tokens, int token_shift, int8_t *rate)
 {
-  parent_subnet->entry[the_entry] = (void *) MallocNew(Subnet);
-  clear_subnet((Subnet *) parent_subnet->entry[the_entry]);
-  alloced += sizeof (Subnet);
-  check_alloc_limit();
-}
+  uint32_t interval, now_ts, prev_hit, new_tokens;
+  int interval2;
 
-/* ================================================== */
+  now_ts = get_ts_from_timeval(now);
 
-static void
-create_node(Subnet *parent_subnet, int the_entry)
-{
-  Node *new_node;
-  new_node = MallocNew(Node);
-  parent_subnet->entry[the_entry] = (void *) new_node;
-  clear_node(new_node);
+  prev_hit = *last_hit;
+  *last_hit = now_ts;
+  (*hits)++;
 
-  alloced += sizeof (Node);
+  interval = now_ts - prev_hit;
 
-  if (n_nodes == max_nodes) {
-    if (nodes) {
-      assert(max_nodes > 0);
-      max_nodes *= 2;
-      nodes = ReallocArray(Node *, max_nodes, nodes);
-    } else {
-      assert(max_nodes == 0);
-      max_nodes = 16;
-      nodes = MallocArray(Node *, max_nodes);
+  if (prev_hit == INVALID_TS || (int32_t)interval < 0)
+    return;
+
+  new_tokens = (now_ts >> token_shift) - (prev_hit >> token_shift);
+  *tokens = MIN(*tokens + new_tokens, max_tokens);
+
+  /* Convert the interval to scaled and rounded log2 */
+  if (interval) {
+    interval += interval >> 1;
+    for (interval2 = -RATE_SCALE * TS_FRAC; interval2 < -MIN_RATE;
+         interval2 += RATE_SCALE) {
+      if (interval <= 1)
+        break;
+      interval >>= 1;
     }
-    alloced += sizeof (Node *) * (max_nodes - n_nodes);
-  }
-  nodes[n_nodes++] = (Node *) new_node;
-  check_alloc_limit();
-}
-
-/* ================================================== */
-/* Recursively seek out the Node entry for a particular address,
-   expanding subnet tables and node entries as we go if necessary. */
-
-static void *
-find_subnet(Subnet *subnet, uint32_t *addr, int addr_len, int bits_consumed)
-{
-  uint32_t this_subnet;
-
-  this_subnet = get_subnet(addr, bits_consumed);
-  bits_consumed += NBITS;
-
-  if (bits_consumed < 32 * addr_len) {
-    if (!subnet->entry[this_subnet]) {
-      if (alloc_limit_reached)
-        return NULL;
-      create_subnet(subnet, this_subnet);
-    }
-    return find_subnet((Subnet *) subnet->entry[this_subnet], addr, addr_len, bits_consumed);
   } else {
-    if (!subnet->entry[this_subnet]) {
-      if (alloc_limit_reached)
-        return NULL;
-      create_node(subnet, this_subnet);
-    }
-    return subnet->entry[this_subnet];
+    interval2 = -RATE_SCALE * (TS_FRAC + 1);
   }
-}
 
-/* ================================================== */
-
-static Node *
-get_node(IPAddr *ip)
-{
-  uint32_t ip6[4];
-
-  switch (ip->family) {
-    case IPADDR_INET4:
-      return (Node *)find_subnet(&top_subnet4, &ip->addr.in4, 1, 0);
-    case IPADDR_INET6:
-      split_ip6(ip, ip6);
-      return (Node *)find_subnet(&top_subnet6, ip6, 4, 0);
-    default:
-      return NULL;
-  }
-}
-
-/* ================================================== */
-
-void
-CLG_LogNTPClientAccess (IPAddr *client, time_t now)
-{
-  Node *node;
-
-  if (active) {
-    node = get_node(client);
-    if (node == NULL)
-      return;
-
-    node->ip_addr = *client;
-    ++node->client_hits;
-    node->last_ntp_hit = now;
-  }
-}
-
-/* ================================================== */
-
-void
-CLG_LogNTPPeerAccess(IPAddr *client, time_t now)
-{
-  Node *node;
-
-  if (active) {
-    node = get_node(client);
-    if (node == NULL)
-      return;
-
-    node->ip_addr = *client;
-    ++node->peer_hits;
-    node->last_ntp_hit = now;
-  }
-}
-
-/* ================================================== */
-
-void
-CLG_LogCommandAccess(IPAddr *client, CLG_Command_Type type, time_t now)
-{
-  Node *node;
-
-  if (active) {
-    node = get_node(client);
-    if (node == NULL)
-      return;
-
-    node->ip_addr = *client;
-    node->last_cmd_hit = now;
-    switch (type) {
-      case CLG_CMD_AUTH:
-        ++node->cmd_hits_auth;
-        break;
-      case CLG_CMD_NORMAL:
-        ++node->cmd_hits_normal;
-        break;
-      case CLG_CMD_BAD_PKT:
-        ++node->cmd_hits_bad;
-        break;
-      default:
-        assert(0);
-        break;
-    }
-  }
-}
-
-/* ================================================== */
-
-CLG_Status
-CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report,
-                                 time_t now, unsigned long *n_indices)
-{
-  Node *node;
-
-  *n_indices = n_nodes;
-
-  if (!active) {
-    return CLG_INACTIVE;
+  /* Update the rate in a rough approximation of exponential moving average */
+  if (*rate == INVALID_RATE) {
+    *rate = -interval2;
   } else {
-
-    if ((index < 0) || (index >= n_nodes)) {
-      return CLG_INDEXTOOLARGE;
+    if (*rate < -interval2) {
+      (*rate)++;
+    } else if (*rate > -interval2) {
+      if (*rate > RATE_SCALE * 5 / 2 - interval2)
+        *rate = RATE_SCALE * 5 / 2 - interval2;
+      else
+        *rate = (*rate - interval2 - 1) / 2;
     }
-    
-    node = nodes[index];
-    
-    report->ip_addr = node->ip_addr;
-    report->client_hits = node->client_hits;
-    report->peer_hits = node->peer_hits;
-    report->cmd_hits_auth = node->cmd_hits_auth;
-    report->cmd_hits_normal = node->cmd_hits_normal;
-    report->cmd_hits_bad = node->cmd_hits_bad;
-    report->last_ntp_hit_ago = now - node->last_ntp_hit;
-    report->last_cmd_hit_ago = now - node->last_cmd_hit;
-    
-    return CLG_SUCCESS;
+  }
+}
+
+/* ================================================== */
+
+static int
+get_index(Record *record)
+{
+  return record - (Record *)ARR_GetElements(records);
+}
+
+/* ================================================== */
+
+int
+CLG_LogNTPAccess(IPAddr *client, struct timeval *now)
+{
+  Record *record;
+
+  total_ntp_hits++;
+
+  if (!active)
+    return -1;
+
+  record = get_record(client);
+  if (record == NULL)
+    return -1;
+
+  /* Update one of the two rates depending on whether the previous request
+     of the client had a reply or it timed out */
+  update_record(now, &record->last_ntp_hit, &record->ntp_hits,
+                &record->ntp_tokens, max_ntp_tokens, ntp_token_shift,
+                record->flags & FLAG_NTP_DROPPED ?
+                &record->ntp_timeout_rate : &record->ntp_rate);
+
+  DEBUG_LOG(LOGF_ClientLog, "NTP hits %"PRIu32" rate %d trate %d tokens %d",
+            record->ntp_hits, record->ntp_rate, record->ntp_timeout_rate,
+            record->ntp_tokens);
+
+  return get_index(record);
+}
+
+/* ================================================== */
+
+int
+CLG_LogCommandAccess(IPAddr *client, struct timeval *now)
+{
+  Record *record;
+
+  total_cmd_hits++;
+
+  if (!active)
+    return -1;
+
+  record = get_record(client);
+  if (record == NULL)
+    return -1;
+
+  update_record(now, &record->last_cmd_hit, &record->cmd_hits,
+                &record->cmd_tokens, max_cmd_tokens, cmd_token_shift,
+                &record->cmd_rate);
+
+  DEBUG_LOG(LOGF_ClientLog, "Cmd hits %"PRIu32" rate %d tokens %d",
+            record->cmd_hits, record->cmd_rate, record->cmd_tokens);
+
+  return get_index(record);
+}
+
+/* ================================================== */
+
+static int
+limit_response_random(int leak_rate)
+{
+  static uint32_t rnd;
+  static int bits_left = 0;
+  int r;
+
+  if (bits_left < leak_rate) {
+    UTI_GetRandomBytes(&rnd, sizeof (rnd));
+    bits_left = 8 * sizeof (rnd);
   }
 
+  /* Return zero on average once per 2^leak_rate */
+  r = rnd % (1U << leak_rate) ? 1 : 0;
+  rnd >>= leak_rate;
+  bits_left -= leak_rate;
+
+  return r;
+}
+
+/* ================================================== */
+
+int
+CLG_LimitNTPResponseRate(int index)
+{
+  Record *record;
+  int drop;
+
+  if (!ntp_tokens_per_packet)
+    return 0;
+
+  record = ARR_GetElement(records, index);
+  record->flags &= ~FLAG_NTP_DROPPED;
+
+  if (record->ntp_tokens >= ntp_tokens_per_packet) {
+    record->ntp_tokens -= ntp_tokens_per_packet;
+    return 0;
+  }
+
+  drop = limit_response_random(ntp_leak_rate);
+
+  /* Poorly implemented clients may send new requests at even a higher rate
+     when they are not getting replies.  If the request rate seems to be more
+     than twice as much as when replies are sent, give up on rate limiting to
+     reduce the amount of traffic.  Invert the sense of the leak to respond to
+     most of the requests, but still keep the estimated rate updated. */
+  if (record->ntp_timeout_rate != INVALID_RATE &&
+      record->ntp_timeout_rate > record->ntp_rate + RATE_SCALE)
+    drop = !drop;
+
+  if (!drop) {
+    record->ntp_tokens = 0;
+    return 0;
+  }
+
+  record->flags |= FLAG_NTP_DROPPED;
+  record->ntp_drops++;
+  total_ntp_drops++;
+
+  return 1;
+}
+
+/* ================================================== */
+
+int
+CLG_LimitCommandResponseRate(int index)
+{
+  Record *record;
+
+  if (!cmd_tokens_per_packet)
+    return 0;
+
+  record = ARR_GetElement(records, index);
+
+  if (record->cmd_tokens >= cmd_tokens_per_packet) {
+    record->cmd_tokens -= cmd_tokens_per_packet;
+    return 0;
+  }
+
+  if (!limit_response_random(cmd_leak_rate)) {
+    record->cmd_tokens = 0;
+    return 0;
+  }
+
+  record->cmd_drops++;
+  total_cmd_drops++;
+
+  return 1;
+}
+
+/* ================================================== */
+
+extern int
+CLG_GetNumberOfIndices(void)
+{
+  if (!active)
+    return -1;
+
+  return ARR_GetSize(records);
+}
+
+/* ================================================== */
+
+static int get_interval(int rate)
+{
+  if (rate == INVALID_RATE)
+    return 127;
+
+  rate += rate > 0 ? RATE_SCALE / 2 : -RATE_SCALE / 2;
+
+  return rate / -RATE_SCALE;
+}
+
+/* ================================================== */
+
+static uint32_t get_last_ago(uint32_t x, uint32_t y)
+{
+  if (y == INVALID_TS || (int32_t)(x - y) < 0)
+    return -1;
+
+  return (x - y) >> TS_FRAC;
+}
+
+/* ================================================== */
+
+int
+CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timeval *now)
+{
+  Record *record;
+  uint32_t now_ts;
+
+  if (!active || index < 0 || index >= ARR_GetSize(records))
+    return 0;
+
+  record = ARR_GetElement(records, index);
+
+  if (record->ip_addr.family == IPADDR_UNSPEC)
+    return 0;
+
+  now_ts = get_ts_from_timeval(now);
+
+  report->ip_addr = record->ip_addr;
+  report->ntp_hits = record->ntp_hits;
+  report->cmd_hits = record->cmd_hits;
+  report->ntp_drops = record->ntp_drops;
+  report->cmd_drops = record->cmd_drops;
+  report->ntp_interval = get_interval(record->ntp_rate);
+  report->cmd_interval = get_interval(record->cmd_rate);
+  report->ntp_timeout_interval = get_interval(record->ntp_timeout_rate);
+  report->last_ntp_hit_ago = get_last_ago(now_ts, record->last_ntp_hit);
+  report->last_cmd_hit_ago = get_last_ago(now_ts, record->last_cmd_hit);
+
+  return 1;
+}
+
+/* ================================================== */
+
+void
+CLG_GetServerStatsReport(RPT_ServerStatsReport *report)
+{
+  report->ntp_hits = total_ntp_hits;
+  report->cmd_hits = total_cmd_hits;
+  report->ntp_drops = total_ntp_drops;
+  report->cmd_drops = total_cmd_drops;
+  report->log_drops = total_record_drops;
 }

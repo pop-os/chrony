@@ -35,6 +35,7 @@
 #include <fcntl.h>
 #include <float.h>
 #include <glob.h>
+#include <grp.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -53,9 +54,14 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/shm.h>
+#include <sys/wait.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+
+#if defined(LINUX) || defined(FREEBSD) || defined(NETBSD) || defined(SOLARIS)
+#include <sys/timex.h>
+#endif
 
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>

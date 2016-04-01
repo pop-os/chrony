@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011, 2013-2014
+ * Copyright (C) Miroslav Lichvar  2011, 2013-2015
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -150,8 +150,6 @@ SCH_Initialise(void)
   LCL_ReadRawTime(&last_select_ts_raw);
   last_select_ts = last_select_ts_raw;
 
-  srandom(last_select_ts.tv_sec << 16 ^ last_select_ts.tv_usec);
-
   initialised = 1;
 }
 
@@ -278,6 +276,26 @@ release_tqe(TimerQueueEntry *node)
 
 /* ================================================== */
 
+static SCH_TimeoutID
+get_new_tqe_id(void)
+{
+  TimerQueueEntry *ptr;
+
+try_again:
+  next_tqe_id++;
+  if (!next_tqe_id)
+    goto try_again;
+
+  /* Make sure the ID isn't already used */
+  for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next)
+    if (ptr->id == next_tqe_id)
+      goto try_again;
+
+  return next_tqe_id;
+}
+
+/* ================================================== */
+
 SCH_TimeoutID
 SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler handler, SCH_ArbitraryArgument arg)
 {
@@ -288,7 +306,7 @@ SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler handler, SCH_ArbitraryArgu
 
   new_tqe = allocate_tqe();
 
-  new_tqe->id = next_tqe_id++;
+  new_tqe->id = get_new_tqe_id();
   new_tqe->handler = handler;
   new_tqe->arg = arg;
   new_tqe->tv = *tv;
@@ -356,7 +374,10 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   assert(class < SCH_NumberOfClasses);
 
   if (randomness > 0.0) {
-    r = random() % 0xffff / (0xffff - 1.0) * randomness + 1.0;
+    uint16_t rnd;
+
+    UTI_GetRandomBytes(&rnd, sizeof (rnd));
+    r = rnd / (double)0xffff * randomness + 1.0;
     min_delay *= r;
     separation *= r;
   }
@@ -397,7 +418,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   /* We have located the insertion point */
   new_tqe = allocate_tqe();
 
-  new_tqe->id = next_tqe_id++;
+  new_tqe->id = get_new_tqe_id();
   new_tqe->handler = handler;
   new_tqe->arg = arg;
   UTI_AddDoubleToTimeval(&now, new_min_delay, &new_tqe->tv);
@@ -421,6 +442,9 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
 
   assert(initialised);
 
+  if (!id)
+    return;
+
   for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next) {
 
     if (ptr->id == id) {
@@ -436,9 +460,12 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
       /* Release memory back to the operating system */
       release_tqe(ptr);
 
-      break;
+      return;
     }
   }
+
+  /* Catch calls with invalid non-zero ID */
+  assert(0);
 }
 
 /* ================================================== */

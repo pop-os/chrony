@@ -29,7 +29,8 @@
 
 #include "sysincl.h"
 
-typedef unsigned long SCH_TimeoutID;
+/* Type for timeout IDs, valid IDs are always greater than zero */
+typedef unsigned int SCH_TimeoutID;
 
 typedef enum {
   SCH_ReservedTimeoutValue = 0,

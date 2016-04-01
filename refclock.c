@@ -233,7 +233,7 @@ RCL_AddRefclock(RefclockParameters *params)
     if (index >= 10)
       ref[2] = (index / 10) % 10 + '0';
 
-    inst->ref_id = ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
+    inst->ref_id = (uint32_t)ref[0] << 24 | ref[1] << 16 | ref[2] << 8 | ref[3];
   }
 
   if (inst->driver->poll) {
@@ -260,7 +260,7 @@ RCL_AddRefclock(RefclockParameters *params)
 
   filter_init(&inst->filter, params->filter_length, params->max_dispersion);
 
-  inst->source = SRC_CreateNewInstance(inst->ref_id, SRC_REFCLOCK, params->sel_option, NULL,
+  inst->source = SRC_CreateNewInstance(inst->ref_id, SRC_REFCLOCK, params->sel_options, NULL,
                                        params->min_samples, params->max_samples);
 
   DEBUG_LOG(LOGF_Refclock, "refclock %s refid=%s poll=%d dpoll=%d filter=%d",
@@ -372,8 +372,6 @@ RCL_AddSample(RCL_Instance instance, struct timeval *sample_time, double offset,
       !valid_sample_time(instance, sample_time))
     return 0;
 
-  filter_add_sample(&instance->filter, &cooked_time, offset - correction + instance->offset, dispersion);
-
   switch (leap) {
     case LEAP_Normal:
     case LEAP_InsertSecond:
@@ -381,10 +379,11 @@ RCL_AddSample(RCL_Instance instance, struct timeval *sample_time, double offset,
       instance->leap_status = leap;
       break;
     default:
-      instance->leap_status = LEAP_Unsynchronised;
-      break;
+      DEBUG_LOG(LOGF_Refclock, "refclock sample ignored bad leap %d", leap);
+      return 0;
   }
 
+  filter_add_sample(&instance->filter, &cooked_time, offset - correction + instance->offset, dispersion);
   instance->pps_active = 0;
 
   log_sample(instance, &cooked_time, 0, 0, offset, offset - correction + instance->offset, dispersion);
