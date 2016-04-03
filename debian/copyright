@@ -42,6 +42,23 @@ Files: test/simulation/test.common
 Copyright: 2013-2014, Miroslav Lichvar
 License: GPL-2+
 
+Files: privops.c
+Copyright: 2015, Bryan Christianson
+           2016, Miroslav Lichvar
+License: GPL-2
+
+Files: privops.h
+Copyright: 2015, Bryan Christianson
+License: GPL-2
+
+Files: contrib/bryan_christianson_1/chronylogrotate.sh
+Copyright: 2015, Bryan Christianson
+License: GPL-2
+
+Files: test/unit/*
+Copyright: 2016, Miroslav Lichvar
+License: GPL-2
+
 Files: md5.*
 Copyright: 1990, RSA Data Security, Inc. All rights reserved.
 License: RSA-MD
