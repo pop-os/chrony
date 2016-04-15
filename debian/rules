@@ -13,7 +13,8 @@ override_dh_auto_configure:
 		--without-readline \
 		--with-user=_chrony \
 		--enable-scfilter \
-		--chronysockdir=/run/chrony
+		--chronysockdir=/run/chrony \
+		--with-ntp-era=$(shell date -d '1970-01-01 00:00:00+00:00' +'%s')
 
 override_dh_auto_build:
 	dh_auto_build
