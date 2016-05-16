@@ -35,7 +35,8 @@ case "$1" in
 
         if `which ucf >/dev/null`
         then
-          ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
+            ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
+            ucf --three-way /usr/share/chrony/chrony.keys /etc/chrony/chrony.keys
         fi
 
         # obsolete, instead use logrotate
