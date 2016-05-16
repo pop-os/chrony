@@ -29,4 +29,4 @@ override_dh_install:
 	install -m 0640 -t $(BASE)/usr/share/chrony/ debian/chrony.keys
 
 override_dh_fixperms:
-	dh_fixperms -X etc/chrony/chrony.keys
+	dh_fixperms -X usr/share/chrony/chrony.keys
