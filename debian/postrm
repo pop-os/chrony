@@ -15,6 +15,7 @@ case "$1" in
         if `which ucf >/dev/null`
         then
             ucf --purge /etc/chrony/chrony.conf
+            ucf --purge /etc/chrony/chrony.keys
         fi
         rm -rf /etc/chrony
         rm -rf /var/lib/chrony
