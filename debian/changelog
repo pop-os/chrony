@@ -1,3 +1,46 @@
+chrony (2.3-1) unstable; urgency=medium
+
+  * Import upstream version 2.3:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+    (Closes: #818235)
+
+  * debian/chrony.conf:
+    - Drop the “logchange” directive. Upstream has enabled “logchange” by
+    default with a threshold of 1 second. We now use that instead of our custom
+    threshold of 0,5 second which tended to spam syslog.
+    - Remove obsolete comment.
+
+  * debian/chrony.lintian-overrides:
+    - Update “chrony.keys” path
+
+  * debian/control:
+    - Bump standard-version to 3.9.8 (no changes required).
+    - Use HTTPS transport protocol for the homepage URL.
+
+  * debian/copyright:
+    - Add some entries about new or untracked files.
+
+  * debian/postinst:
+    - Move /usr/share/chrony/chrony.keys template to /etc/chrony using ucf.
+    - Avoid displaying needless prompt when upgrading to chrony ≥ 2.2.1-1.
+    (Closes: #820087)
+
+  * debian/postrm:
+    - Remove chrony.keys on purge.
+    - Remove all vestiges of chrony.keys from the state hashfile.
+
+  * debian/rules:
+    - Re-enable test suite.
+    - Remove dh_installinit override. The init script is LSB-compliant so
+    passing the “default” option or the two-digit sequence number is unneeded.
+    - Explicitly set the NTP era. With this change, the NTP time will be
+    mapped from 1970-01-01T00:00:00Z to 2106-02-07T06:28:16Z. Thanks to this
+    fixed value, chrony build should be reproducible.
+    - Move the key file template (chrony.keys) in /usr/share/chrony.
+    - Force /usr/share/chrony/chrony.keys to use 0640 modes.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 May 2016 21:58:05 +0200
+
 chrony (2.2.1-1) unstable; urgency=medium
 
   * Import upstream versions 2.2 and 2.2.1:
