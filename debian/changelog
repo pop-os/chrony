@@ -1,4 +1,4 @@
-chrony (2.3-1) unstable; urgency=medium
+chrony (2.3-1) unstable; urgency=low
 
   * Import upstream version 2.3:
     - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
@@ -39,7 +39,7 @@ chrony (2.3-1) unstable; urgency=medium
     - Move the key file template (chrony.keys) in /usr/share/chrony.
     - Force /usr/share/chrony/chrony.keys to use 0640 modes.
 
- -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 May 2016 21:58:05 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 18 May 2016 23:13:05 +0200
 
 chrony (2.2.1-1) unstable; urgency=medium
 
