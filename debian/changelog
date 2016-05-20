@@ -1,3 +1,10 @@
+chrony (2.3-2) unstable; urgency=medium
+
+  * Cherry pick upstream patch to fix FTBFS on PowerPC, ppc64 and ppc64el
+    architectures.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 20 May 2016 14:21:14 +0200
+
 chrony (2.3-1) unstable; urgency=low
 
   * Import upstream version 2.3:
