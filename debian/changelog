@@ -1,4 +1,4 @@
-chrony (2.3-2) unstable; urgency=medium
+chrony (2.3-2) unstable; urgency=low
 
   * Cherry pick upstream patch to fix FTBFS on PowerPC, ppc64 and ppc64el
     architectures.
