@@ -62,6 +62,10 @@ case "$1" in
         then
             ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
             ucf --three-way /usr/share/chrony/chrony.keys /etc/chrony/chrony.keys
+            if [ -x "$(which ucfr)" ]; then
+                ucfr chrony /etc/chrony/chrony.conf
+                ucfr chrony /etc/chrony/chrony.keys
+            fi
         fi
 
         # obsolete, instead use logrotate
