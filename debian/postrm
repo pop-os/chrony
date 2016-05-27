@@ -16,6 +16,10 @@ case "$1" in
         then
             ucf --purge /etc/chrony/chrony.conf
             ucf --purge /etc/chrony/chrony.keys
+            if [ -x "$(which ucfr)" ]; then
+                ucfr --purge chrony /etc/chrony/chrony.conf
+                ucfr --purge chrony /etc/chrony/chrony.keys
+            fi
         fi
         rm -rf /etc/chrony
         rm -rf /var/lib/chrony
