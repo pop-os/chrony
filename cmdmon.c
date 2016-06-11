@@ -132,6 +132,7 @@ static const char permissions[] = {
   PERMIT_AUTH, /* REFRESH */
   PERMIT_AUTH, /* SERVER_STATS */
   PERMIT_AUTH, /* CLIENT_ACCESSES_BY_INDEX2 */
+  PERMIT_AUTH, /* LOCAL2 */
 };
 
 /* ================================================== */
@@ -248,43 +249,51 @@ prepare_socket(int family, int port_number)
 
 /* ================================================== */
 
-void
-CAM_Initialise(int family)
+static void
+do_size_checks(void)
 {
-  int i, port_number;
+  int i, request_length, padding_length, reply_length;
+  CMD_Request request;
+  CMD_Reply reply;
 
-  assert(!initialised);
-  initialised = 1;
-
-  assert(sizeof (permissions) / sizeof (permissions[0]) == N_REQUEST_TYPES);
+  assert(offsetof(CMD_Request, data) == 20);
+  assert(offsetof(CMD_Reply, data) == 28);
 
   for (i = 0; i < N_REQUEST_TYPES; i++) {
-    CMD_Request r;
-    int command_length, padding_length;
-
-    r.version = PROTO_VERSION_NUMBER;
-    r.command = htons(i);
-    command_length = PKL_CommandLength(&r);
-    padding_length = PKL_CommandPaddingLength(&r);
-    assert(padding_length <= MAX_PADDING_LENGTH && padding_length <= command_length);
-    assert((command_length >= offsetof(CMD_Request, data) &&
-            command_length <= sizeof (CMD_Request)) || command_length == 0);
+    request.version = PROTO_VERSION_NUMBER;
+    request.command = htons(i);
+    request_length = PKL_CommandLength(&request);
+    padding_length = PKL_CommandPaddingLength(&request);
+    if (padding_length > MAX_PADDING_LENGTH || padding_length > request_length ||
+        request_length > sizeof (CMD_Request) ||
+        (request_length && request_length < offsetof(CMD_Request, data)))
+      assert(0);
   }
 
   for (i = 1; i < N_REPLY_TYPES; i++) {
-    CMD_Reply r;
-    int reply_length;
-
-    r.reply = htons(i);
-    r.status = STT_SUCCESS;
-    r.data.manual_list.n_samples = htonl(MAX_MANUAL_LIST_SAMPLES);
-    reply_length = PKL_ReplyLength(&r);
-    assert((reply_length >= offsetof(CMD_Reply, data) &&
-            reply_length <= sizeof (CMD_Reply)) || reply_length == 0);
+    reply.reply = htons(i);
+    reply.status = STT_SUCCESS;
+    reply.data.manual_list.n_samples = htonl(MAX_MANUAL_LIST_SAMPLES);
+    reply_length = PKL_ReplyLength(&reply);
+    if ((reply_length && reply_length < offsetof(CMD_Reply, data)) ||
+        reply_length > sizeof (CMD_Reply))
+      assert(0);
   }
+}
 
+/* ================================================== */
+
+void
+CAM_Initialise(int family)
+{
+  int port_number;
+
+  assert(!initialised);
+  assert(sizeof (permissions) / sizeof (permissions[0]) == N_REQUEST_TYPES);
+  do_size_checks();
+
+  initialised = 1;
   sock_fdu = -1;
-
   port_number = CNF_GetCommandPort();
 
   if (port_number && (family == IPADDR_UNSPEC || family == IPADDR_INET4))
@@ -576,11 +585,10 @@ handle_settime(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_local(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  int on_off, stratum;
-  on_off = ntohl(rx_message->data.local.on_off);
-  if (on_off) {
-    stratum = ntohl(rx_message->data.local.stratum);
-    REF_EnableLocal(stratum);
+  if (ntohl(rx_message->data.local.on_off)) {
+    REF_EnableLocal(ntohl(rx_message->data.local.stratum),
+                    UTI_FloatNetworkToHost(rx_message->data.local.distance),
+                    ntohl(rx_message->data.local.orphan));
   } else {
     REF_DisableLocal();
   }
@@ -1409,7 +1417,7 @@ read_from_cmd_socket(void *anything)
           handle_settime(&rx_message, &tx_message);
           break;
         
-        case REQ_LOCAL:
+        case REQ_LOCAL2:
           handle_local(&rx_message, &tx_message);
           break;
 

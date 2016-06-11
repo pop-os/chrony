@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2015
+ * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -45,6 +45,8 @@
 static int are_we_synchronised;
 static int enable_local_stratum;
 static int local_stratum;
+static int local_orphan;
+static double local_distance;
 static NTP_Leap our_leap_status;
 static int our_leap_sec;
 static int our_stratum;
@@ -230,7 +232,7 @@ REF_Initialise(void)
 
   correction_time_ratio = CNF_GetCorrectionTimeRatio();
 
-  enable_local_stratum = CNF_AllowLocalReference(&local_stratum);
+  enable_local_stratum = CNF_AllowLocalReference(&local_stratum, &local_orphan, &local_distance);
 
   leap_timeout_id = 0;
   leap_in_progress = 0;
@@ -1157,29 +1159,37 @@ REF_GetReferenceParams
  double *root_dispersion
 )
 {
-  double elapsed;
-  double extra_dispersion;
+  double elapsed, dispersion;
 
   assert(initialised);
 
   if (are_we_synchronised) {
+    UTI_DiffTimevalsToDouble(&elapsed, local_time, &our_ref_time);
+    dispersion = our_root_dispersion +
+      (our_skew + fabs(our_residual_freq) + LCL_GetMaxClockError()) * elapsed;
+  } else {
+    dispersion = 0.0;
+  }
+
+  /* Local reference is active when enabled and the clock is not synchronised
+     or the root distance exceeds the threshold */
+
+  if (are_we_synchronised &&
+      !(enable_local_stratum && our_root_delay / 2 + dispersion > local_distance)) {
 
     *is_synchronised = 1;
 
     *stratum = our_stratum;
 
-    UTI_DiffTimevalsToDouble(&elapsed, local_time, &our_ref_time);
-    extra_dispersion = (our_skew + fabs(our_residual_freq) + LCL_GetMaxClockError()) * elapsed;
-
     *leap_status = !leap_in_progress ? our_leap_status : LEAP_Unsynchronised;
     *ref_id = our_ref_id;
     *ref_time = our_ref_time;
     *root_delay = our_root_delay;
-    *root_dispersion = our_root_dispersion + extra_dispersion;
+    *root_dispersion = dispersion;
 
   } else if (enable_local_stratum) {
 
-    *is_synchronised = 1;
+    *is_synchronised = 0;
 
     *stratum = local_stratum;
     *ref_id = NTP_REFID_LOCAL;
@@ -1220,13 +1230,27 @@ REF_GetReferenceParams
 int
 REF_GetOurStratum(void)
 {
-  if (are_we_synchronised) {
-    return our_stratum;
-  } else if (enable_local_stratum) {
-    return local_stratum;
-  } else {
+  struct timeval now_cooked, ref_time;
+  int synchronised, stratum;
+  NTP_Leap leap_status;
+  uint32_t ref_id;
+  double root_delay, root_dispersion;
+
+  SCH_GetLastEventTime(&now_cooked, NULL, NULL);
+  REF_GetReferenceParams(&now_cooked, &synchronised, &leap_status, &stratum,
+                         &ref_id, &ref_time, &root_delay, &root_dispersion);
+
+  return stratum;
+}
+
+/* ================================================== */
+
+int
+REF_GetOrphanStratum(void)
+{
+  if (!enable_local_stratum || !local_orphan || mode != REF_ModeNormal)
     return NTP_MAX_STRATUM;
-  }
+  return local_stratum;
 }
 
 /* ================================================== */
@@ -1257,10 +1281,12 @@ REF_ModifyMakestep(int limit, double threshold)
 /* ================================================== */
 
 void
-REF_EnableLocal(int stratum)
+REF_EnableLocal(int stratum, double distance, int orphan)
 {
   enable_local_stratum = 1;
-  local_stratum = stratum;
+  local_stratum = CLAMP(1, stratum, NTP_MAX_STRATUM - 1);
+  local_distance = distance;
+  local_orphan = !!orphan;
 }
 
 /* ================================================== */
@@ -1269,14 +1295,6 @@ void
 REF_DisableLocal(void)
 {
   enable_local_stratum = 0;
-}
-
-/* ================================================== */
-
-int
-REF_IsLocalActive(void)
-{
-  return !are_we_synchronised && enable_local_stratum;
 }
 
 /* ================================================== */
@@ -1309,52 +1327,34 @@ int REF_IsLeapSecondClose(void)
 void
 REF_GetTrackingReport(RPT_TrackingReport *rep)
 {
-  double elapsed;
-  double extra_dispersion;
   struct timeval now_raw, now_cooked;
   double correction;
+  int synchronised;
 
   LCL_ReadRawTime(&now_raw);
   LCL_GetOffsetCorrection(&now_raw, &correction, NULL);
   UTI_AddDoubleToTimeval(&now_raw, correction, &now_cooked);
 
-  rep->ref_id = NTP_REFID_UNSYNC;
+  REF_GetReferenceParams(&now_cooked, &synchronised,
+                         &rep->leap_status, &rep->stratum,
+                         &rep->ref_id, &rep->ref_time,
+                         &rep->root_delay, &rep->root_dispersion);
+
+  if (rep->stratum == NTP_MAX_STRATUM)
+    rep->stratum = 0;
+
   rep->ip_addr.family = IPADDR_UNSPEC;
-  rep->stratum = 0;
-  rep->leap_status = our_leap_status;
-  rep->ref_time.tv_sec = 0;
-  rep->ref_time.tv_usec = 0;
   rep->current_correction = correction;
   rep->freq_ppm = LCL_ReadAbsoluteFrequency();
   rep->resid_freq_ppm = 0.0;
   rep->skew_ppm = 0.0;
-  rep->root_delay = 0.0;
-  rep->root_dispersion = 0.0;
   rep->last_update_interval = last_ref_update_interval;
   rep->last_offset = last_offset;
   rep->rms_offset = sqrt(avg2_offset);
 
-  if (are_we_synchronised) {
-    
-    UTI_DiffTimevalsToDouble(&elapsed, &now_cooked, &our_ref_time);
-    extra_dispersion = (our_skew + fabs(our_residual_freq) + LCL_GetMaxClockError()) * elapsed;
-    
-    rep->ref_id = our_ref_id;
+  if (synchronised) {
     rep->ip_addr = our_ref_ip;
-    rep->stratum = our_stratum;
-    rep->ref_time = our_ref_time;
     rep->resid_freq_ppm = 1.0e6 * our_residual_freq;
     rep->skew_ppm = 1.0e6 * our_skew;
-    rep->root_delay = our_root_delay;
-    rep->root_dispersion = our_root_dispersion + extra_dispersion;
-
-  } else if (enable_local_stratum) {
-
-    rep->ref_id = NTP_REFID_LOCAL;
-    rep->ip_addr.family = IPADDR_UNSPEC;
-    rep->stratum = local_stratum;
-    rep->ref_time = now_cooked;
-    rep->root_dispersion = LCL_GetSysPrecisionAsQuantum();
   }
-
 }

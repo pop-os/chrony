@@ -602,6 +602,7 @@ NCR_ChangeRemoteAddress(NCR_Instance inst, NTP_Remote_Address *remote_addr)
     close_client_socket(inst);
   else {
     NIO_CloseServerSocket(inst->local_addr.sock_fd);
+    inst->local_addr.ip_addr.family = IPADDR_UNSPEC;
     inst->local_addr.sock_fd = NIO_OpenServerSocket(remote_addr);
   }
 
@@ -800,7 +801,7 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
                 )
 {
   NTP_Packet message;
-  int leap, auth_len, length, ret, precision;
+  int auth_len, length, ret, precision;
   struct timeval local_receive, local_transmit;
   NTP_int64 ts_fuzz;
 
@@ -822,7 +823,7 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
   if (my_mode == MODE_CLIENT) {
     /* Don't reveal local time or state of the clock in client packets */
     precision = 32;
-    are_we_synchronised = leap_status = our_stratum = our_ref_id = 0;
+    leap_status = our_stratum = our_ref_id = 0;
     our_ref_time.tv_sec = our_ref_time.tv_usec = 0;
     our_root_delay = our_root_dispersion = 0.0;
   } else {
@@ -858,14 +859,8 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     local_receive = *local_rx;
   }
 
-  if (are_we_synchronised) {
-    leap = (int) leap_status;
-  } else {
-    leap = LEAP_Unsynchronised;
-  }
-
   /* Generate transmit packet */
-  message.lvm = NTP_LVM(leap, version, my_mode);
+  message.lvm = NTP_LVM(leap_status, version, my_mode);
   /* Stratum 16 and larger are invalid */
   if (our_stratum < NTP_MAX_STRATUM) {
     message.stratum = our_stratum;
@@ -961,6 +956,7 @@ static void
 transmit_timeout(void *arg)
 {
   NCR_Instance inst = (NCR_Instance) arg;
+  NTP_Local_Address local_addr;
   int sent;
 
   inst->tx_timeout_id = 0;
@@ -996,6 +992,10 @@ transmit_timeout(void *arg)
     inst->local_addr.sock_fd = NIO_OpenClientSocket(&inst->remote_addr);
   }
 
+  /* Don't require the packet to be sent from the same address as before */
+  local_addr.ip_addr.family = IPADDR_UNSPEC;
+  local_addr.sock_fd = inst->local_addr.sock_fd;
+
   /* Check whether we need to 'warm up' the link to the other end by
      sending an NTP exchange to ensure both ends' ARP caches are
      primed.  On loaded systems this might also help ensure that bits
@@ -1009,7 +1009,7 @@ transmit_timeout(void *arg)
        as the reply will be ignored */
     transmit_packet(MODE_CLIENT, inst->local_poll, inst->version, 0, 0,
                     &inst->remote_orig, &inst->local_rx, NULL, NULL,
-                    &inst->remote_addr, &inst->local_addr);
+                    &inst->remote_addr, &local_addr);
 
     inst->presend_done = 1;
 
@@ -1027,7 +1027,7 @@ transmit_timeout(void *arg)
                          &inst->remote_orig,
                          &inst->local_rx, &inst->local_tx, &inst->local_ntp_tx,
                          &inst->remote_addr,
-                         &inst->local_addr);
+                         &local_addr);
 
   ++inst->tx_count;
 
@@ -1184,7 +1184,6 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
 
   /* These are the timeval equivalents of the remote epochs */  
   struct timeval remote_receive_tv, remote_transmit_tv;
-  struct timeval remote_reference_tv;
   struct timeval local_average, remote_average;
   double local_interval, remote_interval;
 
@@ -1223,7 +1222,6 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
 
   UTI_Int64ToTimeval(&message->receive_ts, &remote_receive_tv);
   UTI_Int64ToTimeval(&message->transmit_ts, &remote_transmit_tv);
-  UTI_Int64ToTimeval(&message->reference_ts, &remote_reference_tv);
 
   /* Check if the packet is valid per RFC 5905, section 8.
      The test values are 1 when passed and 0 when failed. */
@@ -1241,7 +1239,6 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
      association if not properly 'up'. */
   test3 = (message->originate_ts.hi || message->originate_ts.lo) &&
           (message->receive_ts.hi || message->receive_ts.lo) &&
-          (message->reference_ts.hi || message->reference_ts.lo) &&
           (message->transmit_ts.hi || message->transmit_ts.lo);
 
   /* Test 4 would check for denied access.  It would always pass as this
@@ -1262,10 +1259,8 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
           message->stratum != NTP_INVALID_STRATUM; 
 
   /* Test 7 checks for bad data.  The root distance must be smaller than a
-     defined maximum and the transmit time must not be before the time of
-     the last synchronisation update. */
-  test7 = pkt_root_delay / 2.0 + pkt_root_dispersion < NTP_MAX_DISPERSION &&
-          UTI_CompareTimevals(&remote_reference_tv, &remote_transmit_tv) < 1;
+     defined maximum. */
+  test7 = pkt_root_delay / 2.0 + pkt_root_dispersion < NTP_MAX_DISPERSION;
 
   /* The packet is considered valid if the tests above passed */
   valid_packet = test1 && test2 && test3 && test5 && test6 && test7;
@@ -1353,7 +1348,8 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
 
     /* Test D requires that the remote peer is not synchronised to us to
        prevent a synchronisation loop */
-    testD = message->stratum <= 1 || pkt_refid != UTI_IPToRefid(&local_addr->ip_addr);
+    testD = message->stratum <= 1 || REF_GetMode() != REF_ModeNormal ||
+            pkt_refid != UTI_IPToRefid(&local_addr->ip_addr);
   } else {
     offset = delay = dispersion = 0.0;
     sample_time = *now;
@@ -1449,6 +1445,9 @@ receive_packet(NTP_Packet *message, struct timeval *now, double now_err, NCR_Ins
     /* If in client mode, no more packets are expected to be coming from the
        server and the socket can be closed */
     close_client_socket(inst);
+
+    /* Update the local address */
+    inst->local_addr.ip_addr = local_addr->ip_addr;
 
     requeue_transmit = 1;
   }
@@ -2004,6 +2003,14 @@ NTP_Remote_Address *
 NCR_GetRemoteAddress(NCR_Instance inst) 
 {
   return &inst->remote_addr;
+}
+
+/* ================================================== */
+
+uint32_t
+NCR_GetLocalRefid(NCR_Instance inst)
+{
+  return UTI_IPToRefid(&inst->local_addr.ip_addr);
 }
 
 /* ================================================== */

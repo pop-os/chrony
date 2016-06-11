@@ -83,6 +83,7 @@ extern char *CNF_GetLeapSecTimezone(void);
 /* Value returned in ppm, as read from file */
 extern double CNF_GetMaxUpdateSkew(void);
 extern double CNF_GetMaxClockError(void);
+extern double CNF_GetMaxDrift(void);
 extern double CNF_GetCorrectionTimeRatio(void);
 extern double CNF_GetMaxSlewRate(void);
 
@@ -91,7 +92,7 @@ extern double CNF_GetReselectDistance(void);
 extern double CNF_GetStratumWeight(void);
 extern double CNF_GetCombineLimit(void);
 
-extern int CNF_AllowLocalReference(int *stratum);
+extern int CNF_AllowLocalReference(int *stratum, int *orphan, double *distance);
 
 extern void CNF_SetupAccessRestrictions(void);
 
