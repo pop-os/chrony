@@ -87,7 +87,7 @@ struct RCL_Instance_Record {
   SRC_Instance source;
 };
 
-/* Array of RCL_Instance_Record */
+/* Array of pointers to RCL_Instance_Record */
 static ARR_Instance refclocks;
 
 static LOG_FileID logfileid;
@@ -114,13 +114,13 @@ static void filter_add_dispersion(struct MedianFilter *filter, double dispersion
 static RCL_Instance
 get_refclock(unsigned int index)
 {
-  return (RCL_Instance)ARR_GetElement(refclocks, index);
+  return *(RCL_Instance *)ARR_GetElement(refclocks, index);
 }
 
 void
 RCL_Initialise(void)
 {
-  refclocks = ARR_CreateInstance(sizeof (struct RCL_Instance_Record));
+  refclocks = ARR_CreateInstance(sizeof (RCL_Instance));
 
   CNF_AddRefclocks();
 
@@ -148,6 +148,7 @@ RCL_Finalise(void)
     filter_fini(&inst->filter);
     Free(inst->driver_parameter);
     SRC_DestroyInstance(inst->source);
+    Free(inst);
   }
 
   if (ARR_GetSize(refclocks) > 0) {
@@ -162,8 +163,10 @@ int
 RCL_AddRefclock(RefclockParameters *params)
 {
   int pps_source = 0;
+  RCL_Instance inst;
 
-  RCL_Instance inst = ARR_GetNewElement(refclocks);
+  inst = MallocNew(struct RCL_Instance_Record);
+  *(RCL_Instance *)ARR_GetNewElement(refclocks) = inst;
 
   if (strcmp(params->driver_name, "SHM") == 0) {
     inst->driver = &RCL_SHM_driver;
@@ -470,15 +473,16 @@ RCL_AddPulse(RCL_Instance instance, struct timeval *pulse_time, double second)
     double root_delay, root_dispersion, distance;
     uint32_t ref_id;
 
-    /* Ignore the pulse if we are not well synchronized */
+    /* Ignore the pulse if we are not well synchronized and the local
+       reference is not active */
 
     REF_GetReferenceParams(&cooked_time, &is_synchronised, &leap, &stratum,
         &ref_id, &ref_time, &root_delay, &root_dispersion);
     distance = fabs(root_delay) / 2 + root_dispersion;
 
-    if (!is_synchronised || distance >= 0.5 / rate) {
+    if (leap == LEAP_Unsynchronised || distance >= 0.5 / rate) {
       DEBUG_LOG(LOGF_Refclock, "refclock pulse ignored second=%.9f sync=%d dist=%.9f",
-          second, is_synchronised, distance);
+          second, leap != LEAP_Unsynchronised, distance);
       /* Drop also all stored samples */
       filter_reset(&instance->filter);
       return 0;
@@ -528,9 +532,10 @@ pps_stratum(RCL_Instance instance, struct timeval *tv)
   REF_GetReferenceParams(tv, &is_synchronised, &leap, &stratum,
       &ref_id, &ref_time, &root_delay, &root_dispersion);
 
-  /* Don't change our stratum if local stratum is active
+  /* Don't change our stratum if the local reference is active
      or this is the current source */
-  if (ref_id == instance->ref_id || REF_IsLocalActive())
+  if (ref_id == instance->ref_id ||
+      (!is_synchronised && leap != LEAP_Unsynchronised))
     return stratum - 1;
 
   /* Or the current source is another PPS refclock */ 

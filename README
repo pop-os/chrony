@@ -53,7 +53,7 @@ ready-formatted plain text (chrony.txt) in the distribution.
 There is also information available on the chrony web pages, accessible
 through the URL 
 
-    http://chrony.tuxfamily.org/
+    https://chrony.tuxfamily.org/
 
 Where are new versions announced?
 =================================
@@ -84,6 +84,12 @@ chrony-dev-request@chrony.tuxfamily.org
 
 as applicable.
 
+When you are reporting a bug, please send us all the information you can.
+Unfortunately, chrony has proven to be one of those programs where it is very
+difficult to reproduce bugs in a different environment. So we may have to
+interact with you quite a lot to obtain enough extra logging and tracing to
+pin-point the problem in some cases. Please be patient and plan for this!
+
 License
 =======
 
@@ -104,6 +110,10 @@ Miroslav Lichvar <mlichvar@redhat.com>
 
 Acknowledgements
 ================
+
+In writing the chronyd program, extensive use has been made of RFC 1305
+and RFC 5905, written by David Mills. The source code of the NTP reference
+implementation has been used to check the details of the protocol.
 
 The following people have provided patches and other major contributions
 to the program :
@@ -131,6 +141,7 @@ Erik Bryer <ebryer@spots.ab.ca>
 Bryan Christianson <bryan@whatroute.net>
     Support for Mac OS X
     Support for privilege separation
+    Entries in contrib directory
 
 Juliusz Chroboczek <jch@pps.jussieu.fr>
     Fix install rule in Makefile if chronyd file is in use.
@@ -216,6 +227,9 @@ Andreas Piesk <apiesk@virbus.de>
 
 Timo Teras <timo.teras@iki.fi>
     Patch to reply correctly on multihomed hosts
+
+Stephen Wadeley <swadeley@redhat.com>
+    Improvements to man pages
 
 Wolfgang Weisselberg <weissel@netcologne.de>
     Entries in contrib directory

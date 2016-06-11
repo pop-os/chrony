@@ -85,6 +85,7 @@ static char *rtc_file = NULL;
 static double max_update_skew = 1000.0;
 static double correction_time_ratio = 3.0;
 static double max_clock_error = 1.0; /* in ppm */
+static double max_drift = 500000.0; /* in ppm */
 static double max_slew_rate = 1e6 / 12.0; /* in ppm */
 
 static double max_distance = 3.0;
@@ -107,6 +108,8 @@ static char *dumpdir;
 
 static int enable_local=0;
 static int local_stratum;
+static int local_orphan;
+static double local_distance;
 
 /* Threshold (in seconds) - if absolute value of initial error is less
    than this, slew instead of stepping */
@@ -489,6 +492,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_double(p, &max_clock_error);
   } else if (!strcasecmp(command, "maxdistance")) {
     parse_double(p, &max_distance);
+  } else if (!strcasecmp(command, "maxdrift")) {
+    parse_double(p, &max_drift);
   } else if (!strcasecmp(command, "maxsamples")) {
     parse_int(p, &max_samples);
   } else if (!strcasecmp(command, "maxslewrate")) {
@@ -814,13 +819,9 @@ parse_log(char *line)
 static void
 parse_local(char *line)
 {
-  int stratum;
-  if (sscanf(line, "stratum%d", &stratum) == 1) {
-    local_stratum = stratum;
-    enable_local = 1;
-  } else {
+  if (!CPS_ParseLocal(line, &local_stratum, &local_orphan, &local_distance))
     command_parse_error();
-  }
+  enable_local = 1;
 }
 
 /* ================================================== */
@@ -1487,6 +1488,14 @@ CNF_GetMaxUpdateSkew(void)
 /* ================================================== */
 
 double
+CNF_GetMaxDrift(void)
+{
+  return max_drift;
+}
+
+/* ================================================== */
+
+double
 CNF_GetMaxClockError(void)
 {
   return max_clock_error;
@@ -1558,10 +1567,12 @@ CNF_GetCommandPort(void) {
 /* ================================================== */
 
 int
-CNF_AllowLocalReference(int *stratum)
+CNF_AllowLocalReference(int *stratum, int *orphan, double *distance)
 {
   if (enable_local) {
     *stratum = local_stratum;
+    *orphan = local_orphan;
+    *distance = local_distance;
     return 1;
   } else {
     return 0;

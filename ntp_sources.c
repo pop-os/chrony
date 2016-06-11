@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2012, 2014
+ * Copyright (C) Miroslav Lichvar  2011-2012, 2014, 2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -53,8 +53,7 @@ typedef struct {
   int pool;                     /* Number of the pool from which was this source
                                    added or INVALID_POOL */
   int tentative;                /* Flag indicating there was no valid response
-                                   yet and the source may be removed if other
-                                   sources from the pool respond first */
+                                   received from the source yet */
 } SourceRecord;
 
 /* Hash table of SourceRecord, its size is a power of two and it's never
@@ -71,6 +70,7 @@ static int auto_start_sources = 0;
 struct UnresolvedSource {
   char *name;
   int port;
+  int random_order;
   int replacement;
   union {
     struct {
@@ -311,7 +311,7 @@ add_source(NTP_Remote_Address *remote_addr, char *name, NTP_Source_Type type, So
       record->remote_addr = NCR_GetRemoteAddress(record->data);
       record->name = name ? Strdup(name) : NULL;
       record->pool = pool;
-      record->tentative = pool != INVALID_POOL ? 1 : 0;
+      record->tentative = 1;
 
       if (auto_start_sources)
         NCR_StartInstance(record->data);
@@ -328,6 +328,7 @@ replace_source(NTP_Remote_Address *old_addr, NTP_Remote_Address *new_addr)
 {
   int slot1, slot2, found;
   SourceRecord *record;
+  struct SourcePool *pool;
 
   find_slot(old_addr, &slot1, &found);
   if (!found)
@@ -340,6 +341,15 @@ replace_source(NTP_Remote_Address *old_addr, NTP_Remote_Address *new_addr)
   record = get_record(slot1);
   NCR_ChangeRemoteAddress(record->data, new_addr);
   record->remote_addr = NCR_GetRemoteAddress(record->data);
+
+  if (!record->tentative) {
+    record->tentative = 1;
+
+    if (record->pool != INVALID_POOL) {
+      pool = ARR_GetElement(pools, record->pool);
+      pool->sources--;
+    }
+  }
 
   /* The hash table must be rebuilt for the new address */
   rehash_records();
@@ -358,12 +368,16 @@ process_resolved_name(struct UnresolvedSource *us, IPAddr *ip_addrs, int n_addrs
 {
   NTP_Remote_Address address;
   int i, added;
+  unsigned short first = 0;
+
+  if (us->random_order)
+    UTI_GetRandomBytes(&first, sizeof (first));
 
   for (i = added = 0; i < n_addrs; i++) {
-    DEBUG_LOG(LOGF_NtpSources, "(%d) %s", i + 1, UTI_IPToString(&ip_addrs[i]));
-
-    address.ip_addr = ip_addrs[i];
+    address.ip_addr = ip_addrs[((unsigned int)i + first) % n_addrs];
     address.port = us->port;
+
+    DEBUG_LOG(LOGF_NtpSources, "(%d) %s", i + 1, UTI_IPToString(&address.ip_addr));
 
     if (us->replacement) {
       if (replace_source(&us->replace_source, &address) != NSR_AlreadyInUse)
@@ -507,6 +521,7 @@ NSR_AddSourceByName(char *name, int port, int pool, NTP_Source_Type type, Source
   us = MallocNew(struct UnresolvedSource);
   us->name = Strdup(name);
   us->port = port;
+  us->random_order = 0;
   us->replacement = 0;
   us->new_source.type = type;
   us->new_source.params = *params;
@@ -648,6 +663,11 @@ resolve_source_replacement(SourceRecord *record)
   us = MallocNew(struct UnresolvedSource);
   us->name = Strdup(record->name);
   us->port = record->remote_addr->port;
+  /* If there never was a valid reply from this source (e.g. it was a bad
+     replacement), ignore the order of addresses from the resolver to not get
+     stuck to a pair of addresses if the order doesn't change, or a group of
+     IPv4/IPv6 addresses if the resolver prefers inaccessible IP family */
+  us->random_order = record->tentative;
   us->replacement = 1;
   us->replace_source = *record->remote_addr;
 
@@ -733,6 +753,26 @@ static void remove_tentative_pool_sources(int pool)
     rehash_records();
 }
 
+/* ================================================== */
+
+uint32_t
+NSR_GetLocalRefid(IPAddr *address)
+{
+  NTP_Remote_Address remote_addr;
+  int slot, found;
+
+  remote_addr.ip_addr = *address;
+  remote_addr.port = 0;
+
+  find_slot(&remote_addr, &slot, &found);
+  if (!found)
+    return 0;
+
+  return NCR_GetLocalRefid(get_record(slot)->data);
+}
+
+/* ================================================== */
+
 /* This routine is called by ntp_io when a new packet arrives off the network,
    possibly with an authentication tail */
 void
@@ -752,20 +792,21 @@ NSR_ProcessReceive(NTP_Packet *message, struct timeval *now, double now_err, NTP
       return;
 
     if (record->tentative) {
-      /* First reply from a pool source */
+      /* This was the first valid reply from the source */
       record->tentative = 0;
 
-      assert(record->pool != INVALID_POOL);
-      pool = (struct SourcePool *)ARR_GetElement(pools, record->pool);
-      pool->sources++;
+      if (record->pool != INVALID_POOL) {
+        pool = ARR_GetElement(pools, record->pool);
+        pool->sources++;
 
-      DEBUG_LOG(LOGF_NtpSources, "pool %s has %d confirmed sources",
-                record->name, pool->sources);
+        DEBUG_LOG(LOGF_NtpSources, "pool %s has %d confirmed sources",
+                  record->name, pool->sources);
 
-      /* If the number of sources reached the configured maximum, remove
-         the tentative sources added from this pool */
-      if (pool->sources >= pool->max_sources)
-        remove_tentative_pool_sources(record->pool);
+        /* If the number of sources from the pool reached the configured
+           maximum, remove the remaining tentative sources */
+        if (pool->sources >= pool->max_sources)
+          remove_tentative_pool_sources(record->pool);
+      }
     }
   } else {
     NCR_ProcessUnknown(message, now, now_err, remote_addr, local_addr, length);

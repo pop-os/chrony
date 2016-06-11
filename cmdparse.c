@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2013-2014
+ * Copyright (C) Miroslav Lichvar  2013-2014, 2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -221,6 +221,41 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
   return result;
 }
 
+/* ================================================== */
+
+int
+CPS_ParseLocal(char *line, int *stratum, int *orphan, double *distance)
+{
+  int n;
+  char *cmd;
+
+  *stratum = 10;
+  *distance = 1.0;
+  *orphan = 0;
+
+  while (*line) {
+    cmd = line;
+    line = CPS_SplitWord(line);
+
+    if (!strcasecmp(cmd, "stratum")) {
+      if (sscanf(line, "%d%n", stratum, &n) != 1 ||
+          *stratum >= NTP_MAX_STRATUM || *stratum <= 0)
+        return 0;
+    } else if (!strcasecmp(cmd, "orphan")) {
+      *orphan = 1;
+      n = 0;
+    } else if (!strcasecmp(cmd, "distance")) {
+      if (sscanf(line, "%lf%n", distance, &n) != 1)
+        return 0;
+    } else {
+      return 0;
+    }
+
+    line += n;
+  }
+
+  return 1;
+}
 /* ================================================== */
 
 void
