@@ -22,7 +22,6 @@ Architecture: linux-any
 Depends: ${misc:Depends},
  ${shlibs:Depends},
  ucf,
- install-info,
  iproute2 [linux-any],
  lsb-base,
  adduser,
