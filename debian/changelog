@@ -1,3 +1,59 @@
+chrony (2.4-1) unstable; urgency=medium
+
+  The “Fix decade-old bug reports” release.
+
+  * Import upstream version 2.4:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/chrony.if-{up,post-down}:
+    - New scripts used to put chronyd online/offline depending on the
+    state of the connection. (Closes: #240528,#312092,#389961)
+
+  * debian/chrony.keys:
+    - Highlight “chronyc keygen” command to generate keys.
+
+  * debian/chrony.ppp.ip-down:
+    - Be sure that there is no default route before going offline.
+    (Closes: #252131)
+
+  * debian/control:
+    - Remove install-info dependency.
+    - Remove texinfo build dependency since documentation in Texinfo format
+    has been dropped upstream.
+    - Build depend on asciidoctor ≥ 1.5.3-1~. The version constraint is
+    important since chrony’s man pages are generated from “adoc” files, a
+    functionality that has been added in asciidoctor 1.5.3.
+
+  * debian/dirs:
+    - Add “etc/NetworkManager/dispatcher.d”.
+
+  * debian/doc-base:
+    - Remove the file since we do not generate chrony.{html,txt} anymore.
+
+  * debian/docs:
+    - Remove references to chrony.{html,txt}.
+
+  * debian/patches/*:
+    - Drop fix-ftbfs-on-powerpc-ppc64-ppc64el.diff; applied upstream.
+    - Update the “series” file accordingly.
+
+  * debian/postinst:
+    - Use ucfr to associate chrony with its configuration files. Suggested by
+    Paul Gevers <elbrus@debian.org>
+
+  * debian/postrm:
+    - Remove all vestiges of the association between chrony and its
+    configuration files. Also suggested by Paul Gevers <elbrus@debian.org>
+
+  * debian/rules:
+    - Provide upstream NetworkManager dispatcher script.
+
+  * debian/watch:
+    - Use HTTPS to fetch new upstream releases.
+    - Switch to version 4 format.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 17 Jun 2016 17:20:08 +0200
+
 chrony (2.3-2) unstable; urgency=low
 
   * Cherry pick upstream patch to fix FTBFS on PowerPC, ppc64 and ppc64el
