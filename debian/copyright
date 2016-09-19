@@ -1,7 +1,7 @@
-Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: chrony
 Upstream-Contact: Miroslav Lichvar <mlichvar@redhat.com>
-Source: http://download.tuxfamily.org/chrony/
+Source: https://download.tuxfamily.org/chrony/
 
 Files: *
 Copyright: 2009-2015, Miroslav Lichvar
@@ -91,7 +91,7 @@ License: GPL-2
   GNU General Public License for more details.
   .
   You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
   .
   On Debian systems, the complete text of the GNU General Public License
   version 2 can be found in the file `/usr/share/common-licenses/GPL-2'.
@@ -108,7 +108,7 @@ License: GPL-2+
   GNU General Public License for more details.
   .
   You should have received a copy of the GNU General Public License
-  along with this program. If not, see <http://www.gnu.org/licenses/>
+  along with this program. If not, see <https://www.gnu.org/licenses/>
   .
   On Debian systems, the complete text of the GNU General Public License
   version 2 can be found in `/usr/share/common-licenses/GPL-2'.
