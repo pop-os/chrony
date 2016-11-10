@@ -5,7 +5,7 @@ export DEB_BUILD_MAINT_OPTIONS=hardening=+all
 BASE=debian/chrony
 
 %:
-	dh $@ --parallel
+	dh $@
 
 override_dh_auto_configure:
 	dh_auto_configure --  --mandir=/usr/share/man \
