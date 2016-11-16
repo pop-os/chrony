@@ -27,6 +27,12 @@ DESC="time daemon"
 
 . /lib/lsb/init-functions
 
+# Override this variable by editing /etc/default/chrony.
+DAEMON_OPTS=""
+if [ -f /etc/default/chrony ]; then
+    . /etc/default/chrony
+fi
+
 putonline ()
 {   # Do we have a default route?  If so put chronyd online.
     if ip r 2>/dev/null | grep -q '^default'; then
@@ -45,7 +51,7 @@ putonline ()
 
 case "$1" in
     start)
-	start-stop-daemon --start --verbose --exec $DAEMON
+	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
 			putonline
@@ -66,7 +72,7 @@ case "$1" in
 	echo -n "Restarting $DESC: "
 	start-stop-daemon --stop --quiet --exec $DAEMON
 	sleep 1
-	start-stop-daemon --start --verbose --exec $DAEMON -- -r
+	start-stop-daemon --start --verbose --exec $DAEMON -- -r $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
 			putonline
