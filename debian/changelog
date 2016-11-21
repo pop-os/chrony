@@ -1,3 +1,30 @@
+chrony (2.4.1-1) unstable; urgency=medium
+
+  * Import upstream version 2.4.1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/chrony.default:
+    - New file used to pass options to chronyd. Thanks to nutzteil
+    <nutzteil@web.de> for the suggestion and the initial patch.
+    (Closes: #834240)
+
+  * debian/compat:
+    - Bump to debhelper compat 10.
+
+  * debian/control:
+    - Build depend on debhelper ≥ 10.
+
+  * debian/copyright:
+    - Use HTTPS for all URI.
+
+  * debian/init:
+    - Read and execute options assigned to the “DAEMON_OPTS” variable.
+
+  * debian/rules:
+    - Drop dh “--parallel” option. Enabled by default in debhelper 10.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 21 Nov 2016 12:58:05 +0100
+
 chrony (2.4-1) unstable; urgency=medium
 
   The “Fix decade-old bug reports” release.
