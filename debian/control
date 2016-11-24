@@ -10,7 +10,7 @@ Build-Depends: debhelper (>= 10),
  libnss3-dev,
  libtomcrypt-dev,
  libcap-dev [linux-any],
- pps-tools (>= 0.20120406+g0deb9c7e-2),
+ pps-tools (>= 0.20120406+g0deb9c7e-2) [linux-any],
  libseccomp-dev (>= 2.2.3-3~) [amd64 arm64 armel armhf hppa i386 mips mipsel mips64el powerpc ppc64 ppc64el s390x x32],
  pkg-config,
  asciidoctor (>= 1.5.3-1~)
