@@ -72,7 +72,7 @@ case "$1" in
 	echo -n "Restarting $DESC: "
 	start-stop-daemon --stop --quiet --exec $DAEMON
 	sleep 1
-	start-stop-daemon --start --verbose --exec $DAEMON -- -r $DAEMON_OPTS
+	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
 			putonline
