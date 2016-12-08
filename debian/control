@@ -7,7 +7,6 @@ Standards-Version: 3.9.8
 Build-Depends: debhelper (>= 10),
  bison,
  libedit-dev,
- libnss3-dev,
  libtomcrypt-dev,
  libcap-dev [linux-any],
  pps-tools (>= 0.20120406+g0deb9c7e-2) [linux-any],
