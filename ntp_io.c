@@ -30,6 +30,7 @@
 
 #include "sysincl.h"
 
+#include "array.h"
 #include "ntp_io.h"
 #include "ntp_core.h"
 #include "ntp_sources.h"
@@ -40,7 +41,12 @@
 #include "privops.h"
 #include "util.h"
 
+#ifdef HAVE_LINUX_TIMESTAMPING
+#include "ntp_io_linux.h"
+#endif
+
 #define INVALID_SOCK_FD -1
+#define CMSGBUF_SIZE 256
 
 union sockaddr_in46 {
   struct sockaddr_in in4;
@@ -49,6 +55,31 @@ union sockaddr_in46 {
 #endif
   struct sockaddr u;
 };
+
+struct Message {
+  union sockaddr_in46 name;
+  struct iovec iov;
+  NTP_Receive_Buffer buf;
+  /* Aligned buffer for control messages */
+  struct cmsghdr cmsgbuf[CMSGBUF_SIZE / sizeof (struct cmsghdr)];
+};
+
+#ifdef HAVE_RECVMMSG
+#define MAX_RECV_MESSAGES 4
+#define MessageHeader mmsghdr
+#else
+/* Compatible with mmsghdr */
+struct MessageHeader {
+  struct msghdr msg_hdr;
+  unsigned int msg_len;
+};
+
+#define MAX_RECV_MESSAGES 1
+#endif
+
+/* Arrays of Message and MessageHeader */
+static ARR_Instance recv_messages;
+static ARR_Instance recv_headers;
 
 /* The server/peer and client sockets for IPv4 and IPv6 */
 static int server_sock_fd4;
@@ -80,7 +111,7 @@ static int initialised=0;
 /* ================================================== */
 
 /* Forward prototypes */
-static void read_from_socket(void *anything);
+static void read_from_socket(int sock_fd, int event, void *anything);
 
 /* ================================================== */
 
@@ -91,8 +122,8 @@ prepare_socket(int family, int port_number, int client_only)
   socklen_t my_addr_len;
   int sock_fd;
   IPAddr bind_address;
-  int on_off = 1;
-  
+  int events = SCH_FILE_INPUT, on_off = 1;
+
   /* Open Internet domain UDP socket for NTP message transmissions */
 
   sock_fd = socket(family, SOCK_DGRAM, 0);
@@ -175,10 +206,18 @@ prepare_socket(int family, int port_number, int client_only)
 
 #ifdef SO_TIMESTAMP
   /* Enable receiving of timestamp control messages */
+#ifdef SO_TIMESTAMPNS
+  /* Try nanosecond resolution first */
+  if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMPNS, (char *)&on_off, sizeof(on_off)) < 0)
+#endif
   if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMP, (char *)&on_off, sizeof(on_off)) < 0) {
     LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "SO_TIMESTAMP");
     /* Don't quit - we might survive anyway */
   }
+#endif
+
+#ifdef HAVE_LINUX_TIMESTAMPING
+  NIO_Linux_SetTimestampSocketOptions(sock_fd, client_only, &events);
 #endif
 
 #ifdef IP_FREEBIND
@@ -229,8 +268,8 @@ prepare_socket(int family, int port_number, int client_only)
     return INVALID_SOCK_FD;
   }
 
-  /* Register handler for read events on the socket */
-  SCH_AddInputFileHandler(sock_fd, read_from_socket, (void *)(long)sock_fd);
+  /* Register handler for read and possibly exception events on the socket */
+  SCH_AddFileHandler(sock_fd, events, read_from_socket, NULL);
 
   return sock_fd;
 }
@@ -282,11 +321,38 @@ close_socket(int sock_fd)
   if (sock_fd == INVALID_SOCK_FD)
     return;
 
-  SCH_RemoveInputFileHandler(sock_fd);
+  SCH_RemoveFileHandler(sock_fd);
   close(sock_fd);
 }
 
 /* ================================================== */
+
+static void
+prepare_buffers(unsigned int n)
+{
+  struct MessageHeader *hdr;
+  struct Message *msg;
+  unsigned int i;
+
+  for (i = 0; i < n; i++) {
+    msg = ARR_GetElement(recv_messages, i);
+    hdr = ARR_GetElement(recv_headers, i);
+
+    msg->iov.iov_base = &msg->buf;
+    msg->iov.iov_len = sizeof (msg->buf);
+    hdr->msg_hdr.msg_name = &msg->name;
+    hdr->msg_hdr.msg_namelen = sizeof (msg->name);
+    hdr->msg_hdr.msg_iov = &msg->iov;
+    hdr->msg_hdr.msg_iovlen = 1;
+    hdr->msg_hdr.msg_control = &msg->cmsgbuf;
+    hdr->msg_hdr.msg_controllen = sizeof (msg->cmsgbuf);
+    hdr->msg_hdr.msg_flags = 0;
+    hdr->msg_len = 0;
+  }
+}
+
+/* ================================================== */
+
 void
 NIO_Initialise(int family)
 {
@@ -294,6 +360,19 @@ NIO_Initialise(int family)
 
   assert(!initialised);
   initialised = 1;
+
+#ifdef HAVE_LINUX_TIMESTAMPING
+  NIO_Linux_Initialise();
+#else
+  if (ARR_GetSize(CNF_GetHwTsInterfaces()))
+    LOG_FATAL(LOGF_NtpIO, "HW timestamping not supported");
+#endif
+
+  recv_messages = ARR_CreateInstance(sizeof (struct Message));
+  ARR_SetSize(recv_messages, MAX_RECV_MESSAGES);
+  recv_headers = ARR_CreateInstance(sizeof (struct MessageHeader));
+  ARR_SetSize(recv_headers, MAX_RECV_MESSAGES);
+  prepare_buffers(MAX_RECV_MESSAGES);
 
   server_port = CNF_GetNTPPort();
   client_port = CNF_GetAcquisitionPort();
@@ -367,6 +446,13 @@ NIO_Finalise(void)
   close_socket(server_sock_fd6);
   server_sock_fd6 = client_sock_fd6 = INVALID_SOCK_FD;
 #endif
+  ARR_DestroyInstance(recv_headers);
+  ARR_DestroyInstance(recv_messages);
+
+#ifdef HAVE_LINUX_TIMESTAMPING
+  NIO_Linux_Finalise();
+#endif
+
   initialised = 0;
 }
 
@@ -482,116 +568,174 @@ NIO_IsServerSocket(int sock_fd)
 /* ================================================== */
 
 static void
-read_from_socket(void *anything)
+process_message(struct msghdr *hdr, int length, int sock_fd)
 {
-  /* This should only be called when there is something
-     to read, otherwise it will block. */
-
-  int status, sock_fd;
-  NTP_Receive_Buffer message;
-  union sockaddr_in46 where_from;
-  unsigned int flags = 0;
-  struct timeval now;
-  double now_err;
   NTP_Remote_Address remote_addr;
   NTP_Local_Address local_addr;
-  char cmsgbuf[256];
-  struct msghdr msg;
-  struct iovec iov;
+  NTP_Local_Timestamp local_ts;
+  struct timespec sched_ts;
   struct cmsghdr *cmsg;
+  int if_index;
 
-  assert(initialised);
+  SCH_GetLastEventTime(&local_ts.ts, &local_ts.err, NULL);
+  local_ts.source = NTP_TS_DAEMON;
+  sched_ts = local_ts.ts;
 
-  SCH_GetLastEventTime(&now, &now_err, NULL);
+  if (hdr->msg_namelen > sizeof (union sockaddr_in46)) {
+    DEBUG_LOG(LOGF_NtpIO, "Truncated source address");
+    return;
+  }
 
-  iov.iov_base = &message.ntp_pkt;
-  iov.iov_len = sizeof(message);
-  msg.msg_name = &where_from;
-  msg.msg_namelen = sizeof(where_from);
-  msg.msg_iov = &iov;
-  msg.msg_iovlen = 1;
-  msg.msg_control = (void *) cmsgbuf;
-  msg.msg_controllen = sizeof(cmsgbuf);
-  msg.msg_flags = 0;
+  if (hdr->msg_namelen >= sizeof (((struct sockaddr *)hdr->msg_name)->sa_family)) {
+    UTI_SockaddrToIPAndPort((struct sockaddr *)hdr->msg_name,
+                            &remote_addr.ip_addr, &remote_addr.port);
+  } else {
+    remote_addr.ip_addr.family = IPADDR_UNSPEC;
+    remote_addr.port = 0;
+  }
 
-  sock_fd = (long)anything;
-  status = recvmsg(sock_fd, &msg, flags);
+  local_addr.ip_addr.family = IPADDR_UNSPEC;
+  local_addr.sock_fd = sock_fd;
+  if_index = -1;
 
-  /* Don't bother checking if read failed or why if it did.  More
-     likely than not, it will be connection refused, resulting from a
-     previous sendto() directing a datagram at a port that is not
-     listening (which appears to generate an ICMP response, and on
-     some architectures e.g. Linux this is translated into an error
-     reponse on a subsequent recvfrom). */
+  if (hdr->msg_flags & MSG_TRUNC) {
+    DEBUG_LOG(LOGF_NtpIO, "Received truncated message from %s:%d",
+              UTI_IPToString(&remote_addr.ip_addr), remote_addr.port);
+    return;
+  }
 
-  if (status > 0) {
-    if (msg.msg_namelen > sizeof (where_from))
-      LOG_FATAL(LOGF_NtpIO, "Truncated source address");
+  if (hdr->msg_flags & MSG_CTRUNC) {
+    DEBUG_LOG(LOGF_NtpIO, "Truncated control message");
+    /* Continue */
+  }
 
-    UTI_SockaddrToIPAndPort(&where_from.u, &remote_addr.ip_addr, &remote_addr.port);
-
-    local_addr.ip_addr.family = IPADDR_UNSPEC;
-    local_addr.sock_fd = sock_fd;
-
-    for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+  for (cmsg = CMSG_FIRSTHDR(hdr); cmsg; cmsg = CMSG_NXTHDR(hdr, cmsg)) {
 #ifdef HAVE_IN_PKTINFO
-      if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_PKTINFO) {
-        struct in_pktinfo ipi;
+    if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_PKTINFO) {
+      struct in_pktinfo ipi;
 
-        memcpy(&ipi, CMSG_DATA(cmsg), sizeof(ipi));
-        local_addr.ip_addr.addr.in4 = ntohl(ipi.ipi_spec_dst.s_addr);
-        local_addr.ip_addr.family = IPADDR_INET4;
-      }
+      memcpy(&ipi, CMSG_DATA(cmsg), sizeof(ipi));
+      local_addr.ip_addr.addr.in4 = ntohl(ipi.ipi_addr.s_addr);
+      local_addr.ip_addr.family = IPADDR_INET4;
+      if_index = ipi.ipi_ifindex;
+    }
 #endif
 
 #ifdef HAVE_IN6_PKTINFO
-      if (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_PKTINFO) {
-        struct in6_pktinfo ipi;
+    if (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_PKTINFO) {
+      struct in6_pktinfo ipi;
 
-        memcpy(&ipi, CMSG_DATA(cmsg), sizeof(ipi));
-        memcpy(&local_addr.ip_addr.addr.in6, &ipi.ipi6_addr.s6_addr,
-            sizeof (local_addr.ip_addr.addr.in6));
-        local_addr.ip_addr.family = IPADDR_INET6;
-      }
+      memcpy(&ipi, CMSG_DATA(cmsg), sizeof(ipi));
+      memcpy(&local_addr.ip_addr.addr.in6, &ipi.ipi6_addr.s6_addr,
+             sizeof (local_addr.ip_addr.addr.in6));
+      local_addr.ip_addr.family = IPADDR_INET6;
+      if_index = ipi.ipi6_ifindex;
+    }
 #endif
 
-#ifdef SO_TIMESTAMP
-      if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_TIMESTAMP) {
-        struct timeval tv;
+#ifdef SCM_TIMESTAMP
+    if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_TIMESTAMP) {
+      struct timeval tv;
+      struct timespec ts;
 
-        memcpy(&tv, CMSG_DATA(cmsg), sizeof(tv));
-        LCL_CookTime(&tv, &now, &now_err);
-      }
+      memcpy(&tv, CMSG_DATA(cmsg), sizeof(tv));
+      UTI_TimevalToTimespec(&tv, &ts);
+      LCL_CookTime(&ts, &local_ts.ts, &local_ts.err);
+      local_ts.source = NTP_TS_KERNEL;
+    }
 #endif
+
+#ifdef SCM_TIMESTAMPNS
+    if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_TIMESTAMPNS) {
+      struct timespec ts;
+
+      memcpy(&ts, CMSG_DATA(cmsg), sizeof (ts));
+      LCL_CookTime(&ts, &local_ts.ts, &local_ts.err);
+      local_ts.source = NTP_TS_KERNEL;
     }
-
-    DEBUG_LOG(LOGF_NtpIO, "Received %d bytes from %s:%d to %s fd %d",
-              status, UTI_IPToString(&remote_addr.ip_addr), remote_addr.port,
-              UTI_IPToString(&local_addr.ip_addr), local_addr.sock_fd);
-
-    if (status >= NTP_NORMAL_PACKET_LENGTH) {
-
-      NSR_ProcessReceive((NTP_Packet *) &message.ntp_pkt, &now, now_err,
-                         &remote_addr, &local_addr, status);
-
-    } else {
-
-      /* Just ignore the packet if it's not of a recognized length */
-
-    }
+#endif
   }
+
+#ifdef HAVE_LINUX_TIMESTAMPING
+  if (NIO_Linux_ProcessMessage(&remote_addr, &local_addr, &local_ts,
+                               hdr, length, sock_fd, if_index))
+    return;
+#endif
+
+  DEBUG_LOG(LOGF_NtpIO, "Received %d bytes from %s:%d to %s fd=%d if=%d tss=%d delay=%.9f",
+            length, UTI_IPToString(&remote_addr.ip_addr), remote_addr.port,
+            UTI_IPToString(&local_addr.ip_addr), local_addr.sock_fd, if_index,
+            local_ts.source, UTI_DiffTimespecsToDouble(&sched_ts, &local_ts.ts));
+
+  /* Just ignore the packet if it's not of a recognized length */
+  if (length < NTP_NORMAL_PACKET_LENGTH || length > sizeof (NTP_Receive_Buffer))
+    return;
+
+  NSR_ProcessRx(&remote_addr, &local_addr, &local_ts,
+                (NTP_Packet *)hdr->msg_iov[0].iov_base, length);
+}
+
+/* ================================================== */
+
+static void
+read_from_socket(int sock_fd, int event, void *anything)
+{
+  /* This should only be called when there is something
+     to read, otherwise it may block */
+
+  struct MessageHeader *hdr;
+  unsigned int i, n;
+  int status, flags = 0;
+
+  hdr = ARR_GetElements(recv_headers);
+  n = ARR_GetSize(recv_headers);
+  assert(n >= 1);
+
+  if (event == SCH_FILE_EXCEPTION) {
+#ifdef HAVE_LINUX_TIMESTAMPING
+    flags |= MSG_ERRQUEUE;
+#else
+    assert(0);
+#endif
+  }
+
+#ifdef HAVE_RECVMMSG
+  status = recvmmsg(sock_fd, hdr, n, flags | MSG_DONTWAIT, NULL);
+  if (status >= 0)
+    n = status;
+#else
+  n = 1;
+  status = recvmsg(sock_fd, &hdr[0].msg_hdr, flags);
+  if (status >= 0)
+    hdr[0].msg_len = status;
+#endif
+
+  if (status < 0) {
+    DEBUG_LOG(LOGF_NtpIO, "Could not receive from fd %d : %s", sock_fd,
+              strerror(errno));
+    return;
+  }
+
+  for (i = 0; i < n; i++) {
+    hdr = ARR_GetElement(recv_headers, i);
+    process_message(&hdr->msg_hdr, hdr->msg_len, sock_fd);
+  }
+
+  /* Restore the buffers to their original state */
+  prepare_buffers(n);
 }
 
 /* ================================================== */
 /* Send a packet to remote address from local address */
 
-static int
-send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr)
+int
+NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
+               NTP_Local_Address *local_addr, int length, int process_tx)
 {
   union sockaddr_in46 remote;
   struct msghdr msg;
   struct iovec iov;
-  char cmsgbuf[256];
+  struct cmsghdr *cmsg, cmsgbuf[CMSGBUF_SIZE / sizeof (struct cmsghdr)];
   int cmsglen;
   socklen_t addrlen = 0;
 
@@ -604,11 +748,7 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
   }
 
   /* Don't set address with connected socket */
-  if (local_addr->sock_fd == server_sock_fd4 ||
-#ifdef FEAT_IPV6
-      local_addr->sock_fd == server_sock_fd6 ||
-#endif
-      !separate_client_sockets) {
+  if (NIO_IsServerSocket(local_addr->sock_fd) || !separate_client_sockets) {
     addrlen = UTI_IPAndPortToSockaddr(&remote_addr->ip_addr, remote_addr->port,
                                       &remote.u);
     if (!addrlen)
@@ -624,7 +764,7 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
   }
 
   iov.iov_base = packet;
-  iov.iov_len = packetlen;
+  iov.iov_len = length;
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
   msg.msg_control = cmsgbuf;
@@ -634,7 +774,6 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
 
 #ifdef HAVE_IN_PKTINFO
   if (local_addr->ip_addr.family == IPADDR_INET4) {
-    struct cmsghdr *cmsg;
     struct in_pktinfo *ipi;
 
     cmsg = CMSG_FIRSTHDR(&msg);
@@ -652,7 +791,6 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
 
 #ifdef HAVE_IN6_PKTINFO
   if (local_addr->ip_addr.family == IPADDR_INET6) {
-    struct cmsghdr *cmsg;
     struct in6_pktinfo *ipi;
 
     cmsg = CMSG_FIRSTHDR(&msg);
@@ -669,6 +807,11 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
   }
 #endif
 
+#ifdef HAVE_LINUX_TIMESTAMPING
+  if (process_tx)
+   cmsglen = NIO_Linux_RequestTxTimestamp(&msg, cmsglen, local_addr->sock_fd);
+#endif
+
   msg.msg_controllen = cmsglen;
   /* This is apparently required on some systems */
   if (!cmsglen)
@@ -682,18 +825,9 @@ send_packet(void *packet, int packetlen, NTP_Remote_Address *remote_addr, NTP_Lo
     return 0;
   }
 
-  DEBUG_LOG(LOGF_NtpIO, "Sent %d bytes to %s:%d from %s fd %d", packetlen,
+  DEBUG_LOG(LOGF_NtpIO, "Sent %d bytes to %s:%d from %s fd %d", length,
       UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
       UTI_IPToString(&local_addr->ip_addr), local_addr->sock_fd);
 
   return 1;
-}
-
-/* ================================================== */
-/* Send a packet to a given address */
-
-int
-NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr, int length)
-{
-  return send_packet((void *) packet, length, remote_addr, local_addr);
 }

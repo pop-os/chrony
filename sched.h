@@ -40,7 +40,7 @@ typedef enum {
 } SCH_TimeoutClass;
 
 typedef void* SCH_ArbitraryArgument;
-typedef void (*SCH_FileHandler)(SCH_ArbitraryArgument);
+typedef void (*SCH_FileHandler)(int fd, int event, SCH_ArbitraryArgument);
 typedef void (*SCH_TimeoutHandler)(SCH_ArbitraryArgument);
 
 /* Exported functions */
@@ -51,19 +51,21 @@ extern void SCH_Initialise(void);
 /* Finalisation function for the module */
 extern void SCH_Finalise(void);
 
+/* File events */
+#define SCH_FILE_INPUT 1
+#define SCH_FILE_OUTPUT 2
+#define SCH_FILE_EXCEPTION 4
+
 /* Register a handler for when select goes true on a file descriptor */
-extern void SCH_AddInputFileHandler
-(int fd,                        /* The file descriptor */
- SCH_FileHandler,               /* The handler routine */
- SCH_ArbitraryArgument          /* An arbitrary passthrough argument to the handler */
-);
-extern void SCH_RemoveInputFileHandler(int fd);
+extern void SCH_AddFileHandler(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg);
+extern void SCH_RemoveFileHandler(int fd);
+extern void SCH_SetFileHandlerEvents(int fd, int events);
 
 /* Get the time stamp taken after a file descriptor became ready or a timeout expired */
-extern void SCH_GetLastEventTime(struct timeval *cooked, double *err, struct timeval *raw);
+extern void SCH_GetLastEventTime(struct timespec *cooked, double *err, struct timespec *raw);
 
 /* This queues a timeout to elapse at a given (raw) local time */
-extern SCH_TimeoutID SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler, SCH_ArbitraryArgument);
+extern SCH_TimeoutID SCH_AddTimeout(struct timespec *ts, SCH_TimeoutHandler handler, SCH_ArbitraryArgument arg);
 
 /* This queues a timeout to elapse at a given delta time relative to the current (raw) time */
 extern SCH_TimeoutID SCH_AddTimeoutByDelay(double delay, SCH_TimeoutHandler, SCH_ArbitraryArgument);

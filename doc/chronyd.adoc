@@ -75,14 +75,15 @@ This option is similar to *-q*, but it will only print the offset without any
 corrections of the clock.
 
 *-r*::
-This option will reload sample histories for each of the servers and refclocks
-being used. These histories are created by using the
-<<chronyc.adoc#dump,*dump*>> command in *chronyc*, or by setting the
-<<chrony.conf.adoc#dumponexit,*dumponexit*>> directive in the configuration
-file. This option is useful if you want to stop and restart *chronyd* briefly
-for any reason, e.g. to install a new version. However, it should be used only
-on systems where the kernel can maintain clock compensation whilst not under
-*chronyd*'s control (i.e. Linux, FreeBSD, NetBSD and Solaris).
+This option will try to reload and then delete files containing sample
+histories for each of the servers and reference clocks being used. These
+histories are created by using the <<chronyc.adoc#dump,*dump*>> command in
+*chronyc*, or by setting the <<chrony.conf.adoc#dumponexit,*dumponexit*>>
+directive in the configuration file. This option is useful if you want to stop
+and restart *chronyd* briefly for any reason, e.g. to install a new version.
+However, it should be used only on systems where the kernel can maintain clock
+compensation whilst not under *chronyd*'s control (i.e. Linux, FreeBSD, NetBSD
+and Solaris).
 
 *-R*::
 When this option is used, the <<chrony.conf.adoc#initstepslew,*initstepslew*>>
@@ -109,13 +110,20 @@ time and the RTC time, the system time will be set to it to restore the time
 when *chronyd* was previously stopped. This is useful on computers that have no
 RTC or the RTC is broken (e.g. it has no battery).
 
+*-t* _timeout_::
+This option sets a timeout (in seconds) after which *chronyd* will exit. If the
+clock is not synchronised, it will exit with a non-zero status. This is useful
+with the *-q* or *-Q* option to shorten the maximum time waiting for
+measurements, or with the *-r* option to limit the time when *chronyd* is
+running, but still allow it to adjust the frequency of the system clock.
+
 *-u* _user_::
 This option sets the name of the system user to which *chronyd* will switch
 after start in order to drop root privileges. It overrides the
 <<chrony.conf.adoc#user,*user*>> directive (default _@DEFAULT_USER@_).
 +
 On Linux, *chronyd* needs to be compiled with support for the *libcap* library.
-On Mac OS X, FreeBSD, NetBSD and Solaris *chronyd* forks into two processes.
+On macOS, FreeBSD, NetBSD and Solaris *chronyd* forks into two processes.
 The child process retains root privileges, but can only perform a very limited
 range of privileged system calls on behalf of the parent.
 
@@ -134,7 +142,7 @@ killed even in normal operation.
 
 *-P* _priority_::
 On Linux, this option will select the SCHED_FIFO real-time scheduler at the
-specified priority (which must be between 0 and 100). On Mac OS X, this option
+specified priority (which must be between 0 and 100). On macOS, this option
 must have either a value of 0 (the default) to disable the thread time
 constraint policy or 1 for the policy to be enabled. Other systems do not
 support this option.
@@ -161,4 +169,4 @@ https://chrony.tuxfamily.org/.
 
 == AUTHORS
 
-chrony was written by Richard Curnow, Miroslav Lichvar and others.
+chrony was written by Richard Curnow, Miroslav Lichvar, and others.

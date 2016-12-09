@@ -47,10 +47,10 @@ extern int log_debug_enabled;
 
 #if DEBUG > 0
 #define LOG_MESSAGE(severity, facility, ...) \
-  LOG_Message(severity, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__);
+  LOG_Message(severity, facility, __LINE__, __FILE__, FUNCTION_NAME, __VA_ARGS__)
 #else
 #define LOG_MESSAGE(severity, facility, ...) \
-  LOG_Message(severity, __VA_ARGS__);
+  LOG_Message(severity, __VA_ARGS__)
 #endif
 
 #define DEBUG_LOG(facility, ...) \
@@ -82,7 +82,9 @@ typedef enum {
 typedef enum {
   LOGF_Reference,
   LOGF_NtpIO,
+  LOGF_NtpIOLinux,
   LOGF_NtpCore,
+  LOGF_NtpSignd,
   LOGF_NtpSources,
   LOGF_Scheduler,
   LOGF_SourceStats,
@@ -114,6 +116,7 @@ typedef enum {
   LOGF_TempComp,
   LOGF_RtcLinux,
   LOGF_Refclock,
+  LOGF_HwClocks,
   LOGF_Smooth,
 } LOG_Facility;
 

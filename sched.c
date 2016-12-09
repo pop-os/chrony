@@ -44,17 +44,6 @@ static int initialised = 0;
 
 /* ================================================== */
 
-/* Variables to handle the capability to dispatch on particular file
-   handles becoming readable */
-
-/* Each bit set in this fd set corresponds to a read descriptor that
-   we are watching and with which we have a handler associated in the
-   file_handlers array */
-static fd_set read_fds;
-
-/* This is the number of bits that we have set in read_fds */
-static unsigned int n_read_fds;
-
 /* One more than the highest file descriptor that is registered */
 static unsigned int one_highest_fd;
 
@@ -67,12 +56,13 @@ static unsigned int one_highest_fd;
 typedef struct {
   SCH_FileHandler       handler;
   SCH_ArbitraryArgument arg;
+  int                   events;
 } FileHandlerEntry;
 
 static ARR_Instance file_handlers;
 
 /* Timestamp when last select() returned */
-static struct timeval last_select_ts, last_select_ts_raw;
+static struct timespec last_select_ts, last_select_ts_raw;
 static double last_select_ts_err;
 
 /* ================================================== */
@@ -83,7 +73,7 @@ typedef struct _TimerQueueEntry
 {
   struct _TimerQueueEntry *next; /* Forward and back links in the list */
   struct _TimerQueueEntry *prev;
-  struct timeval tv;            /* Local system time at which the
+  struct timespec ts;           /* Local system time at which the
                                    timeout is to expire.  Clearly this
                                    must be in terms of what the
                                    operating system thinks of as
@@ -111,7 +101,7 @@ static SCH_TimeoutID next_tqe_id;
 static TimerQueueEntry *tqe_free_list = NULL;
 
 /* Timestamp when was last timeout dispatched for each class */
-static struct timeval last_class_dispatch[SCH_NumberOfClasses];
+static struct timespec last_class_dispatch[SCH_NumberOfClasses];
 
 /* ================================================== */
 
@@ -120,8 +110,8 @@ static int need_to_exit;
 /* ================================================== */
 
 static void
-handle_slew(struct timeval *raw,
-            struct timeval *cooked,
+handle_slew(struct timespec *raw,
+            struct timespec *cooked,
             double dfreq,
             double doffset,
             LCL_ChangeType change_type,
@@ -132,9 +122,6 @@ handle_slew(struct timeval *raw,
 void
 SCH_Initialise(void)
 {
-  FD_ZERO(&read_fds);
-  n_read_fds = 0;
-
   file_handlers = ARR_CreateInstance(sizeof (FileHandlerEntry));
 
   n_timer_queue_entries = 0;
@@ -166,73 +153,85 @@ SCH_Finalise(void) {
 /* ================================================== */
 
 void
-SCH_AddInputFileHandler
-(int fd, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
+SCH_AddFileHandler
+(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
 {
   FileHandlerEntry *ptr;
 
   assert(initialised);
+  assert(events);
+  assert(fd >= 0);
   
   if (fd >= FD_SETSIZE)
     LOG_FATAL(LOGF_Scheduler, "Too many file descriptors");
 
+  /* Resize the array if the descriptor is highest so far */
+  while (ARR_GetSize(file_handlers) <= fd) {
+    ptr = ARR_GetNewElement(file_handlers);
+    ptr->handler = NULL;
+    ptr->arg = NULL;
+    ptr->events = 0;
+  }
+
+  ptr = ARR_GetElement(file_handlers, fd);
+
   /* Don't want to allow the same fd to register a handler more than
      once without deleting a previous association - this suggests
      a bug somewhere else in the program. */
-  if (FD_ISSET(fd, &read_fds))
-    assert(0);
+  assert(!ptr->handler);
 
-  ++n_read_fds;
-  
-  if (ARR_GetSize(file_handlers) < fd + 1)
-    ARR_SetSize(file_handlers, fd + 1);
-
-  ptr = (FileHandlerEntry *)ARR_GetElement(file_handlers, fd);
   ptr->handler = handler;
   ptr->arg = arg;
+  ptr->events = events;
 
-  FD_SET(fd, &read_fds);
-
-  if ((fd + 1) > one_highest_fd) {
+  if (one_highest_fd < fd + 1)
     one_highest_fd = fd + 1;
-  }
 }
 
 
 /* ================================================== */
 
 void
-SCH_RemoveInputFileHandler(int fd)
+SCH_RemoveFileHandler(int fd)
 {
-  int fds_left, fd_to_check;
+  FileHandlerEntry *ptr;
 
   assert(initialised);
 
+  ptr = ARR_GetElement(file_handlers, fd);
+
   /* Check that a handler was registered for the fd in question */
-  if (!FD_ISSET(fd, &read_fds))
-    assert(0);
+  assert(ptr->handler);
 
-  --n_read_fds;
-
-  FD_CLR(fd, &read_fds);
+  ptr->handler = NULL;
+  ptr->arg = NULL;
+  ptr->events = 0;
 
   /* Find new highest file descriptor */
-  fds_left = n_read_fds;
-  fd_to_check = 0;
-  while (fds_left > 0) {
-    if (FD_ISSET(fd_to_check, &read_fds)) {
-      --fds_left;
-    }
-    ++fd_to_check;
+  while (one_highest_fd > 0) {
+    ptr = ARR_GetElement(file_handlers, one_highest_fd - 1);
+    if (ptr->handler)
+      break;
+    one_highest_fd--;
   }
-
-  one_highest_fd = fd_to_check;
 }
 
 /* ================================================== */
 
 void
-SCH_GetLastEventTime(struct timeval *cooked, double *err, struct timeval *raw)
+SCH_SetFileHandlerEvents(int fd, int events)
+{
+  FileHandlerEntry *ptr;
+
+  assert(events);
+  ptr = ARR_GetElement(file_handlers, fd);
+  ptr->events = events;
+}
+
+/* ================================================== */
+
+void
+SCH_GetLastEventTime(struct timespec *cooked, double *err, struct timespec *raw)
 {
   if (cooked) {
     *cooked = last_select_ts;
@@ -299,7 +298,7 @@ try_again:
 /* ================================================== */
 
 SCH_TimeoutID
-SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler handler, SCH_ArbitraryArgument arg)
+SCH_AddTimeout(struct timespec *ts, SCH_TimeoutHandler handler, SCH_ArbitraryArgument arg)
 {
   TimerQueueEntry *new_tqe;
   TimerQueueEntry *ptr;
@@ -311,12 +310,12 @@ SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler handler, SCH_ArbitraryArgu
   new_tqe->id = get_new_tqe_id();
   new_tqe->handler = handler;
   new_tqe->arg = arg;
-  new_tqe->tv = *tv;
+  new_tqe->ts = *ts;
   new_tqe->class = SCH_ReservedTimeoutValue;
 
   /* Now work out where to insert the new entry in the list */
   for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next) {
-    if (UTI_CompareTimevals(&new_tqe->tv, &ptr->tv) == -1) {
+    if (UTI_CompareTimespecs(&new_tqe->ts, &ptr->ts) == -1) {
       /* If the new entry comes before the current pointer location in
          the list, we want to insert the new entry just before ptr. */
       break;
@@ -343,14 +342,14 @@ SCH_AddTimeout(struct timeval *tv, SCH_TimeoutHandler handler, SCH_ArbitraryArgu
 SCH_TimeoutID
 SCH_AddTimeoutByDelay(double delay, SCH_TimeoutHandler handler, SCH_ArbitraryArgument arg)
 {
-  struct timeval now, then;
+  struct timespec now, then;
 
   assert(initialised);
   assert(delay >= 0.0);
 
   LCL_ReadRawTime(&now);
-  UTI_AddDoubleToTimeval(&now, delay, &then);
-  if (UTI_CompareTimevals(&now, &then) > 0) {
+  UTI_AddDoubleToTimespec(&now, delay, &then);
+  if (UTI_CompareTimespecs(&now, &then) > 0) {
     LOG_FATAL(LOGF_Scheduler, "Timeout overflow");
   }
 
@@ -367,7 +366,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
 {
   TimerQueueEntry *new_tqe;
   TimerQueueEntry *ptr;
-  struct timeval now;
+  struct timespec now;
   double diff, r;
   double new_min_delay;
 
@@ -376,10 +375,10 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   assert(class < SCH_NumberOfClasses);
 
   if (randomness > 0.0) {
-    uint16_t rnd;
+    uint32_t rnd;
 
     UTI_GetRandomBytes(&rnd, sizeof (rnd));
-    r = rnd / (double)0xffff * randomness + 1.0;
+    r = rnd * (randomness / (uint32_t)-1) + 1.0;
     min_delay *= r;
     separation *= r;
   }
@@ -388,7 +387,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   new_min_delay = min_delay;
 
   /* Check the separation from the last dispatched timeout */
-  UTI_DiffTimevalsToDouble(&diff, &now, &last_class_dispatch[class]);
+  diff = UTI_DiffTimespecsToDouble(&now, &last_class_dispatch[class]);
   if (diff < separation && diff >= 0.0 && diff + new_min_delay < separation) {
     new_min_delay = separation - diff;
   }
@@ -397,7 +396,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
      if necessary to keep at least the separation away */
   for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next) {
     if (ptr->class == class) {
-      UTI_DiffTimevalsToDouble(&diff, &ptr->tv, &now);
+      diff = UTI_DiffTimespecsToDouble(&ptr->ts, &now);
       if (new_min_delay > diff) {
         if (new_min_delay - diff < separation) {
           new_min_delay = diff + separation;
@@ -411,7 +410,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   }
 
   for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next) {
-    UTI_DiffTimevalsToDouble(&diff, &ptr->tv, &now);
+    diff = UTI_DiffTimespecsToDouble(&ptr->ts, &now);
     if (diff > new_min_delay) {
       break;
     }
@@ -423,7 +422,7 @@ SCH_AddTimeoutInClass(double min_delay, double separation, double randomness,
   new_tqe->id = get_new_tqe_id();
   new_tqe->handler = handler;
   new_tqe->arg = arg;
-  UTI_AddDoubleToTimeval(&now, new_min_delay, &new_tqe->tv);
+  UTI_AddDoubleToTimespec(&now, new_min_delay, &new_tqe->ts);
   new_tqe->class = class;
 
   new_tqe->next = ptr;
@@ -477,7 +476,7 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
    completed). */
 
 static void
-dispatch_timeouts(struct timeval *now) {
+dispatch_timeouts(struct timespec *now) {
   TimerQueueEntry *ptr;
   SCH_TimeoutHandler handler;
   SCH_ArbitraryArgument arg;
@@ -487,7 +486,7 @@ dispatch_timeouts(struct timeval *now) {
     LCL_ReadRawTime(now);
 
     if (!(n_timer_queue_entries > 0 &&
-          UTI_CompareTimevals(now, &(timer_queue.next->tv)) >= 0)) {
+          UTI_CompareTimespecs(now, &timer_queue.next->ts) >= 0)) {
       break;
     }
 
@@ -520,35 +519,49 @@ dispatch_timeouts(struct timeval *now) {
 
 /* ================================================== */
 
-/* nfh is the number of bits set in fhs */
+/* nfd is the number of bits set in all fd_sets */
 
 static void
-dispatch_filehandlers(int nfh, fd_set *fhs)
+dispatch_filehandlers(int nfd, fd_set *read_fds, fd_set *write_fds, fd_set *except_fds)
 {
   FileHandlerEntry *ptr;
-  int fh = 0;
+  int fd;
   
-  while (nfh > 0) {
-    if (FD_ISSET(fh, fhs)) {
+  for (fd = 0; nfd && fd < one_highest_fd; fd++) {
+    if (except_fds && FD_ISSET(fd, except_fds)) {
+      /* This descriptor has an exception, dispatch its handler */
+      ptr = (FileHandlerEntry *)ARR_GetElement(file_handlers, fd);
+      (ptr->handler)(fd, SCH_FILE_EXCEPTION, ptr->arg);
+      nfd--;
 
-      /* This descriptor can be read from, dispatch its handler */
-      ptr = (FileHandlerEntry *)ARR_GetElement(file_handlers, fh);
-      (ptr->handler)(ptr->arg);
-
-      /* Decrement number of readable files still to find */
-      --nfh;
+      /* Don't try to read from it now */
+      if (read_fds && FD_ISSET(fd, read_fds)) {
+        FD_CLR(fd, read_fds);
+        nfd--;
+      }
     }
 
-    ++fh;
-  }
+    if (read_fds && FD_ISSET(fd, read_fds)) {
+      /* This descriptor can be read from, dispatch its handler */
+      ptr = (FileHandlerEntry *)ARR_GetElement(file_handlers, fd);
+      (ptr->handler)(fd, SCH_FILE_INPUT, ptr->arg);
+      nfd--;
+    }
 
+    if (write_fds && FD_ISSET(fd, write_fds)) {
+      /* This descriptor can be written to, dispatch its handler */
+      ptr = (FileHandlerEntry *)ARR_GetElement(file_handlers, fd);
+      (ptr->handler)(fd, SCH_FILE_OUTPUT, ptr->arg);
+      nfd--;
+    }
+  }
 }
 
 /* ================================================== */
 
 static void
-handle_slew(struct timeval *raw,
-            struct timeval *cooked,
+handle_slew(struct timespec *raw,
+            struct timespec *cooked,
             double dfreq,
             double doffset,
             LCL_ChangeType change_type,
@@ -566,17 +579,69 @@ handle_slew(struct timeval *raw,
     /* If a step change occurs, just shift all raw time stamps by the offset */
     
     for (ptr = timer_queue.next; ptr != &timer_queue; ptr = ptr->next) {
-      UTI_AddDoubleToTimeval(&ptr->tv, -doffset, &ptr->tv);
+      UTI_AddDoubleToTimespec(&ptr->ts, -doffset, &ptr->ts);
     }
 
     for (i = 0; i < SCH_NumberOfClasses; i++) {
-      UTI_AddDoubleToTimeval(&last_class_dispatch[i], -doffset, &last_class_dispatch[i]);
+      UTI_AddDoubleToTimespec(&last_class_dispatch[i], -doffset, &last_class_dispatch[i]);
     }
 
-    UTI_AddDoubleToTimeval(&last_select_ts_raw, -doffset, &last_select_ts_raw);
+    UTI_AddDoubleToTimespec(&last_select_ts_raw, -doffset, &last_select_ts_raw);
   }
 
-  UTI_AdjustTimeval(&last_select_ts, cooked, &last_select_ts, &delta, dfreq, doffset);
+  UTI_AdjustTimespec(&last_select_ts, cooked, &last_select_ts, &delta, dfreq, doffset);
+}
+
+/* ================================================== */
+
+static void
+fill_fd_sets(fd_set **read_fds, fd_set **write_fds, fd_set **except_fds)
+{
+  FileHandlerEntry *handlers;
+  fd_set *rd, *wr, *ex;
+  int i, n, events;
+
+  n = ARR_GetSize(file_handlers);
+  handlers = ARR_GetElements(file_handlers);
+  rd = wr = ex = NULL;
+
+  for (i = 0; i < n; i++) {
+    events = handlers[i].events;
+
+    if (!events)
+      continue;
+
+    if (events & SCH_FILE_INPUT) {
+      if (!rd) {
+        rd = *read_fds;
+        FD_ZERO(rd);
+      }
+      FD_SET(i, rd);
+    }
+
+    if (events & SCH_FILE_OUTPUT) {
+      if (!wr) {
+        wr = *write_fds;
+        FD_ZERO(wr);
+      }
+      FD_SET(i, wr);
+    }
+
+    if (events & SCH_FILE_EXCEPTION) {
+      if (!ex) {
+        ex = *except_fds;
+        FD_ZERO(ex);
+      }
+      FD_SET(i, ex);
+    }
+  }
+
+  if (!rd)
+    *read_fds = NULL;
+  if (!wr)
+    *write_fds = NULL;
+  if (!ex)
+    *except_fds = NULL;
 }
 
 /* ================================================== */
@@ -584,31 +649,33 @@ handle_slew(struct timeval *raw,
 #define JUMP_DETECT_THRESHOLD 10
 
 static int
-check_current_time(struct timeval *prev_raw, struct timeval *raw, int timeout,
+check_current_time(struct timespec *prev_raw, struct timespec *raw, int timeout,
                    struct timeval *orig_select_tv,
                    struct timeval *rem_select_tv)
 {
-  struct timeval elapsed_min, elapsed_max;
+  struct timespec elapsed_min, elapsed_max, orig_select_ts, rem_select_ts;
   double step, elapsed;
+
+  UTI_TimevalToTimespec(orig_select_tv, &orig_select_ts);
 
   /* Get an estimate of the time spent waiting in the select() call. On some
      systems (e.g. Linux) the timeout timeval is modified to return the
      remaining time, use that information. */
   if (timeout) {
-    elapsed_max = elapsed_min = *orig_select_tv;
+    elapsed_max = elapsed_min = orig_select_ts;
   } else if (rem_select_tv && rem_select_tv->tv_sec >= 0 &&
              rem_select_tv->tv_sec <= orig_select_tv->tv_sec &&
              (rem_select_tv->tv_sec != orig_select_tv->tv_sec ||
               rem_select_tv->tv_usec != orig_select_tv->tv_usec)) {
-    UTI_DiffTimevals(&elapsed_min, orig_select_tv, rem_select_tv);
+    UTI_TimevalToTimespec(rem_select_tv, &rem_select_ts);
+    UTI_DiffTimespecs(&elapsed_min, &orig_select_ts, &rem_select_ts);
     elapsed_max = elapsed_min;
   } else {
     if (rem_select_tv)
-      elapsed_max = *orig_select_tv;
+      elapsed_max = orig_select_ts;
     else
-      UTI_DiffTimevals(&elapsed_max, raw, prev_raw);
-    elapsed_min.tv_sec = 0;
-    elapsed_min.tv_usec = 0;
+      UTI_DiffTimespecs(&elapsed_max, raw, prev_raw);
+    UTI_ZeroTimespec(&elapsed_min);
   }
 
   if (last_select_ts_raw.tv_sec + elapsed_min.tv_sec >
@@ -621,8 +688,8 @@ check_current_time(struct timeval *prev_raw, struct timeval *raw, int timeout,
     return 1;
   }
 
-  UTI_DiffTimevalsToDouble(&step, &last_select_ts_raw, raw);
-  UTI_TimevalToDouble(&elapsed_min, &elapsed);
+  step = UTI_DiffTimespecsToDouble(&last_select_ts_raw, raw);
+  elapsed = UTI_TimespecToDouble(&elapsed_min);
   step += elapsed;
 
   /* Cooked time may no longer be valid after dispatching the handlers */
@@ -636,10 +703,11 @@ check_current_time(struct timeval *prev_raw, struct timeval *raw, int timeout,
 void
 SCH_MainLoop(void)
 {
-  fd_set rd;
+  fd_set read_fds, write_fds, except_fds;
+  fd_set *p_read_fds, *p_write_fds, *p_except_fds;
   int status, errsv;
   struct timeval tv, saved_tv, *ptv;
-  struct timeval now, saved_now, cooked;
+  struct timespec ts, now, saved_now, cooked;
   double err;
 
   assert(initialised);
@@ -655,28 +723,28 @@ SCH_MainLoop(void)
 
     /* Check whether there is a timeout and set it up */
     if (n_timer_queue_entries > 0) {
+      UTI_DiffTimespecs(&ts, &timer_queue.next->ts, &now);
+      assert(ts.tv_sec > 0 || ts.tv_nsec > 0);
 
-      UTI_DiffTimevals(&tv, &(timer_queue.next->tv), &now);
+      UTI_TimespecToTimeval(&ts, &tv);
       ptv = &tv;
-      assert(tv.tv_sec > 0 || tv.tv_usec > 0);
       saved_tv = tv;
-
     } else {
       ptv = NULL;
-      /* This is needed to fix a compiler warning */
-      saved_tv.tv_sec = 0;
+      saved_tv.tv_sec = saved_tv.tv_usec = 0;
     }
+
+    p_read_fds = &read_fds;
+    p_write_fds = &write_fds;
+    p_except_fds = &except_fds;
+    fill_fd_sets(&p_read_fds, &p_write_fds, &p_except_fds);
 
     /* if there are no file descriptors being waited on and no
        timeout set, this is clearly ridiculous, so stop the run */
-    if (!ptv && !n_read_fds) {
+    if (!ptv && !p_read_fds && !p_write_fds)
       LOG_FATAL(LOGF_Scheduler, "Nothing to do");
-    }
 
-    /* Copy current set of read file descriptors */
-    memcpy((void *) &rd, (void *) &read_fds, sizeof(fd_set));
-
-    status = select(one_highest_fd, &rd, NULL, NULL, ptv);
+    status = select(one_highest_fd, p_read_fds, p_write_fds, p_except_fds, ptv);
     errsv = errno;
 
     LCL_ReadRawTime(&now);
@@ -697,10 +765,8 @@ SCH_MainLoop(void)
         LOG_FATAL(LOGF_Scheduler, "select() failed : %s", strerror(errsv));
       }
     } else if (status > 0) {
-      /* A file descriptor is ready to read */
-
-      dispatch_filehandlers(status, &rd);
-
+      /* A file descriptor is ready for input or output */
+      dispatch_filehandlers(status, p_read_fds, p_write_fds, p_except_fds);
     } else {
       /* No descriptors readable, timeout must have elapsed.
        Therefore, tv must be non-null */
