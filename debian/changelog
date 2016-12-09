@@ -1,3 +1,27 @@
+chrony (2.4.1-2) unstable; urgency=medium
+
+  * debian/chrony.conf:
+    - Don’t create sample histories by default. Using that feature does not
+    make a lot of sense when using a pool of rapidely rotating time servers.
+    - Remove unused directives.
+    - Improve (well, I hope! ;-) ) the configuration file readability.
+    - Reword the driftfile directive commentary.
+    - Shorten the lead-in comment.
+
+  * debian/control:
+    - Build-depend on pps-tools only on linux.
+    - Remove libnss3-dev from Build-Depends until #846012 is fixed.
+
+  * debian/init:
+    - Don’t pass the “-r” option when restarting chronyd as we have disabled
+    the creation of sample histories by default.
+
+  * debian/rules:
+    - Drop dh_auto_build override. Nowadays, the documentation is built by
+    default.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 9 Dec 2016 16:58:32 +0100
+
 chrony (2.4.1-1) unstable; urgency=medium
 
   * Import upstream version 2.4.1:
