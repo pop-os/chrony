@@ -94,14 +94,17 @@
 #define REQ_SERVER_STATS 54
 #define REQ_CLIENT_ACCESSES_BY_INDEX2 55
 #define REQ_LOCAL2 56
-#define N_REQUEST_TYPES 57
+#define REQ_NTP_DATA 57
+#define REQ_ADD_SERVER2 58
+#define REQ_ADD_PEER2 59
+#define N_REQUEST_TYPES 60
 
-/* Structure used to exchange timevals independent on size of time_t */
+/* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
   uint32_t tv_sec_high;
   uint32_t tv_sec_low;
   uint32_t tv_nsec;
-} Timeval;
+} Timespec;
 
 /* This is used in tv_sec_high for 32-bit timestamps */
 #define TV_NOHIGHSEC 0x7fffffff
@@ -200,12 +203,12 @@ typedef struct {
 } REQ_Modify_Makestep;
 
 typedef struct {
-  Timeval ts;
+  Timespec ts;
   int32_t EOR;
 } REQ_Logon;
 
 typedef struct {
-  Timeval ts;
+  Timespec ts;
   int32_t EOR;
 } REQ_Settime;
 
@@ -246,6 +249,7 @@ typedef struct {
 #define REQ_ADDSRC_NOSELECT 0x10
 #define REQ_ADDSRC_TRUST 0x20
 #define REQ_ADDSRC_REQUIRE 0x40
+#define REQ_ADDSRC_INTERLEAVED 0x80
 
 typedef struct {
   IPAddr ip_addr;
@@ -253,9 +257,17 @@ typedef struct {
   int32_t minpoll;
   int32_t maxpoll;
   int32_t presend_minpoll;
+  uint32_t min_stratum;
+  uint32_t poll_target;
+  uint32_t version;
+  uint32_t max_sources;
+  int32_t min_samples;
+  int32_t max_samples;
   uint32_t authkey;
   Float max_delay;
   Float max_delay_ratio;
+  Float max_delay_dev_ratio;
+  Float offset;
   uint32_t flags;
   int32_t EOR;
 } REQ_NTP_Source;
@@ -308,6 +320,11 @@ typedef struct {
   int32_t option;
   int32_t EOR;
 } REQ_SmoothTime;
+
+typedef struct {
+  IPAddr ip_addr;
+  int32_t EOR;
+} REQ_NTPData;
 
 /* ================================================== */
 
@@ -409,6 +426,7 @@ typedef struct {
     REQ_ManualDelete manual_delete;
     REQ_ReselectDistance reselect_distance;
     REQ_SmoothTime smoothtime;
+    REQ_NTPData ntp_data;
   } data; /* Command specific parameters */
 
   /* Padding used to prevent traffic amplification.  It only defines the
@@ -442,7 +460,8 @@ typedef struct {
 #define RPY_SMOOTHING 13
 #define RPY_SERVER_STATS 14
 #define RPY_CLIENT_ACCESSES_BY_INDEX2 15
-#define N_REPLY_TYPES 16
+#define RPY_NTP_DATA 16
+#define N_REPLY_TYPES 17
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -512,7 +531,7 @@ typedef struct {
   IPAddr ip_addr;
   uint16_t stratum;
   uint16_t leap_status;
-  Timeval ref_time;
+  Timespec ref_time;
   Float current_correction;
   Float last_offset;
   Float rms_offset;
@@ -540,7 +559,7 @@ typedef struct {
 } RPY_Sourcestats;
 
 typedef struct {
-  Timeval ref_time;
+  Timespec ref_time;
   uint16_t n_samples;
   uint16_t n_runs;
   uint32_t span_seconds;
@@ -590,7 +609,7 @@ typedef struct {
 #define MAX_MANUAL_LIST_SAMPLES 16
 
 typedef struct {
-  Timeval when;
+  Timespec when;
   Float slewed_offset;
   Float orig_offset;
   Float residual;
@@ -624,6 +643,38 @@ typedef struct {
   int32_t EOR;
 } RPY_Smoothing;
 
+#define RPY_NTP_FLAGS_TESTS 0x3ff
+#define RPY_NTP_FLAG_INTERLEAVED 0x4000
+#define RPY_NTP_FLAG_AUTHENTICATED 0x8000
+
+typedef struct {
+  IPAddr remote_addr;
+  IPAddr local_addr;
+  uint16_t remote_port;
+  uint8_t leap;
+  uint8_t version;
+  uint8_t mode;
+  uint8_t stratum;
+  int8_t poll;
+  int8_t precision;
+  Float root_delay;
+  Float root_dispersion;
+  uint32_t ref_id;
+  Timespec ref_time;
+  Float offset;
+  Float peer_delay;
+  Float peer_dispersion;
+  Float response_time;
+  Float jitter_asymmetry;
+  uint16_t flags;
+  uint8_t tx_tss_char;
+  uint8_t rx_tss_char;
+  uint32_t total_tx_count;
+  uint32_t total_rx_count;
+  uint32_t total_valid_count;
+  int32_t EOR;
+} RPY_NTPData;
+
 typedef struct {
   uint8_t version;
   uint8_t pkt_type;
@@ -652,6 +703,7 @@ typedef struct {
     RPY_ManualList manual_list;
     RPY_Activity activity;
     RPY_Smoothing smoothing;
+    RPY_NTPData ntp_data;
   } data; /* Reply specific parameters */
 
 } CMD_Reply;

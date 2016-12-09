@@ -29,6 +29,7 @@
 #define GOT_CONF_H
 
 #include "addressing.h"
+#include "array.h"
 #include "reference.h"
 
 extern void CNF_Initialise(int restarted);
@@ -76,6 +77,7 @@ extern void CNF_GetBindAddress(int family, IPAddr *addr);
 extern void CNF_GetBindAcquisitionAddress(int family, IPAddr *addr);
 extern void CNF_GetBindCommandAddress(int family, IPAddr *addr);
 extern char *CNF_GetBindCommandPath(void);
+extern char *CNF_GetNtpSigndSocket(void);
 extern char *CNF_GetPidFile(void);
 extern REF_LeapMode CNF_GetLeapSecMode(void);
 extern char *CNF_GetLeapSecTimezone(void);
@@ -88,6 +90,7 @@ extern double CNF_GetCorrectionTimeRatio(void);
 extern double CNF_GetMaxSlewRate(void);
 
 extern double CNF_GetMaxDistance(void);
+extern double CNF_GetMaxJitter(void);
 extern double CNF_GetReselectDistance(void);
 extern double CNF_GetStratumWeight(void);
 extern double CNF_GetCombineLimit(void);
@@ -116,5 +119,7 @@ extern char *CNF_GetHwclockFile(void);
 
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
+
+extern ARR_Instance CNF_GetHwTsInterfaces(void);
 
 #endif /* GOT_CONF_H */

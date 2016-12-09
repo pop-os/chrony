@@ -39,6 +39,7 @@
 #include "clientlog.h"
 #include "conf.h"
 #include "memory.h"
+#include "ntp.h"
 #include "reports.h"
 #include "util.h"
 #include "logging.h"
@@ -57,6 +58,8 @@ typedef struct {
   int8_t cmd_rate;
   int8_t ntp_timeout_rate;
   uint8_t flags;
+  NTP_int64 ntp_rx_ts;
+  NTP_int64 ntp_tx_ts;
 } Record;
 
 /* Hash table of records, there is a fixed number of records per slot */
@@ -155,7 +158,7 @@ get_record(IPAddr *ip)
   time_t last_hit, oldest_hit = 0;
   Record *record, *oldest_record;
 
-  if (ip->family != IPADDR_INET4 && ip->family != IPADDR_INET6)
+  if (!active || (ip->family != IPADDR_INET4 && ip->family != IPADDR_INET6))
     return NULL;
 
   while (1) {
@@ -206,6 +209,8 @@ get_record(IPAddr *ip)
   record->ntp_rate = record->cmd_rate = INVALID_RATE;
   record->ntp_timeout_rate = INVALID_RATE;
   record->flags = 0;
+  UTI_ZeroNtp64(&record->ntp_rx_ts);
+  UTI_ZeroNtp64(&record->ntp_tx_ts);
 
   return record;
 }
@@ -336,23 +341,24 @@ CLG_Finalise(void)
 /* ================================================== */
 
 static uint32_t
-get_ts_from_timeval(struct timeval *tv)
+get_ts_from_timespec(struct timespec *ts)
 {
-  uint32_t sec = tv->tv_sec, usec = tv->tv_usec;
+  uint32_t sec = ts->tv_sec, nsec = ts->tv_nsec;
 
-  return sec << TS_FRAC | (4295U * usec - (usec >> 5)) >> (32 - TS_FRAC);
+  /* This is fast and accurate enough */
+  return sec << TS_FRAC | (140740U * (nsec >> 15)) >> (32 - TS_FRAC);
 }
 
 /* ================================================== */
 
 static void
-update_record(struct timeval *now, uint32_t *last_hit, uint32_t *hits,
+update_record(struct timespec *now, uint32_t *last_hit, uint32_t *hits,
               uint16_t *tokens, uint32_t max_tokens, int token_shift, int8_t *rate)
 {
   uint32_t interval, now_ts, prev_hit, new_tokens;
   int interval2;
 
-  now_ts = get_ts_from_timeval(now);
+  now_ts = get_ts_from_timespec(now);
 
   prev_hit = *last_hit;
   *last_hit = now_ts;
@@ -405,14 +411,25 @@ get_index(Record *record)
 /* ================================================== */
 
 int
-CLG_LogNTPAccess(IPAddr *client, struct timeval *now)
+CLG_GetClientIndex(IPAddr *client)
+{
+  Record *record;
+
+  record = get_record(client);
+  if (record == NULL)
+    return -1;
+
+  return get_index(record);
+}
+
+/* ================================================== */
+
+int
+CLG_LogNTPAccess(IPAddr *client, struct timespec *now)
 {
   Record *record;
 
   total_ntp_hits++;
-
-  if (!active)
-    return -1;
 
   record = get_record(client);
   if (record == NULL)
@@ -435,14 +452,11 @@ CLG_LogNTPAccess(IPAddr *client, struct timeval *now)
 /* ================================================== */
 
 int
-CLG_LogCommandAccess(IPAddr *client, struct timeval *now)
+CLG_LogCommandAccess(IPAddr *client, struct timespec *now)
 {
   Record *record;
 
   total_cmd_hits++;
-
-  if (!active)
-    return -1;
 
   record = get_record(client);
   if (record == NULL)
@@ -552,7 +566,19 @@ CLG_LimitCommandResponseRate(int index)
 
 /* ================================================== */
 
-extern int
+void CLG_GetNtpTimestamps(int index, NTP_int64 **rx_ts, NTP_int64 **tx_ts)
+{
+  Record *record;
+
+  record = ARR_GetElement(records, index);
+
+  *rx_ts = &record->ntp_rx_ts;
+  *tx_ts = &record->ntp_tx_ts;
+}
+
+/* ================================================== */
+
+int
 CLG_GetNumberOfIndices(void)
 {
   if (!active)
@@ -586,7 +612,7 @@ static uint32_t get_last_ago(uint32_t x, uint32_t y)
 /* ================================================== */
 
 int
-CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timeval *now)
+CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timespec *now)
 {
   Record *record;
   uint32_t now_ts;
@@ -599,7 +625,7 @@ CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *repo
   if (record->ip_addr.family == IPADDR_UNSPEC)
     return 0;
 
-  now_ts = get_ts_from_timeval(now);
+  now_ts = get_ts_from_timespec(now);
 
   report->ip_addr = record->ip_addr;
   report->ntp_hits = record->ntp_hits;

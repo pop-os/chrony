@@ -25,7 +25,7 @@ void
 test_unit(void)
 {
   int i, j;
-  struct timeval tv;
+  struct timespec ts;
   double offset, freq, wander;
   char conf[] = "smoothtime 300 0.01";
 
@@ -37,19 +37,19 @@ test_unit(void)
   locked = 0;
 
   for (i = 0; i < 500; i++) {
-    tv.tv_sec = tv.tv_usec = 0;
-    SMT_Reset(&tv);
+    UTI_ZeroTimespec(&ts);
+    SMT_Reset(&ts);
 
     DEBUG_LOG(0, "iteration %d", i);
 
     offset = (random() % 1000000 - 500000) / 1.0e6;
     freq = (random() % 1000000 - 500000) / 1.0e9;
-    update_smoothing(&tv, offset, freq);
+    update_smoothing(&ts, offset, freq);
 
     for (j = 0; j < 10000; j++) {
-      update_smoothing(&tv, 0.0, 0.0);
-      UTI_AddDoubleToTimeval(&tv, 16.0, &tv);
-      get_smoothing(&tv, &offset, &freq, &wander);
+      update_smoothing(&ts, 0.0, 0.0);
+      UTI_AddDoubleToTimespec(&ts, 16.0, &ts);
+      get_smoothing(&ts, &offset, &freq, &wander);
     }
 
     TEST_CHECK(fabs(offset) < 1e-12);

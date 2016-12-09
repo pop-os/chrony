@@ -87,7 +87,13 @@ extern void NSR_RefreshAddresses(void);
 extern uint32_t NSR_GetLocalRefid(IPAddr *address);
 
 /* This routine is called by ntp_io when a new packet arrives off the network */
-extern void NSR_ProcessReceive(NTP_Packet *message, struct timeval *now, double now_err, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr, int length);
+extern void NSR_ProcessRx(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+                          NTP_Local_Timestamp *rx_ts, NTP_Packet *message, int length);
+
+/* This routine is called by ntp_io when a packet was sent to the network and
+   an accurate transmit timestamp was captured */
+extern void NSR_ProcessTx(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+                          NTP_Local_Timestamp *tx_ts, NTP_Packet *message, int length);
 
 /* Initialisation function */
 extern void NSR_Initialise(void);
@@ -121,7 +127,9 @@ extern int NSR_ModifyPolltarget(IPAddr *address, int new_poll_target);
 
 extern int NSR_InitiateSampleBurst(int n_good_samples, int n_total_samples, IPAddr *mask, IPAddr *address);
 
-extern void NSR_ReportSource(RPT_SourceReport *report, struct timeval *now);
+extern void NSR_ReportSource(RPT_SourceReport *report, struct timespec *now);
+
+extern int NSR_GetNTPReport(RPT_NTPReport *report);
 
 extern void NSR_GetActivityReport(RPT_ActivityReport *report);
 

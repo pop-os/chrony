@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2016-11-21
+.\"      Date: 2016-12-09
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2016-11-21" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2016-12-09" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -132,6 +132,16 @@ the previous measurements that is greater than the specified ratio, it will be
 rejected. The default is 10.0.
 .RE
 .sp
+\fBoffset\fP \fIoffset\fP
+.RS 4
+This option specifies a correction (in seconds) which will be applied to
+offsets measured with this source. It\(cqs particularly useful to compensate for a
+known asymmetry in network delay or timestamping errors. For example, if
+packets sent to the source were on average delayed by 100 microseconds more
+than packets sent from the source back, the correction would be \-0.00005 (\-50
+microseconds). The default is 0.0.
+.RE
+.sp
 \fBminsamples\fP \fIsamples\fP
 .RS 4
 Set the minimum number of samples kept for this source. This overrides the
@@ -189,12 +199,33 @@ order to improve the accuracy of the clock. They can be selected and used for
 synchronisation only if they agree with the trusted and required source.
 .RE
 .sp
+\fBxleave\fP
+.RS 4
+This option enables an interleaved mode which allows the server or the peer to
+send transmit timestamps captured after the actual transmission (e.g. when the
+server or the peer is running \fBchronyd\fP with HW timestamping enabled by the
+\fBhwtimestamp\fP directive). This can significantly improve the
+accuracy of the measurements.
+.sp
+The interleaved mode is compatible with servers that support only the basic
+mode, but peers must both support and have enabled the interleaved mode,
+otherwise the synchronisation will work only in one direction. Note that even
+servers that support the interleaved mode might respond in the basic mode as
+the interleaved mode requires the servers to keep some state for each client
+and the state might be dropped when there are too many clients (e.g.
+\fBclientloglimit\fP is too small), or it might be overwritten
+by other clients that have the same IP address (e.g. computers behind NAT or
+someone sending requests with a spoofed source address). The \fBpresend\fP option
+can be used to shorten the interval in which the server has to keep the state
+for this computer and be able to respond in the interleaved mode.
+.RE
+.sp
 \fBpolltarget\fP \fItarget\fP
 .RS 4
 Target number of measurements to use for the regression algorithm which
 \fBchronyd\fP will try to maintain by adjusting the polling interval between
 \fBminpoll\fP and \fBmaxpoll\fP. A higher target makes \fBchronyd\fP prefer shorter polling
-intervals. The default is 6 and a useful range is from 6 to 60.
+intervals. The default is 8 and a useful range is from 6 to 60.
 .RE
 .sp
 \fBport\fP \fIport\fP
@@ -230,8 +261,11 @@ presend 9
 .\}
 .sp
 when the polling interval is 512 seconds or more, an extra NTP client packet
-will be sent to the server a short time (4 seconds) before making the actual
+will be sent to the server a short time (2 seconds) before making the actual
 measurement.
+.sp
+The \fBpresend\fP option cannot be used in the \fBpeer\fP directive. If it is used
+with the \fBxleave\fP option, \fBchronyd\fP will send two extra packets instead of one.
 .RE
 .sp
 \fBminstratum\fP \fIstratum\fP
@@ -246,9 +280,13 @@ sources are unreachable.
 .sp
 \fBversion\fP \fIversion\fP
 .RS 4
-This option sets the NTP version number used in packets sent to the server.
-This can be useful when the server runs an old NTP implementation that does not
-respond to newer versions. The default version number is 4.
+This option sets the NTP version of packets sent to the server. This can be
+useful when the server runs an old NTP implementation that does not respond to
+requests using a newer version. The default version depends on whether a key is
+specified by the \fBkey\fP option and which authentication hash function the key
+is using. If the output size of the hash function is longer than 160 bits, the
+default version is 3 for compatibility with older \fBchronyd\fP servers. Otherwise,
+the default version is 4.
 .RE
 .RE
 .sp
@@ -288,26 +326,33 @@ pool pool.ntp.org iburst maxsources 3
 \fBpeer\fP \fIhostname\fP [\fIoption\fP]...
 .RS 4
 The syntax of this directive is identical to that for the \fBserver\fP
-directive, except that it is used to specify an NTP peer rather than an NTP
-server.
+directive, except that it specifies a symmetric association with an NTP peer
+instead of a client/server association with an NTP server. A single symmetric
+association allows the peers to be both servers and clients to each other. This
+is mainly useful when the NTP implementation of the peer (e.g. \fBntpd\fP) supports
+ephemeral symmetric associations and does not need to be configured with an
+address of this host. \fBchronyd\fP does not support ephemeral associations.
 .sp
 When a key is specified by the \fBkey\fP option to enable authentication, both
-peers must be configured to use the same key and the same key number.
+peers must use the same key and the same key number.
 .sp
-Please note that NTP peers that are not configured with a key to enable
-authentication are vulnerable to a denial\-of\-service attack. An attacker
-knowing that NTP hosts A and B are peering with each other can send a packet
-with random timestamps to host A with source address of B which will set the
-NTP state variables on A to the values sent by the attacker. Host A will then
-send on its next poll to B a packet with an origin timestamp that does not match
-the transmit timestamp of B and the packet will be dropped. If the attacker
-does this periodically for both hosts, they will not be able to synchronise to
-each other.
-.sp
-This attack can be prevented by enabling authentication with the \fBkey\fP option,
-or by using the \fBserver\fP directive on both sides to specify the other
-host as a server instead of a peer. The disadvantage of the \fBserver\fP directive
-is that it will double the network traffic between the two hosts.
+Note that the symmetric mode is less secure than the client/server mode. A
+denial\-of\-service attack is possible on unauthenticated symmetric associations,
+i.e. when the peer was specified without the \fBkey\fP option. An attacker who does
+not see network traffic between two hosts, but knows that they are peering with
+each other, can periodically send them unauthenticated packets with spoofed
+source addresses in order to disrupt their NTP state and prevent them from
+synchronising to each other. When the association is authenticated, an attacker
+who does see the network traffic, but cannot prevent the packets from reaching
+the other host, can still disrupt the state by replaying old packets. The
+attacker has effectively the same power as a man\-in\-the\-middle attacker. A
+partial protection against this attack is implemented in \fBchronyd\fP, which can
+protect the peers if they are using the same polling interval and they never
+sent an authenticated packet with a timestamp from future, but it should not be
+relied on as it is difficult to ensure the conditions are met. If two hosts
+should be able to synchronise to each other in both directions, it is
+recommended to use two separate client/server associations (specified by the
+\fBserver\fP directive on both hosts) instead.
 .RE
 .sp
 \fBinitstepslew\fP \fIstep\-threshold\fP [\fIhostname\fP]...
@@ -526,6 +571,14 @@ more than one pulse per second, a negative \fBdpoll\fP has to be specified (\-3 
 a 5Hz signal). The default is 1.
 .RE
 .sp
+\fBmaxlockage\fP \fIpulses\fP
+.RS 4
+This option specifies in number of pulses how old can be samples from the
+refclock specified by the \fBlock\fP option to be paired with the pulses.
+Increasing this value is useful when the samples are produced at a lower rate
+than the pulses. The default is 2.
+.RE
+.sp
 \fBoffset\fP \fIoffset\fP
 .RS 4
 This option can be used to compensate for a constant error. The specified
@@ -686,15 +739,15 @@ An example of the directive is:
 .RS 4
 .\}
 .nf
-dumpdir @CHRONYVARDIR@
+dumpdir @CHRONYRUNDIR@
 .fi
 .if n \{\
 .RE
 .\}
 .sp
-A source whose reference ID (the IP address for IPv4 sources) is \fI1.2.3.4\fP
-would have its measurement history saved in the file
-\fI/var/lib/chrony/1.2.3.4.dat\fP.
+A source whose IP address is \fI1.2.3.4\fP would have its measurement history saved
+in the file \fI@CHRONYRUNDIR@/1.2.3.4.dat\fP. History of reference clocks is saved
+to files named by their reference ID in form of \fIrefid:XXXXXXXX.dat\fP.
 .RE
 .sp
 \fBdumponexit\fP
@@ -718,7 +771,7 @@ useful range is 4 to 64.
 The \fBminsamples\fP directive sets the default minimum number of samples that
 \fBchronyd\fP should keep for each source. This setting can be overridden for
 individual sources in the \fBserver\fP and \fBrefclock\fP
-directives. The default value is 0. The useful range is 4 to 64.
+directives. The default value is 6. The useful range is 4 to 64.
 .RE
 .SS "Source selection"
 .sp
@@ -752,6 +805,15 @@ By default, the maximum root distance is 3 seconds.
 Setting \fBmaxdistance\fP to a larger value can be useful to allow synchronisation
 with a server that only has a very infrequent connection to its sources and can
 accumulate a large dispersion between updates of its clock.
+.RE
+.sp
+\fBmaxjitter\fP \fIjitter\fP
+.RS 4
+The \fBmaxjitter\fP directive sets the maximum allowed jitter of the sources to not
+be rejected by the source selection algorithm. This prevents synchronisation
+with sources that have a small root distance, but their time is too variable.
+.sp
+By default, the maximum jitter is 1 second.
 .RE
 .sp
 \fBminsources\fP \fIsources\fP
@@ -1330,15 +1392,12 @@ directive.
 .sp
 \fBbindaddress\fP \fIaddress\fP
 .RS 4
-The \fBbindaddress\fP directive allows you to restrict the network interface to
-which \fBchronyd\fP will listen for NTP requests. This provides an additional level
-of access restriction above that available through the \fBdeny\fP
-mechanism.
+The \fBbindaddress\fP directive binds the socket on which \fBchronyd\fP listens for NTP
+requests to a local address of the computer. On systems other than Linux, the
+address of the computer needs to be already configured when \fBchronyd\fP is
+started.
 .sp
-Suppose you have a local network with addresses in the \fI192.168.1.0\fP
-subnet together with an Internet connection. The network interface\(cqs IP
-address is \fI192.168.1.1\fP. Suppose you want to block all access through the
-Internet connection. You could add the line:
+An example of the use of the directive is:
 .sp
 .if n \{\
 .RS 4
@@ -1350,11 +1409,9 @@ bindaddress 192.168.1.1
 .RE
 .\}
 .sp
-to the configuration file.
-.sp
-For each of the IPv4 and IPv6 protocols, only one \fBbindaddress\fP directive can be
-specified. Therefore, it is not useful on computers which should serve NTP on
-multiple network interfaces.
+Currently, for each of the IPv4 and IPv6 protocols, only one \fBbindaddress\fP
+directive can be specified. Therefore, it is not useful on computers which
+should serve NTP on multiple network interfaces.
 .RE
 .sp
 \fBbroadcast\fP \fIinterval\fP \fIaddress\fP [\fIport\fP]
@@ -1403,8 +1460,10 @@ directive.
 \fBclientloglimit\fP \fIlimit\fP
 .RS 4
 This directive specifies the maximum amount of memory that \fBchronyd\fP is allowed
-to allocate for logging of client accesses. The default limit is 524288 bytes,
-which allows monitoring of several thousands of addresses at the same time.
+to allocate for logging of client accesses and the state that \fBchronyd\fP as an
+NTP server needs to support the interleaved mode for its clients. The default
+limit is 524288 bytes, which is sufficient for monitoring about four thousand
+clients at the same time.
 .sp
 In older \fBchrony\fP versions if the limit was set to 0, the memory allocation was
 unlimited.
@@ -1426,7 +1485,8 @@ clientloglimit 1048576
 .RS 4
 This directive, which takes no arguments, specifies that client accesses are
 not to be logged. Normally they are logged, allowing statistics to be reported
-using the \fBclients\fP command in \fBchronyc\fP.
+using the \fBclients\fP command in \fBchronyc\fP. This option
+also effectively disables server support for the NTP interleaved mode.
 .RE
 .sp
 \fBlocal\fP [\fIoption\fP]...
@@ -1508,6 +1568,31 @@ An example of the directive is:
 .\}
 .nf
 local stratum 10 orphan
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.sp
+\fBntpsigndsocket\fP \fIdirectory\fP
+.RS 4
+This directive specifies the location of the Samba \fBntp_signd\fP socket when it
+is running as a Domain Controller (DC). If \fBchronyd\fP is compiled with this
+feature, responses to MS\-SNTP clients will be signed by the \fBsmbd\fP daemon.
+.sp
+Note that MS\-SNTP requests are not authenticated and any client that is allowed
+to access the server by the \fBallow\fP directive, or the
+\fBallow\fP command in \fBchronyc\fP, can get an MS\-SNTP
+response signed with a trust account\(cqs password and try to crack the password
+in a brute\-force attack. Access to the server should be carefully controlled.
+.sp
+An example of the directive is:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+ntpsigndsocket /var/lib/samba/ntp_signd
 .fi
 .if n \{\
 .RE
@@ -1658,16 +1743,17 @@ smoothtime 50000 0.01
 .sp
 \fBbindcmdaddress\fP \fIaddress\fP
 .RS 4
-The \fBbindcmdaddress\fP directive allows you to specify the network interface on
-which \fBchronyd\fP will listen for monitoring command packets (issued by
-\fBchronyc\fP). This provides an additional level of access restriction above that
-available through the \fBcmddeny\fP mechanism.
+The \fBbindcmdaddress\fP directive allows you to specify an IP address of an
+interface on which \fBchronyd\fP will listen for monitoring command packets (issued
+by \fBchronyc\fP). On systems other than Linux, the address of the interface needs
+to be already configured when \fBchronyd\fP is started.
 .sp
 This directive can also change the path of the Unix domain command socket,
 which is used by \fBchronyc\fP to send configuration commands. The socket must be
 in a directory that is accessible only by the root or \fIchrony\fP user. The
 directory will be created on start if it does not exist. The compiled\-in default
-path of the socket is \fI@CHRONYSOCKDIR@/chronyd.sock\fP.
+path of the socket is \fI@CHRONYRUNDIR@/chronyd.sock\fP. The socket can be
+disabled by setting the path to \fI/\fP.
 .sp
 By default, \fBchronyd\fP binds to the loopback interface (with addresses
 \fI127.0.0.1\fP and \fI::1\fP). This blocks all access except from localhost. To listen
@@ -1686,8 +1772,8 @@ bindcmdaddress ::
 .sp
 to the configuration file.
 .sp
-For each of the IPv4 and IPv6 protocols, only one \fBbindcmdaddress\fP directive can be
-specified.
+For each of the IPv4, IPv6, and Unix domain protocols, only one
+\fBbindcmdaddress\fP directive can be specified.
 .sp
 An example that sets the path of the Unix domain command socket is:
 .sp
@@ -1824,7 +1910,7 @@ This would set the threshold error to 30 seconds.
 \fBrtcdevice\fP \fIdevice\fP
 .RS 4
 The \fBrtcdevice\fP directive sets the path to the device file for accessing the
-RTC. The default path is \fI/dev/rtc\fP.
+RTC. The default path is \fI@DEFAULT_RTC_DEVICE@\fP.
 .RE
 .sp
 \fBrtcfile\fP \fIfile\fP
@@ -1918,7 +2004,7 @@ cannot be used with the \fBrtcfile\fP directive.
 .sp
 On Linux, the RTC copy is performed by the kernel every 11 minutes.
 .sp
-On Mac OS X, \fBchronyd\fP will perform the RTC copy every 60 minutes
+On macOS, \fBchronyd\fP will perform the RTC copy every 60 minutes
 when the system clock is in a synchronised state.
 .sp
 On other systems this directive does nothing.
@@ -1942,8 +2028,8 @@ line in the file) from the log file is shown below.
 .RS 4
 .\}
 .nf
-2015\-10\-13 05:40:50 203.0.113.15    N  2 111 111 1111  10 10 1.0 \(rs
-   \-4.966e\-03  2.296e\-01  1.577e\-05  1.615e\-01  7.446e\-03
+2016\-11\-09 05:40:50 203.0.113.15    N  2 111 111 1111  10 10 1.0 \(rs
+   \-4.966e\-03  2.296e\-01  1.577e\-05  1.615e\-01  7.446e\-03 CB00717B 4B D K
 .fi
 .if n \{\
 .RE
@@ -2135,6 +2221,53 @@ The root delay (\fIDELTA\fP in RFC 5905). [1.615e\-01]
 .\}
 The root dispersion (\fIEPSILON\fP in RFC 5905). [7.446e\-03]
 .RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 17.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 17." 4.2
+.\}
+Reference ID of the server\(cqs source as a hexadecimal number. [CB00717B]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 18.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 18." 4.2
+.\}
+NTP mode of the received packet (\fI1\fP=active peer, \fI2\fP=passive peer,
+\fI3\fP=server, \fIB\fP=basic, \fII\fP=interleaved). [4B]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 19.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 19." 4.2
+.\}
+Source of the local transmit timestamp
+(\fID\fP=daemon, \fIK\fP=kernel, \fIH\fP=hardware). [D]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 20.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 20." 4.2
+.\}
+Source of the local receive timestamp
+(\fID\fP=daemon, \fIK\fP=kernel, \fIH\fP=hardware). [K]
+.RE
 .RE
 .sp
 \fBstatistics\fP
@@ -2147,8 +2280,8 @@ the file) from the log file is shown below.
 .RS 4
 .\}
 .nf
-2015\-07\-22 05:40:50 203.0.113.15     6.261e\-03 \-3.247e\-03 \(rs
-     2.220e\-03  1.874e\-06  1.080e\-06 7.8e\-02  16   0   8
+2016\-08\-10 05:40:50 203.0.113.15     6.261e\-03 \-3.247e\-03 \(rs
+     2.220e\-03  1.874e\-06  1.080e\-06 7.8e\-02  16   0   8  0.00
 .fi
 .if n \{\
 .RE
@@ -2304,6 +2437,21 @@ no longer represented well by a linear model and that some older samples need
 to be discarded. The number of runs for the data that is being retained is
 tabulated. Values of approximately half the number of samples are expected.
 [8]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 13.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 13." 4.2
+.\}
+The estimated asymmetry of network jitter on the path to the source which was
+used to correct the measured offsets. The asymmetry can be between \-0.5 and
+0.5. A negative value means the delay of packets sent to the source is
+more variable than the delay of packets sent from the source back. [0.00,
+i.e. no correction for asymmetry]
 .RE
 .RE
 .sp
@@ -2877,6 +3025,47 @@ sendmail binary.
 .RE
 .SS "Miscellaneous"
 .sp
+\fBhwtimestamp\fP \fIinterface\fP
+.RS 4
+This directive enables hardware timestamping of NTP packets sent to and
+received from the specified network interface. The network interface controller
+(NIC) uses its own clock to accurately timestamp the actual transmissions and
+receptions, avoiding processing and queueing delays in the kernel, network
+driver, and hardware. This can significantly improve the accuracy of the
+timestamps and the measured offset, which is used for synchronisation of the
+system clock. In order to get best results, it is necessary to enable HW
+timestamping on both sides receiving and sending the packets (i.e. server and
+client, or both peers), and also enable the interleaved mode with the \fBxleave\fP
+option in the \fBserver\fP or the \fBpeer\fP directive.
+.sp
+This directive is supported on Linux 3.19 and newer. The NIC must support HW
+timestamping, which can be verified with the \fBethtool \-T\fP command. The list of
+capabilities should include \fISOF_TIMESTAMPING_RAW_HARDWARE\fP,
+\fISOF_TIMESTAMPING_TX_HARDWARE\fP, \fISOF_TIMESTAMPING_RX_HARDWARE\fP, and the filter
+modes should have \fIHWTSTAMP_FILTER_ALL\fP. When \fBchronyd\fP is running, no other
+process should be working with the clock on the NIC. If no \fBhwtimestamp\fP
+directive is specified, \fBchronyd\fP will try to use software (kernel)
+timestamping. With both hardware and software timestamping there are
+some limitations on which packets can be actually timestamped, e.g. transmit
+timestamping does not currently work with IPv6 packets using IP options and
+hardware receive timestamping does not work with packets from bridged
+interfaces. The timestamping used in measurements is indicated in the
+\fImeasurements.log\fP file if enabled by the \fBlog measurements\fP directive,
+and the \fBntpdata\fP report in \fBchronyc\fP.
+.sp
+An example of the directive is:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+hwtimestamp eth0
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.sp
 \fBinclude\fP \fIpattern\fP
 .RS 4
 The \fBinclude\fP directive includes a configuration file or multiple configuration
@@ -2964,8 +3153,8 @@ significant impact on performance as \fBchronyd\(cqs\fP memory usage is modest. 
 \fBpidfile\fP \fIfile\fP
 .RS 4
 \fBchronyd\fP always writes its process ID (PID) to a file, and checks this file on
-startup to see if another \fBchronyd\fP may already be running on the system. By
-default, the file used is \fI/var/run/chronyd.pid\fP. The \fBpidfile\fP directive
+startup to see if another \fBchronyd\fP might already be running on the system. By
+default, the file used is \fI@DEFAULT_PID_FILE@\fP. The \fBpidfile\fP directive
 allows the name to be changed, e.g.:
 .sp
 .if n \{\
@@ -2982,8 +3171,8 @@ pidfile /run/chronyd.pid
 \fBsched_priority\fP \fIpriority\fP
 .RS 4
 On Linux, the \fBsched_priority\fP directive will select the SCHED_FIFO real\-time
-scheduler at the specified priority (which must be between 0 and 100). On Mac
-OS X, this option must have either a value of 0 (the default) to disable the
+scheduler at the specified priority (which must be between 0 and 100). On
+macOS, this option must have either a value of 0 (the default) to disable the
 thread time constraint policy or 1 for the policy to be enabled. Other systems
 do not support this option.
 .sp
@@ -2998,7 +3187,7 @@ wait for the scheduler to get around to running it. You should not use this
 unless you really need it. The \fBsched_setscheduler(2)\fP man page has more
 details.
 .sp
-On Mac OS X, this directive uses the \fBthread_policy_set()\fP kernel call to
+On macOS, this directive uses the \fBthread_policy_set()\fP kernel call to
 specify real\-time scheduling. As noted for Linux, you should not use this
 directive unless you really need it.
 .RE
@@ -3009,7 +3198,7 @@ The \fBuser\fP directive sets the name of the system user to which \fBchronyd\fP
 switch after start in order to drop root privileges.
 .sp
 On Linux, \fBchronyd\fP needs to be compiled with support for the \fBlibcap\fP library.
-On Mac OS X, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
+On macOS, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
 The child process retains root privileges, but can only perform a very limited
 range of privileged system calls on behalf of the parent.
 .sp
@@ -3420,6 +3609,40 @@ configuration file.
 For the system shutdown, \fBchronyd\fP should receive a SIGTERM several seconds
 before the final SIGKILL; the SIGTERM causes the measurement histories and RTC
 information to be saved.
+.SS "Public NTP server"
+.sp
+\fBchronyd\fP can be configured to operate as a public NTP server, e.g. to join the
+.URL "http://www.pool.ntp.org/en/join.html" "pool.ntp.org" " "
+project. The configuration
+is similar to the NTP client with permanent connection, except it needs to
+allow client access from all addresses. It is recommended to handpick at least
+few good servers, and possibly combine them with a random selection of other
+servers in the pool. Rate limiting can be enabled to not waste too much
+bandwidth on misconfigured and broken NTP clients. The \fB\-r\fP option with the
+\fBdumpdir\fP directive shortens the time for which \fBchronyd\fP will not serve time
+to its clients when it needs to be restarted for any reason.
+.sp
+The configuration file might be:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+server foo.example.net iburst
+server bar.example.net iburst
+server baz.example.net iburst
+pool pool.ntp.org iburst
+makestep 1.0 3
+rtcsync
+allow
+ratelimit interval 2 burst 10
+driftfile @CHRONYVARDIR@/drift
+dumpdir @CHRONYRUNDIR@
+dumponexit
+.fi
+.if n \{\
+.RE
+.\}
 .SH "SEE ALSO"
 .sp
 \fBchronyc(1)\fP, \fBchronyd(8)\fP

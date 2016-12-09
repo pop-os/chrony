@@ -56,7 +56,7 @@ static int initialised = 0;
 struct SelectInfo {
   int stratum;
   int select_ok;
-  double variance;
+  double std_dev;
   double root_distance;
   double lo_limit;
   double hi_limit;
@@ -71,12 +71,12 @@ typedef enum {
   SRC_UNSELECTABLE,     /* Has noselect option set */
   SRC_BAD_STATS,        /* Doesn't have valid stats data */
   SRC_BAD_DISTANCE,     /* Has root distance longer than allowed maximum */
+  SRC_JITTERY,          /* Had std dev larger than allowed maximum */
   SRC_WAITS_STATS,      /* Others have bad stats, selection postponed */
   SRC_STALE,            /* Has older samples than others */
   SRC_ORPHAN,           /* Has stratum equal or larger than orphan stratum */
   SRC_UNTRUSTED,        /* Overlaps trusted sources */
   SRC_FALSETICKER,      /* Doesn't agree with others */
-  SRC_JITTERY,          /* Scatter worse than other's dispersion (not used) */
   SRC_WAITS_SOURCES,    /* Not enough sources, selection postponed */
   SRC_NONPREFERRED,     /* Others have prefer option */
   SRC_WAITS_UPDATE,     /* No updates, selection postponed */
@@ -159,6 +159,7 @@ static int selected_source_index; /* Which source index is currently
 #define DISTANT_PENALTY 32
 
 static double max_distance;
+static double max_jitter;
 static double reselect_distance;
 static double stratum_weight;
 static double combine_limit;
@@ -167,7 +168,7 @@ static double combine_limit;
 /* Forward prototype */
 
 static void
-slew_sources(struct timeval *raw, struct timeval *cooked, double dfreq,
+slew_sources(struct timespec *raw, struct timespec *cooked, double dfreq,
              double doffset, LCL_ChangeType change_type, void *anything);
 static void
 add_dispersion(double dispersion, void *anything);
@@ -184,6 +185,7 @@ void SRC_Initialise(void) {
   max_n_sources = 0;
   selected_source_index = INVALID_SOURCE;
   max_distance = CNF_GetMaxDistance();
+  max_jitter = CNF_GetMaxJitter();
   reselect_distance = CNF_GetReselectDistance();
   stratum_weight = CNF_GetStratumWeight();
   combine_limit = CNF_GetCombineLimit();
@@ -309,22 +311,12 @@ SRC_SetRefid(SRC_Instance instance, uint32_t ref_id, IPAddr *addr)
 }
 
 /* ================================================== */
-/* Function to get the range of frequencies, relative to the given
-   source, that we believe the local clock lies within.  The return
-   values are in terms of the number of seconds fast (+ve) or slow
-   (-ve) relative to the source that the local clock becomes after a
-   given amount of local time has elapsed.
 
-   Suppose the initial offset relative to the source is U (fast +ve,
-   slow -ve) and a time interval T elapses measured in terms of the
-   local clock.  Then the error relative to the source at the end of
-   the interval should lie in the interval [U+T*lo, U+T*hi]. */
-
-void SRC_GetFrequencyRange(SRC_Instance instance, double *lo, double *hi)
+SST_Stats
+SRC_GetSourcestats(SRC_Instance instance)
 {
   assert(initialised);
-
-  SST_GetFrequencyRange(instance->stats, lo, hi);
+  return instance->stats;
 }
 
 /* ================================================== */
@@ -342,7 +334,7 @@ void SRC_GetFrequencyRange(SRC_Instance instance, double *lo, double *hi)
 
 void SRC_AccumulateSample
 (SRC_Instance inst, 
- struct timeval *sample_time, 
+ struct timespec *sample_time,
  double offset, 
  double peer_delay,
  double peer_dispersion,
@@ -357,7 +349,8 @@ void SRC_AccumulateSample
   inst->leap_status = leap_status;
 
   DEBUG_LOG(LOGF_Sources, "ip=[%s] t=%s ofs=%f del=%f disp=%f str=%d",
-      source_to_string(inst), UTI_TimevalToString(sample_time), -offset, root_delay, root_dispersion, stratum);
+            source_to_string(inst), UTI_TimespecToString(sample_time), -offset,
+            root_delay, root_dispersion, stratum);
 
   if (REF_IsLeapSecondClose()) {
     LOG(LOGS_INFO, LOGF_Sources, "Dropping sample around leap second");
@@ -404,7 +397,7 @@ special_mode_end(void)
 
       /* Check if the source could still have enough samples to be selectable */
       if (SOURCE_REACH_BITS - 1 - sources[i]->reachability_size +
-            SRC_Samples(sources[i]) >= MIN_SAMPLES_FOR_REGRESS)
+            SST_Samples(sources[i]->stats) >= MIN_SAMPLES_FOR_REGRESS)
         return 0;
     }
 
@@ -514,10 +507,10 @@ mark_ok_sources(SRC_Status status)
 /* ================================================== */
 
 static int
-combine_sources(int n_sel_sources, struct timeval *ref_time, double *offset,
+combine_sources(int n_sel_sources, struct timespec *ref_time, double *offset,
                 double *offset_sd, double *frequency, double *skew)
 {
-  struct timeval src_ref_time;
+  struct timespec src_ref_time;
   double src_offset, src_offset_sd, src_frequency, src_skew;
   double src_root_delay, src_root_dispersion, sel_src_distance, elapsed;
   double offset_weight, sum_offset_weight, sum_offset, sum2_offset_sd;
@@ -564,7 +557,7 @@ combine_sources(int n_sel_sources, struct timeval *ref_time, double *offset,
     if (sources[index]->status == SRC_OK)
       sources[index]->status = SRC_UNSELECTED;
 
-    UTI_DiffTimevalsToDouble(&elapsed, ref_time, &src_ref_time);
+    elapsed = UTI_DiffTimespecsToDouble(ref_time, &src_ref_time);
     src_offset += elapsed * src_frequency;
     offset_weight = 1.0 / sources[index]->sel_info.root_distance;
     frequency_weight = 1.0 / src_skew;
@@ -604,12 +597,12 @@ void
 SRC_SelectSource(SRC_Instance updated_inst)
 {
   struct SelectInfo *si;
-  struct timeval now, ref_time;
+  struct timespec now, ref_time;
   int i, j, j1, j2, index, sel_prefer, n_endpoints, n_sel_sources;
   int n_badstats_sources, max_sel_reach, max_badstat_reach, sel_req_source;
   int depth, best_depth, trust_depth, best_trust_depth;
   int combined, stratum, min_stratum, max_score_index;
-  int orphan_stratum, orphan_source;
+  int orphan_stratum, orphan_source, leap_votes, leap_ins, leap_del;
   double src_offset, src_offset_sd, src_frequency, src_skew;
   double src_root_delay, src_root_dispersion;
   double best_lo, best_hi, distance, sel_src_distance, max_score;
@@ -657,7 +650,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     si = &sources[i]->sel_info;
     SST_GetSelectionData(sources[i]->stats, &now, &si->stratum,
                          &si->lo_limit, &si->hi_limit, &si->root_distance,
-                         &si->variance, &first_sample_ago,
+                         &si->std_dev, &first_sample_ago,
                          &si->last_sample_ago, &si->select_ok);
 
     if (!si->select_ok) {
@@ -671,6 +664,12 @@ SRC_SelectSource(SRC_Instance updated_inst)
     /* Require the root distance to be below the allowed maximum */
     if (si->root_distance > max_distance) {
       sources[i]->status = SRC_BAD_DISTANCE;
+      continue;
+    }
+
+    /* And the same applies for the estimated standard deviation */
+    if (si->std_dev > max_jitter) {
+      sources[i]->status = SRC_JITTERY;
       continue;
     }
 
@@ -910,18 +909,22 @@ SRC_SelectSource(SRC_Instance updated_inst)
     return;
   }
 
-  /* Accept leap second status if more than half of selectable sources agree */
-  for (i = j1 = j2 = 0; i < n_sel_sources; i++) {
+  /* Accept leap second status if more than half of selectable (and trusted
+     if there are any) sources agree */
+  for (i = leap_ins = leap_del = leap_votes = 0; i < n_sel_sources; i++) {
     index = sel_sources[i];
+    if (best_trust_depth && !(sources[index]->sel_options & SRC_SELECT_TRUST))
+      continue;
+    leap_votes++;
     if (sources[index]->leap_status == LEAP_InsertSecond)
-      j1++;
+      leap_ins++;
     else if (sources[index]->leap_status == LEAP_DeleteSecond)
-      j2++;
+      leap_del++;
   }
 
-  if (j1 > n_sel_sources / 2)
+  if (leap_ins > leap_votes / 2)
     leap_status = LEAP_InsertSecond;
-  else if (j2 > n_sel_sources / 2)
+  else if (leap_del > leap_votes / 2)
     leap_status = LEAP_DeleteSecond;
   else
     leap_status = LEAP_Normal;
@@ -1099,32 +1102,6 @@ SRC_SetReselectDistance(double distance)
 }
 
 /* ================================================== */
-
-double
-SRC_PredictOffset(SRC_Instance inst, struct timeval *when)
-{
-  return SST_PredictOffset(inst->stats, when);
-}
-
-/* ================================================== */
-
-double
-SRC_MinRoundTripDelay(SRC_Instance inst)
-{
-  return SST_MinRoundTripDelay(inst->stats);
-}
-
-/* ================================================== */
-
-int
-SRC_IsGoodSample(SRC_Instance inst, double offset, double delay,
-   double max_delay_dev_ratio, double clock_error, struct timeval *when)
-{
-  return SST_IsGoodSample(inst->stats, offset, delay, max_delay_dev_ratio,
-      clock_error, when);
-}
-
-/* ================================================== */
 /* This routine is registered as a callback with the local clock
    module, to be called whenever the local clock changes frequency or
    is slewed.  It runs through all the existing source statistics, and
@@ -1132,12 +1109,8 @@ SRC_IsGoodSample(SRC_Instance inst, double offset, double delay,
    the new regime. */
 
 static void
-slew_sources(struct timeval *raw,
-             struct timeval *cooked,
-             double dfreq,
-             double doffset,
-             LCL_ChangeType change_type,
-             void *anything)
+slew_sources(struct timespec *raw, struct timespec *cooked, double dfreq,
+             double doffset, LCL_ChangeType change_type, void *anything)
 {
   int i;
 
@@ -1170,40 +1143,54 @@ add_dispersion(double dispersion, void *anything)
 }
 
 /* ================================================== */
+
+static
+FILE *open_dumpfile(SRC_Instance inst, const char *mode)
+{
+  FILE *f;
+  char filename[1024], *dumpdir;
+
+  dumpdir = CNF_GetDumpDir();
+  if (dumpdir[0] == '\0') {
+    LOG(LOGS_WARN, LOGF_Sources, "dumpdir not specified");
+    return NULL;
+  }
+
+  /* Include IP address in the name for NTP sources, or reference ID in hex */
+  if ((inst->type == SRC_NTP &&
+       snprintf(filename, sizeof (filename), "%s/%s.dat", dumpdir,
+                source_to_string(inst)) >= sizeof (filename)) ||
+      (inst->type != SRC_NTP &&
+       snprintf(filename, sizeof (filename), "%s/refid:%08"PRIx32".dat",
+                dumpdir, inst->ref_id) >= sizeof (filename))) {
+    LOG(LOGS_WARN, LOGF_Sources, "dumpdir too long");
+    return NULL;
+  }
+
+  f = fopen(filename, mode);
+  if (!f && mode[0] != 'r')
+    LOG(LOGS_WARN, LOGF_Sources, "Could not open dump file for %s",
+        source_to_string(inst));
+
+  return f;
+}
+
+/* ================================================== */
 /* This is called to dump out the source measurement registers */
 
 void
 SRC_DumpSources(void)
 {
   FILE *out;
-  int direc_len, file_len;
-  char *filename;
-  unsigned int a, b, c, d;
   int i;
-  char *direc;
-
-  direc = CNF_GetDumpDir();
-  direc_len = strlen(direc);
-  file_len = direc_len + 24;
-  filename = MallocArray(char, file_len); /* a bit of slack */
 
   for (i = 0; i < n_sources; i++) {
-    a = (sources[i]->ref_id) >> 24;
-    b = ((sources[i]->ref_id) >> 16) & 0xff;
-    c = ((sources[i]->ref_id) >> 8) & 0xff;
-    d = ((sources[i]->ref_id)) & 0xff;
-
-    snprintf(filename, file_len - 1, "%s/%d.%d.%d.%d.dat", direc, a, b, c, d);
-    out = fopen(filename, "w");
-    if (!out) {
-      LOG(LOGS_WARN, LOGF_Sources, "Could not open dump file %s", filename);
-    } else {
-      SST_SaveToFile(sources[i]->stats, out);
-      fclose(out);
-    }
+    out = open_dumpfile(sources[i], "w");
+    if (!out)
+      continue;
+    SST_SaveToFile(sources[i]->stats, out);
+    fclose(out);
   }
-
-  Free(filename);
 }
 
 /* ================================================== */
@@ -1212,36 +1199,59 @@ void
 SRC_ReloadSources(void)
 {
   FILE *in;
-  char *filename;
-  unsigned int a, b, c, d;
   int i;
-  char *dumpdir;
-  int dumpdirlen, filelen;
 
-  for (i=0; i<n_sources; i++) {
-    a = (sources[i]->ref_id) >> 24;
-    b = ((sources[i]->ref_id) >> 16) & 0xff;
-    c = ((sources[i]->ref_id) >> 8) & 0xff;
-    d = ((sources[i]->ref_id)) & 0xff;
-
-    dumpdir = CNF_GetDumpDir();
-    dumpdirlen = strlen(dumpdir);
-    filelen = dumpdirlen + 24;
-    filename = MallocArray(char, filelen);
-    snprintf(filename, filelen-1, "%s/%d.%d.%d.%d.dat", dumpdir, a, b, c, d);
-    in = fopen(filename, "r");
-    if (!in) {
-      LOG(LOGS_WARN, LOGF_Sources, "Could not open dump file %s", filename);
-    } else {
-      if (SST_LoadFromFile(sources[i]->stats, in)) {
-        SST_DoNewRegression(sources[i]->stats);
-      } else {
-        LOG(LOGS_WARN, LOGF_Sources, "Problem loading from file %s", filename);
-      }
-      fclose(in);
-    }
-    Free(filename);
+  for (i = 0; i < n_sources; i++) {
+    in = open_dumpfile(sources[i], "r");
+    if (!in)
+      continue;
+    if (!SST_LoadFromFile(sources[i]->stats, in))
+      LOG(LOGS_WARN, LOGF_Sources, "Could not load dump file for %s",
+          source_to_string(sources[i]));
+    else
+      LOG(LOGS_INFO, LOGF_Sources, "Loaded dump file for %s",
+          source_to_string(sources[i]));
+    fclose(in);
   }
+}
+
+/* ================================================== */
+
+void
+SRC_RemoveDumpFiles(void)
+{
+  char pattern[1024], name[64], *dumpdir, *s;
+  IPAddr ip_addr;
+  glob_t gl;
+  size_t i;
+
+  dumpdir = CNF_GetDumpDir();
+  if (dumpdir[0] == '\0' ||
+      snprintf(pattern, sizeof (pattern), "%s/*.dat", dumpdir) >= sizeof (pattern))
+    return;
+
+  if (glob(pattern, 0, NULL, &gl))
+    return;
+
+  for (i = 0; i < gl.gl_pathc; i++) {
+    s = strrchr(gl.gl_pathv[i], '/');
+    if (!s || snprintf(name, sizeof (name), "%s", s + 1) >= sizeof (name))
+      continue;
+
+    /* Remove .dat extension */
+    if (strlen(name) < 4)
+      continue;
+    name[strlen(name) - 4] = '\0';
+
+    /* Check if it looks like name of an actual dump file */
+    if (strncmp(name, "refid:", 6) && !UTI_StringToIP(name, &ip_addr))
+      continue;
+
+    DEBUG_LOG(LOGF_Sources, "Removing %s", gl.gl_pathv[i]);
+    unlink(gl.gl_pathv[i]);
+  }
+
+  globfree(&gl);
 }
 
 /* ================================================== */
@@ -1290,7 +1300,7 @@ SRC_ActiveSources(void)
 /* ================================================== */
 
 int
-SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
+SRC_ReportSource(int index, RPT_SourceReport *report, struct timespec *now)
 {
   SRC_Instance src;
   if ((index >= n_sources) || (index < 0)) {
@@ -1298,7 +1308,6 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
   } else {
     src = sources[index];
 
-    memset(&report->ip_addr, 0, sizeof (report->ip_addr));
     if (src->ip_addr)
       report->ip_addr = *src->ip_addr;
     else {
@@ -1308,14 +1317,6 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
     }
 
     switch (src->status) {
-      case SRC_UNSELECTABLE:
-      case SRC_BAD_STATS:
-      case SRC_BAD_DISTANCE:
-      case SRC_STALE:
-      case SRC_ORPHAN:
-      case SRC_WAITS_STATS:
-        report->state = RPT_UNREACH;
-        break;
       case SRC_FALSETICKER:
         report->state = RPT_FALSETICKER;
         break;
@@ -1336,9 +1337,8 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
       case SRC_SELECTED:
         report->state = RPT_SYNC;
         break;
-      case SRC_OK:
       default:
-        assert(0);
+        report->state = RPT_UNREACH;
         break;
     }
 
@@ -1356,7 +1356,7 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timeval *now)
 /* ================================================== */
 
 int
-SRC_ReportSourcestats(int index, RPT_SourcestatsReport *report, struct timeval *now)
+SRC_ReportSourcestats(int index, RPT_SourcestatsReport *report, struct timespec *now)
 { 
   SRC_Instance src;
 
@@ -1382,14 +1382,6 @@ SRC_GetType(int index)
   if ((index >= n_sources) || (index < 0))
     return -1;
   return sources[index]->type;
-}
-
-/* ================================================== */
-
-int
-SRC_Samples(SRC_Instance inst)
-{
-  return SST_Samples(inst->stats);
 }
 
 /* ================================================== */

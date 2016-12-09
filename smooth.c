@@ -93,17 +93,17 @@ static double max_freq;
 /* Frequency offset, time offset and the time of the last smoothing update */
 static double smooth_freq;
 static double smooth_offset;
-static struct timeval last_update;
+static struct timespec last_update;
 
 
 static void
-get_smoothing(struct timeval *now, double *poffset, double *pfreq,
+get_smoothing(struct timespec *now, double *poffset, double *pfreq,
               double *pwander)
 {
   double elapsed, length, offset, freq, wander;
   int i;
 
-  UTI_DiffTimevalsToDouble(&elapsed, now, &last_update);
+  elapsed = UTI_DiffTimespecsToDouble(now, &last_update);
 
   offset = smooth_offset;
   freq = smooth_freq;
@@ -214,7 +214,7 @@ update_stages(void)
 }
 
 static void
-update_smoothing(struct timeval *now, double offset, double freq)
+update_smoothing(struct timespec *now, double offset, double freq)
 {
   /* Don't accept offset/frequency until the clock has stabilized */
   if (locked) {
@@ -234,7 +234,7 @@ update_smoothing(struct timeval *now, double offset, double freq)
 }
 
 static void
-handle_slew(struct timeval *raw, struct timeval *cooked, double dfreq,
+handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
             double doffset, LCL_ChangeType change_type, void *anything)
 {
   double delta;
@@ -246,7 +246,7 @@ handle_slew(struct timeval *raw, struct timeval *cooked, double dfreq,
       update_smoothing(cooked, doffset, dfreq);
   }
 
-  UTI_AdjustTimeval(&last_update, cooked, &last_update, &delta, dfreq, doffset);
+  UTI_AdjustTimespec(&last_update, cooked, &last_update, &delta, dfreq, doffset);
 }
 
 void SMT_Initialise(void)
@@ -277,7 +277,7 @@ int SMT_IsEnabled(void)
 }
 
 double
-SMT_GetOffset(struct timeval *now)
+SMT_GetOffset(struct timespec *now)
 {
   double offset, freq;
 
@@ -290,7 +290,7 @@ SMT_GetOffset(struct timeval *now)
 }
 
 void
-SMT_Activate(struct timeval *now)
+SMT_Activate(struct timespec *now)
 {
   if (!enabled || !locked)
     return;
@@ -302,7 +302,7 @@ SMT_Activate(struct timeval *now)
 }
 
 void
-SMT_Reset(struct timeval *now)
+SMT_Reset(struct timespec *now)
 {
   int i;
 
@@ -318,7 +318,7 @@ SMT_Reset(struct timeval *now)
 }
 
 void
-SMT_Leap(struct timeval *now, int leap)
+SMT_Leap(struct timespec *now, int leap)
 {
   /* When the leap-only mode is disabled, the leap second will be accumulated
      in handle_slew() as a normal offset */
@@ -329,7 +329,7 @@ SMT_Leap(struct timeval *now, int leap)
 }
 
 int
-SMT_GetSmoothingReport(RPT_SmoothingReport *report, struct timeval *now)
+SMT_GetSmoothingReport(RPT_SmoothingReport *report, struct timespec *now)
 {
   double length, elapsed;
   int i;
@@ -346,7 +346,7 @@ SMT_GetSmoothingReport(RPT_SmoothingReport *report, struct timeval *now)
   report->freq_ppm *= -1.0e6;
   report->wander_ppm *= -1.0e6;
 
-  UTI_DiffTimevalsToDouble(&elapsed, now, &last_update);
+  elapsed = UTI_DiffTimespecsToDouble(now, &last_update);
   if (!locked && elapsed >= 0.0) {
     for (i = 0, length = 0.0; i < NUM_STAGES; i++)
       length += stages[i].length;

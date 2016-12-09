@@ -117,8 +117,8 @@ static void rehash_records(void);
 static void clean_source_record(SourceRecord *record);
 
 static void
-slew_sources(struct timeval *raw,
-             struct timeval *cooked,
+slew_sources(struct timespec *raw,
+             struct timespec *cooked,
              double dfreq,
              double doffset,
              LCL_ChangeType change_type,
@@ -680,8 +680,8 @@ resolve_source_replacement(SourceRecord *record)
 void
 NSR_HandleBadSource(IPAddr *address)
 {
-  static struct timeval last_replacement;
-  struct timeval now;
+  static struct timespec last_replacement;
+  struct timespec now;
   NTP_Remote_Address remote_addr;
   SourceRecord *record;
   int slot, found;
@@ -702,7 +702,7 @@ NSR_HandleBadSource(IPAddr *address)
 
   /* Don't resolve names too frequently */
   SCH_GetLastEventTime(NULL, NULL, &now);
-  UTI_DiffTimevalsToDouble(&diff, &now, &last_replacement);
+  diff = UTI_DiffTimespecsToDouble(&now, &last_replacement);
   if (fabs(diff) < RESOLVE_INTERVAL_UNIT * (1 << MIN_REPLACEMENT_INTERVAL)) {
     DEBUG_LOG(LOGF_NtpSources, "replacement postponed");
     return;
@@ -776,7 +776,8 @@ NSR_GetLocalRefid(IPAddr *address)
 /* This routine is called by ntp_io when a new packet arrives off the network,
    possibly with an authentication tail */
 void
-NSR_ProcessReceive(NTP_Packet *message, struct timeval *now, double now_err, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr, int length)
+NSR_ProcessRx(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+              NTP_Local_Timestamp *rx_ts, NTP_Packet *message, int length)
 {
   SourceRecord *record;
   struct SourcePool *pool;
@@ -788,11 +789,11 @@ NSR_ProcessReceive(NTP_Packet *message, struct timeval *now, double now_err, NTP
   if (found == 2) { /* Must match IP address AND port number */
     record = get_record(slot);
 
-    if (!NCR_ProcessKnown(message, now, now_err, record->data, local_addr, length))
+    if (!NCR_ProcessRxKnown(record->data, local_addr, rx_ts, message, length))
       return;
 
     if (record->tentative) {
-      /* This was the first valid reply from the source */
+      /* This was the first good reply from the source */
       record->tentative = 0;
 
       if (record->pool != INVALID_POOL) {
@@ -809,15 +810,34 @@ NSR_ProcessReceive(NTP_Packet *message, struct timeval *now, double now_err, NTP
       }
     }
   } else {
-    NCR_ProcessUnknown(message, now, now_err, remote_addr, local_addr, length);
+    NCR_ProcessRxUnknown(remote_addr, local_addr, rx_ts, message, length);
+  }
+}
+
+/* ================================================== */
+
+void
+NSR_ProcessTx(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+              NTP_Local_Timestamp *tx_ts, NTP_Packet *message, int length)
+{
+  SourceRecord *record;
+  int slot, found;
+
+  find_slot(remote_addr, &slot, &found);
+
+  if (found == 2) { /* Must match IP address AND port number */
+    record = get_record(slot);
+    NCR_ProcessTxKnown(record->data, local_addr, tx_ts, message, length);
+  } else {
+    NCR_ProcessTxUnknown(remote_addr, local_addr, tx_ts, message, length);
   }
 }
 
 /* ================================================== */
 
 static void
-slew_sources(struct timeval *raw,
-             struct timeval *cooked,
+slew_sources(struct timespec *raw,
+             struct timespec *cooked,
              double dfreq,
              double doffset,
              LCL_ChangeType change_type,
@@ -831,6 +851,7 @@ slew_sources(struct timeval *raw,
     if (record->remote_addr) {
       if (change_type == LCL_ChangeUnknownStep) {
         NCR_ResetInstance(record->data);
+        NCR_ResetPoll(record->data);
       } else {
         NCR_SlewTimes(record->data, cooked, dfreq, doffset);
       }
@@ -1083,7 +1104,7 @@ NSR_InitiateSampleBurst(int n_good_samples, int n_total_samples,
    identify the source record. */
 
 void
-NSR_ReportSource(RPT_SourceReport *report, struct timeval *now)
+NSR_ReportSource(RPT_SourceReport *report, struct timespec *now)
 {
   NTP_Remote_Address rem_addr;
   int slot, found;
@@ -1097,6 +1118,26 @@ NSR_ReportSource(RPT_SourceReport *report, struct timeval *now)
     report->poll = 0;
     report->latest_meas_ago = 0;
   }
+}
+
+/* ================================================== */
+/* The ip address is assumed to be completed on input, that is how we
+   identify the source record. */
+
+int
+NSR_GetNTPReport(RPT_NTPReport *report)
+{
+  NTP_Remote_Address rem_addr;
+  int slot, found;
+
+  rem_addr.ip_addr = report->remote_addr;
+  rem_addr.port = 0;
+  find_slot(&rem_addr, &slot, &found);
+  if (!found)
+    return 0;
+
+  NCR_GetNTPReport(get_record(slot)->data, report);
+  return 1;
 }
 
 /* ================================================== */
