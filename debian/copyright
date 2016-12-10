@@ -59,6 +59,18 @@ Files: test/unit/*
 Copyright: 2016, Miroslav Lichvar
 License: GPL-2
 
+Files: hwclock.?
+Copyright: 2016, Miroslav Lichvar
+License: GPL-2
+
+Files: ntp_io_linux.?
+Copyright: 2016, Miroslav Lichvar
+License: GPL-2
+
+Files: ntp_signd.?
+Copyright: 2016, Miroslav Lichvar
+License: GPL-2
+
 Files: md5.*
 Copyright: 1990, RSA Data Security, Inc. All rights reserved.
 License: RSA-MD
