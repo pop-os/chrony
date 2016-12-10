@@ -1,3 +1,17 @@
+chrony (3.0~pre1-1) experimental; urgency=low
+
+  * Import upstream version 3.0-pre1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/copyright:
+    - Mention new files.
+
+  * debian/rules:
+    - Enable support for MS-SNTP authentication in Samba.
+    - Rename --chronysockdir to --chronyrundir.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 10 Dec 2016 16:30:19 +0100
+
 chrony (2.4.1-2) unstable; urgency=medium
 
   * debian/chrony.conf:
