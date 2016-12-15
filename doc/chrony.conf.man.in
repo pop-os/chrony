@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2016-12-09
+.\"      Date: 2016-12-15
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2016-12-09" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2016-12-15" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -121,7 +121,8 @@ round\-trip delay of 0.3 seconds or more should be ignored. The default value is
 This option is similar to the maxdelay option above. \fBchronyd\fP keeps a record
 of the minimum round\-trip delay amongst the previous measurements that it has
 buffered. If a measurement has a round trip delay that is greater than the
-maxdelayratio times the minimum delay, it will be rejected.
+maxdelayratio times the minimum delay, it will be rejected. This option works
+only in the \fBserver\fP directive when not in the interleaved mode.
 .RE
 .sp
 \fBmaxdelaydevratio\fP \fIratio\fP
@@ -1614,8 +1615,8 @@ source port used in NTP client requests can be set by the
 .sp
 \fBratelimit\fP [\fIoption\fP]...
 .RS 4
-This directive enables response rate limiting for NTP packets. Its purpose is
-to reduce network traffic with misconfigured or broken NTP clients that are
+This directive configures response rate limiting for NTP packets. Its purpose
+is to reduce network traffic with misconfigured or broken NTP clients that are
 polling the server too frequently. The limits are applied to individual IP
 addresses. If multiple clients share one IP address (e.g. multiple hosts behind
 NAT), the sum of their traffic will be limited. If a client that increases its
@@ -1631,8 +1632,11 @@ in any order):
 \fBinterval\fP
 .RS 4
 This option sets the minimum interval between responses. It is defined as a
-power of 2 in seconds. The default value is 3 (8 seconds). The minimum value
-is \-4 and the maximum value is 12.
+power of 2 in seconds. The default value is \-10 (1/1024 of a second, or 1024
+packets per second). The minimum value is \-19 (524288 packets per second) and
+the maximum value is 12 (one packet per 4096 seconds). Note that with values
+below \-4 the rate limiting is coarse (responses are allowed in bursts, even if
+the interval between them is shorter than the specified interval).
 .RE
 .sp
 \fBburst\fP
@@ -1640,7 +1644,7 @@ is \-4 and the maximum value is 12.
 This option sets the maximum number of responses that can be sent in a burst,
 temporarily exceeding the limit specified by the \fBinterval\fP option. This is
 useful for clients that make rapid measurements on start (e.g. \fBchronyd\fP with
-the \fBiburst\fP option). The default value is 8. The minimum value is 1 and the
+the \fBiburst\fP option). The default value is 16. The minimum value is 1 and the
 maximum value is 255.
 .RE
 .sp
@@ -1650,9 +1654,10 @@ This option sets the rate at which responses are randomly allowed even if the
 limits specified by the \fBinterval\fP and \fBburst\fP options are exceeded. This is
 necessary to prevent an attacker who is sending requests with a spoofed
 source address from completely blocking responses to that address. The leak
-rate is defined as a power of 1/2 and it is 3 by default, i.e. on average at
-least every eighth request has a response. The minimum value is 1 and the
-maximum value is 4.
+rate is defined as a power of 1/2 and it is 2 by default, i.e. on average at
+least every fourth request has a response. The minimum value is 0, which
+disables the rate limiting, and the maximum value is 4 (one response per 16
+requests).
 .RE
 .RE
 .sp
@@ -1665,15 +1670,18 @@ An example use of the directive is:
 .RS 4
 .\}
 .nf
-ratelimit interval 4 burst 4
+ratelimit interval 1 burst 8
 .fi
 .if n \{\
 .RE
 .\}
 .sp
-This would reduce the response rate for IP addresses that send packets on
-average more frequently than once per 16 seconds or send packets in bursts
-of more than 4 packets.
+This would reduce the response rate for IP addresses sending packets on average
+more than once per 2 seconds, or sending packets in bursts of more than 8
+packets, by up to 75% (with default \fBleak\fP of 2).
+.sp
+Rate limiting can be disabled by setting the \fBleak\fP option to 0, or by the
+\fBnoclientlog\fP directive.
 .RE
 .sp
 \fBsmoothtime\fP \fImax\-freq\fP \fImax\-wander\fP [\fBleaponly\fP]
@@ -1841,10 +1849,9 @@ need to be run with the \fB\-p 257\fP switch to inter\-operate correctly.)
 .sp
 \fBcmdratelimit\fP [\fIoption\fP]...
 .RS 4
-This directive enables response rate limiting for command packets. It is
-similar to the \fBratelimit\fP directive, except responses to
-localhost are never limited and the default interval is 1 (2 seconds), the default
-burst is 16, and the default leak rate is 2.
+This directive is identical to the \fBratelimit\fP directive, except
+it configures rate limiting for command packets and responses to localhost are
+never limited. It is disabled by default (the default \fBleak\fP is 0).
 .sp
 An example of the use of the directive is:
 .sp
@@ -1852,11 +1859,14 @@ An example of the use of the directive is:
 .RS 4
 .\}
 .nf
-cmdratelimit interval 2
+cmdratelimit interval \-2 burst 128 leak 2
 .fi
 .if n \{\
 .RE
 .\}
+.sp
+This would reduce response rate for addresses that send more than 4 requests
+per second, or bursts of more than 128 packets, by up to 75%.
 .RE
 .SS "Real\-time clock (RTC)"
 .sp
@@ -3033,10 +3043,11 @@ received from the specified network interface. The network interface controller
 receptions, avoiding processing and queueing delays in the kernel, network
 driver, and hardware. This can significantly improve the accuracy of the
 timestamps and the measured offset, which is used for synchronisation of the
-system clock. In order to get best results, it is necessary to enable HW
-timestamping on both sides receiving and sending the packets (i.e. server and
-client, or both peers), and also enable the interleaved mode with the \fBxleave\fP
-option in the \fBserver\fP or the \fBpeer\fP directive.
+system clock. In order to get the best results, both sides receiving and
+sending NTP packets (i.e. server and client, or two peers) need to use HW
+timestamping. If the server or peer supports the interleaved mode, it needs to
+be enabled by the \fBxleave\fP option in the \fBserver\fP or the
+\fBpeer\fP directive.
 .sp
 This directive is supported on Linux 3.19 and newer. The NIC must support HW
 timestamping, which can be verified with the \fBethtool \-T\fP command. The list of
@@ -3052,6 +3063,9 @@ hardware receive timestamping does not work with packets from bridged
 interfaces. The timestamping used in measurements is indicated in the
 \fImeasurements.log\fP file if enabled by the \fBlog measurements\fP directive,
 and the \fBntpdata\fP report in \fBchronyc\fP.
+.sp
+If the specified interface is \fI*\fP, \fBchronyd\fP will try to enable HW timestamping
+on all available interfaces.
 .sp
 An example of the directive is:
 .sp
@@ -3617,7 +3631,7 @@ project. The configuration
 is similar to the NTP client with permanent connection, except it needs to
 allow client access from all addresses. It is recommended to handpick at least
 few good servers, and possibly combine them with a random selection of other
-servers in the pool. Rate limiting can be enabled to not waste too much
+servers in the pool. The rate limiting interval can be increased to save more
 bandwidth on misconfigured and broken NTP clients. The \fB\-r\fP option with the
 \fBdumpdir\fP directive shortens the time for which \fBchronyd\fP will not serve time
 to its clients when it needs to be restarted for any reason.
@@ -3635,7 +3649,7 @@ pool pool.ntp.org iburst
 makestep 1.0 3
 rtcsync
 allow
-ratelimit interval 2 burst 10
+ratelimit interval 1
 driftfile @CHRONYVARDIR@/drift
 dumpdir @CHRONYRUNDIR@
 dumponexit

@@ -362,8 +362,8 @@ typedef struct {
    domain socket.
 
    Version 6 (no authentication) : changed format of client accesses by index
-   (using new request/reply types), new flags in NTP source request and report,
-   new commands: refresh, serverstats
+   (using new request/reply types), new fields and flags in NTP source request
+   and report, new commands: ntpdata, refresh, serverstats
  */
 
 #define PROTO_VERSION_NUMBER 6
@@ -672,6 +672,7 @@ typedef struct {
   uint32_t total_tx_count;
   uint32_t total_rx_count;
   uint32_t total_valid_count;
+  uint32_t reserved[4];
   int32_t EOR;
 } RPY_NTPData;
 

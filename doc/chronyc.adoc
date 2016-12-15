@@ -441,10 +441,10 @@ the offline state.
 the name of the server or peer was not resolved to an address yet; this source is
 not visible in the *sources* and *sourcestats* reports.
 
-[[ntpdata]]*ntpdata* _address_::
+[[ntpdata]]*ntpdata* [_address_]::
 The *ntpdata* command displays the last valid measurement and other
-NTP-specific information about the NTP source. An example of the output is
-shown below.
+NTP-specific information about the specified NTP source, or all NTP sources if
+no address was specified. An example of the output is shown below.
 +
 ----
 Remote address  : 203.0.113.15 (CB00710F)
@@ -454,8 +454,8 @@ Leap status     : Normal
 Version         : 4
 Mode            : Server
 Stratum         : 1
-Poll            : 10
-Precision       : 0.000000060 seconds
+Poll interval   : 10 (1024 seconds)
+Precision       : -24 (0.000000060 seconds)
 Root delay      : 0.000015 seconds
 Root dispersion : 0.000015 seconds
 Reference ID    : 50505331
@@ -489,7 +489,7 @@ reference ID.
 *Version*:::
 *Mode*:::
 *Stratum*:::
-*Poll*:::
+*Poll interval*:::
 *Precision*:::
 *Root delay*:::
 *Root dispersion*:::
