@@ -86,6 +86,10 @@ static unsigned int max_slots;
 #define TS_FRAC 4
 #define INVALID_TS 0
 
+/* Static offset included in conversion to the fixed-point timestamps to
+   randomise their alignment */
+static uint32_t ts_offset;
+
 /* Request rates are saved in the record as 8-bit scaled log2 values */
 #define RATE_SCALE 4
 #define MIN_RATE (-14 * RATE_SCALE)
@@ -95,7 +99,7 @@ static unsigned int max_slots;
    number of tokens spent on response are determined from configured
    minimum inverval between responses (in log2) and burst length. */
 
-#define MIN_LIMIT_INTERVAL (-TS_FRAC)
+#define MIN_LIMIT_INTERVAL (-15 - TS_FRAC)
 #define MAX_LIMIT_INTERVAL 12
 #define MIN_LIMIT_BURST 1
 #define MAX_LIMIT_BURST 255
@@ -105,7 +109,8 @@ static uint16_t max_cmd_tokens;
 static uint16_t ntp_tokens_per_packet;
 static uint16_t cmd_tokens_per_packet;
 
-/* Reduction of token rates to avoid overflow of 16-bit counters */
+/* Reduction of token rates to avoid overflow of 16-bit counters.  Negative
+   shift is used for coarse limiting with intervals shorter than -TS_FRAC. */
 static int ntp_token_shift;
 static int cmd_token_shift;
 
@@ -114,7 +119,7 @@ static int cmd_token_shift;
    prevent an attacker sending requests with spoofed source address
    from blocking responses to the address completely. */
 
-#define MIN_LEAK_RATE 1
+#define MIN_LEAK_RATE 0
 #define MAX_LEAK_RATE 4
 
 static int ntp_leak_rate;
@@ -132,6 +137,8 @@ static uint32_t total_cmd_hits;
 static uint32_t total_ntp_drops;
 static uint32_t total_cmd_drops;
 static uint32_t total_record_drops;
+
+#define NSEC_PER_SEC 1000000000U
 
 /* ================================================== */
 
@@ -271,10 +278,17 @@ set_bucket_params(int interval, int burst, uint16_t *max_tokens,
   interval = CLAMP(MIN_LIMIT_INTERVAL, interval, MAX_LIMIT_INTERVAL);
   burst = CLAMP(MIN_LIMIT_BURST, burst, MAX_LIMIT_BURST);
 
-  /* Find smallest shift with which the maximum number fits in 16 bits */
-  for (*token_shift = 0; *token_shift < interval + TS_FRAC; (*token_shift)++) {
-    if (burst << (TS_FRAC + interval - *token_shift) < 1U << 16)
-      break;
+  if (interval >= -TS_FRAC) {
+    /* Find the smallest shift with which the maximum number fits in 16 bits */
+    for (*token_shift = 0; *token_shift < interval + TS_FRAC; (*token_shift)++) {
+      if (burst << (TS_FRAC + interval - *token_shift) < 1U << 16)
+        break;
+    }
+  } else {
+    /* Coarse rate limiting */
+    *token_shift = interval + TS_FRAC;
+    *tokens_per_packet = 1;
+    burst = MAX(1U << -*token_shift, burst);
   }
 
   *tokens_per_packet = 1U << (TS_FRAC + interval - *token_shift);
@@ -291,29 +305,19 @@ CLG_Initialise(void)
 {
   int interval, burst, leak_rate;
 
-  max_ntp_tokens = max_cmd_tokens = 0;
-  ntp_tokens_per_packet = cmd_tokens_per_packet = 0;
-  ntp_token_shift = cmd_token_shift = 0;
-  ntp_leak_rate = cmd_leak_rate = 0;
+  CNF_GetNTPRateLimit(&interval, &burst, &leak_rate);
+  set_bucket_params(interval, burst, &max_ntp_tokens, &ntp_tokens_per_packet,
+                    &ntp_token_shift);
+  ntp_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
 
-  if (CNF_GetNTPRateLimit(&interval, &burst, &leak_rate)) {
-    set_bucket_params(interval, burst, &max_ntp_tokens, &ntp_tokens_per_packet,
-                      &ntp_token_shift);
-    ntp_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
-  }
-
-  if (CNF_GetCommandRateLimit(&interval, &burst, &leak_rate)) {
-    set_bucket_params(interval, burst, &max_cmd_tokens, &cmd_tokens_per_packet,
-                      &cmd_token_shift);
-    cmd_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
-  }
+  CNF_GetCommandRateLimit(&interval, &burst, &leak_rate);
+  set_bucket_params(interval, burst, &max_cmd_tokens, &cmd_tokens_per_packet,
+                    &cmd_token_shift);
+  cmd_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
 
   active = !CNF_GetNoClientLog();
-  if (!active) {
-    if (ntp_leak_rate || cmd_leak_rate)
-      LOG_FATAL(LOGF_ClientLog, "ratelimit cannot be used with noclientlog");
+  if (!active)
     return;
-  }
 
   /* Calculate the maximum number of slots that can be allocated in the
      configured memory limit.  Take into account expanding of the hash
@@ -325,6 +329,9 @@ CLG_Initialise(void)
   records = NULL;
 
   expand_hashtable();
+
+  UTI_GetRandomBytes(&ts_offset, sizeof (ts_offset));
+  ts_offset %= NSEC_PER_SEC / (1U << TS_FRAC);
 }
 
 /* ================================================== */
@@ -344,6 +351,12 @@ static uint32_t
 get_ts_from_timespec(struct timespec *ts)
 {
   uint32_t sec = ts->tv_sec, nsec = ts->tv_nsec;
+
+  nsec += ts_offset;
+  if (nsec >= NSEC_PER_SEC) {
+    nsec -= NSEC_PER_SEC;
+    sec++;
+  }
 
   /* This is fast and accurate enough */
   return sec << TS_FRAC | (140740U * (nsec >> 15)) >> (32 - TS_FRAC);
@@ -369,7 +382,12 @@ update_record(struct timespec *now, uint32_t *last_hit, uint32_t *hits,
   if (prev_hit == INVALID_TS || (int32_t)interval < 0)
     return;
 
-  new_tokens = (now_ts >> token_shift) - (prev_hit >> token_shift);
+  if (token_shift >= 0)
+    new_tokens = (now_ts >> token_shift) - (prev_hit >> token_shift);
+  else if (now_ts - prev_hit > max_tokens)
+    new_tokens = max_tokens;
+  else
+    new_tokens = (now_ts - prev_hit) << -token_shift;
   *tokens = MIN(*tokens + new_tokens, max_tokens);
 
   /* Convert the interval to scaled and rounded log2 */
@@ -502,7 +520,7 @@ CLG_LimitNTPResponseRate(int index)
   Record *record;
   int drop;
 
-  if (!ntp_tokens_per_packet)
+  if (!ntp_leak_rate)
     return 0;
 
   record = ARR_GetElement(records, index);
@@ -543,7 +561,7 @@ CLG_LimitCommandResponseRate(int index)
 {
   Record *record;
 
-  if (!cmd_tokens_per_packet)
+  if (!cmd_leak_rate)
     return 0;
 
   record = ARR_GetElement(records, index);

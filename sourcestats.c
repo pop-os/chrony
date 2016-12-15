@@ -47,8 +47,12 @@
    2000ppm, which would be pretty bad */
 #define WORST_CASE_FREQ_BOUND (2000.0/1.0e6)
 
-/* The minimum allowed skew */
+/* The minimum and maximum assumed skew */
 #define MIN_SKEW 1.0e-12
+#define MAX_SKEW 1.0e+02
+
+/* The minimum assumed std dev for weighting */
+#define MIN_WEIGHT_SD 1.0e-9
 
 /* The asymmetry of network jitter when all jitter is in one direction */
 #define MAX_ASYMMETRY 0.5
@@ -507,8 +511,7 @@ SST_DoNewRegression(SST_Stats inst)
     /* And now, work out the weight vector */
 
     sd = mean_distance - min_distance;
-    if (sd > min_distance || sd <= 0.0)
-      sd = min_distance;
+    sd = CLAMP(MIN_WEIGHT_SD, sd, min_distance);
 
     for (i=0; i<inst->n_samples; i++) {
       sd_weight = 1.0 + SD_TO_DIST_RATIO * (peer_distances[i] - min_distance) / sd;
@@ -539,9 +542,7 @@ SST_DoNewRegression(SST_Stats inst)
     inst->std_dev = sqrt(est_var);
     inst->nruns = nruns;
 
-    if (inst->skew < MIN_SKEW)
-      inst->skew = MIN_SKEW;
-
+    inst->skew = CLAMP(MIN_SKEW, inst->skew, MAX_SKEW);
     stress = fabs(old_freq - inst->estimated_frequency) / old_skew;
 
     DEBUG_LOG(LOGF_SourceStats, "off=%e freq=%e skew=%e n=%d bs=%d runs=%d asym=%f arun=%d",
@@ -844,6 +845,8 @@ SST_SaveToFile(SST_Stats inst, FILE *out)
             inst->strata[j]);
 
   }
+
+  fprintf(out, "%d\n", inst->asymmetry_run);
 }
 
 /* ================================================== */
@@ -898,6 +901,10 @@ SST_LoadFromFile(SST_Stats inst, FILE *in)
         UTI_NormaliseTimespec(&inst->sample_times[i]);
       }
     }
+
+    /* This field was not saved in older versions */
+    if (!fgets(line, sizeof(line), in) || sscanf(line, "%d\n", &inst->asymmetry_run) != 1)
+      inst->asymmetry_run = 0;
   } else {
     inst->n_samples = 0; /* Load abandoned if any sign of corruption */
     return 0;
