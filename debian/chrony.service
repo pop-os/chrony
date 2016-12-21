@@ -1,0 +1,20 @@
+[Unit]
+Description=Chrony is a versatile NTP implementation
+Documentation=file:///usr/share/doc/chrony/chrony.txt.gz man:chronyd(8)
+Conflicts=systemd-timesyncd.service openntpd.service
+After=network.target
+ConditionCapability=CAP_SYS_TIME
+
+[Service]
+Type=forking
+PIDFile=/run/chronyd.pid
+ExecStart=/usr/sbin/chronyd
+ExecStartPost=-/usr/lib/chrony/init-helper go_online
+Restart=on-failure
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+
+[Install]
+Alias=chronyd.service
+WantedBy=multi-user.target
