@@ -2,5 +2,6 @@ etc/chrony
 etc/NetworkManager/dispatcher.d
 etc/ppp/ip-up.d
 etc/ppp/ip-down.d
+usr/lib/chrony
 var/log/chrony
 var/lib/chrony
