@@ -22,6 +22,7 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin
 DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
+HELPER="/usr/lib/chrony/init-helper"
 
 [ -x "$DAEMON" ] || exit 0
 
@@ -33,28 +34,12 @@ if [ -f /etc/default/chrony ]; then
     . /etc/default/chrony
 fi
 
-putonline ()
-{   # Do we have a default route?  If so put chronyd online.
-    if ip r 2>/dev/null | grep -q '^default'; then
-        if chronyc -m online 'burst 4/4' > /dev/null 2>&1; then
-            touch /var/run/chrony-ppp-up
-            echo "$NAME is running and online."
-        else
-            rm -f /var/run/chrony-ppp-up
-            echo "$NAME is running and offline."
-        fi
-    else
-        rm -f /var/run/chrony-ppp-up
-        echo "$NAME is running and offline."
-    fi
-}
-
 case "$1" in
     start)
 	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
-			putonline
+			$HELPER go_online
 			;;
 	        1) # daemon already running
 		        ;;
@@ -75,7 +60,7 @@ case "$1" in
 	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
-			putonline
+			$HELPER go_online
 			;;
 	        1) # still running
 		        ;;
