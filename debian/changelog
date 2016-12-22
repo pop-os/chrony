@@ -1,3 +1,37 @@
+chrony (2.4.1-3) unstable; urgency=medium
+
+  * debian/apm:
+    - Removing that script as APM as been replaced by ACPI long time ago, thus
+    it’s highly probable that it isn’t useful anymore.
+
+  * debian/chrony.maintscript:
+    - Remove the apm script’s conffile.
+
+  * debian/chrony.service:
+    - Supply a systemd service file.
+    - Update unit section’s description. Add chronyc and chrony.conf man pages
+    information and remove reference to “/usr/share/doc/chrony.txt.gz” which
+    is not generated anymore.
+    - Update unit section’s documentation.
+
+  * debian/dirs:
+    - Don’t create etc/apm/event.d as the apm script isn’t provided anymore.
+
+  * debian/init:
+    - Convert to use the init-helper script.
+
+  * debian/init-helper:
+    - Add a helper script that will be used to maintain feature parity between
+    the SysV script and the systemd service file.
+
+  * debian/install:
+    - Install the init-helper script in “/usr/lib/chrony”.
+
+  * debian/rules:
+    - Don’t install the now removed apm script.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 22 Dec 2016 02:16:54 +0100
+
 chrony (2.4.1-2) unstable; urgency=medium
 
   * debian/chrony.conf:
