@@ -1,6 +1,6 @@
 [Unit]
 Description=chrony, an NTP client/server
-Documentation=file:///usr/share/doc/chrony/chrony.txt.gz man:chronyd(8)
+Documentation=man:chronyd(8) man:chronyc(1) man:chrony.conf(5)
 Conflicts=systemd-timesyncd.service openntpd.service
 After=network.target
 ConditionCapability=CAP_SYS_TIME
