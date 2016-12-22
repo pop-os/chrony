@@ -1,5 +1,5 @@
 [Unit]
-Description=Chrony is a versatile NTP implementation
+Description=chrony, an NTP client/server
 Documentation=file:///usr/share/doc/chrony/chrony.txt.gz man:chronyd(8)
 Conflicts=systemd-timesyncd.service openntpd.service
 After=network.target
