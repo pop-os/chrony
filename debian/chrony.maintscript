@@ -1,0 +1,1 @@
+rm_conffile /etc/apm/event.d/01chrony 2.4.1-3~ chrony
