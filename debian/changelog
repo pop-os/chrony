@@ -1,3 +1,11 @@
+chrony (3.0~pre2-2) experimental; urgency=low
+
+  * Merge branch “master”.
+
+  * Enable seccomp facility on powerpcspe.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 03 Jan 2017 18:17:13 +0100
+
 chrony (3.0~pre2-1) experimental; urgency=low
 
   * Import upstream version 3.0-pre2:
