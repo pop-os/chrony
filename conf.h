@@ -29,7 +29,6 @@
 #define GOT_CONF_H
 
 #include "addressing.h"
-#include "array.h"
 #include "reference.h"
 
 extern void CNF_Initialise(int restarted);
@@ -102,8 +101,8 @@ extern void CNF_SetupAccessRestrictions(void);
 extern int CNF_GetSchedPriority(void);
 extern int CNF_GetLockMemory(void);
 
-extern void CNF_GetNTPRateLimit(int *interval, int *burst, int *leak);
-extern void CNF_GetCommandRateLimit(int *interval, int *burst, int *leak);
+extern int CNF_GetNTPRateLimit(int *interval, int *burst, int *leak);
+extern int CNF_GetCommandRateLimit(int *interval, int *burst, int *leak);
 extern void CNF_GetSmooth(double *max_freq, double *max_wander, int *leap_only);
 extern void CNF_GetTempComp(char **file, double *interval, char **point_file, double *T0, double *k0, double *k1, double *k2);
 
@@ -120,6 +119,6 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
-extern ARR_Instance CNF_GetHwTsInterfaces(void);
+extern int CNF_GetHwTsInterface(unsigned int index, char **name, double *tx_comp, double *rx_comp);
 
 #endif /* GOT_CONF_H */

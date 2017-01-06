@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2016-12-15
+.\"      Date: 2017-01-06
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2016-12-15" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2017-01-06" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -684,7 +684,7 @@ Poll interval   : 10 (1024 seconds)
 Precision       : \-24 (0.000000060 seconds)
 Root delay      : 0.000015 seconds
 Root dispersion : 0.000015 seconds
-Reference ID    : 50505331
+Reference ID    : 47505300 (GPS)
 Reference time  : Fri Nov 25 15:22:12 2016
 Offset          : \-0.000060878 seconds
 Peer delay      : 0.000175634 seconds
