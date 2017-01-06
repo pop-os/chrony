@@ -160,9 +160,8 @@ synchronisation only if they agree with the trusted and required source.
 *xleave*:::
 This option enables an interleaved mode which allows the server or the peer to
 send transmit timestamps captured after the actual transmission (e.g. when the
-server or the peer is running *chronyd* with HW timestamping enabled by the
-<<hwtimestamp,*hwtimestamp*>> directive). This can significantly improve the
-accuracy of the measurements.
+server or the peer is running *chronyd* with software (kernel) or hardware
+timestamping). This can significantly improve the accuracy of the measurements.
 +
 The interleaved mode is compatible with servers that support only the basic
 mode, but peers must both support and have enabled the interleaved mode,
@@ -994,7 +993,7 @@ both a client of its servers, and a server to other clients.
 Examples of the use of the directive are as follows:
 +
 ----
-allow foo.example.net
+allow 1.2.3.4
 allow 1.2
 allow 3.4.5
 allow 6.7.8/22
@@ -1005,7 +1004,8 @@ allow ::/0
 allow
 ----
 +
-The first directive allows the named node to be an NTP client of this computer.
+The first directive allows a node with IPv4 address _1.2.3.4_ to be an NTP
+client of this computer.
 The second directive allows any node with an IPv4 address of the form _1.2.x.y_
 (with _x_ and _y_ arbitrary) to be an NTP client of this computer. Likewise,
 the third directive allows any node with an IPv4 address of the form _3.4.5.x_
@@ -1045,6 +1045,10 @@ _any_ previous directive relating to a subnet within the specified subnet.
 Within a configuration file this capability is probably rather moot; however,
 it is of greater use for reconfiguration at run-time via *chronyc* with the
 <<chronyc.adoc#allow,*allow all*>> command.
++
+The directive allows a hostname to be specified instead of an IP address, but
+the name must be resolvable when *chronyd* is started (i.e. *chronyd* needs
+to be started when the network is already up and DNS is working).
 +
 Note, if the <<initstepslew,*initstepslew*>> directive is used in the
 configuration file, each of the computers listed in that directive must allow
@@ -1221,8 +1225,8 @@ source port used in NTP client requests can be set by the
 <<acquisitionport,*acquisitionport*>> directive.
 
 [[ratelimit]]*ratelimit* [_option_]...::
-This directive configures response rate limiting for NTP packets. Its purpose
-is to reduce network traffic with misconfigured or broken NTP clients that are
+This directive enables response rate limiting for NTP packets. Its purpose is
+to reduce network traffic with misconfigured or broken NTP clients that are
 polling the server too frequently. The limits are applied to individual IP
 addresses. If multiple clients share one IP address (e.g. multiple hosts behind
 NAT), the sum of their traffic will be limited. If a client that increases its
@@ -1237,16 +1241,16 @@ in any order):
 +
 *interval*:::
 This option sets the minimum interval between responses. It is defined as a
-power of 2 in seconds. The default value is -10 (1/1024 of a second, or 1024
-packets per second). The minimum value is -19 (524288 packets per second) and
-the maximum value is 12 (one packet per 4096 seconds). Note that with values
-below -4 the rate limiting is coarse (responses are allowed in bursts, even if
-the interval between them is shorter than the specified interval).
+power of 2 in seconds. The default value is 3 (8 seconds). The minimum value
+is -19 (524288 packets per second) and the maximum value is 12 (one packet per
+4096 seconds). Note that with values below -4 the rate limiting is coarse
+(responses are allowed in bursts, even if the interval between them is shorter
+than the specified interval).
 *burst*:::
 This option sets the maximum number of responses that can be sent in a burst,
 temporarily exceeding the limit specified by the *interval* option. This is
 useful for clients that make rapid measurements on start (e.g. *chronyd* with
-the *iburst* option). The default value is 16. The minimum value is 1 and the
+the *iburst* option). The default value is 8. The minimum value is 1 and the
 maximum value is 255.
 *leak*:::
 This option sets the rate at which responses are randomly allowed even if the
@@ -1254,23 +1258,19 @@ limits specified by the *interval* and *burst* options are exceeded. This is
 necessary to prevent an attacker who is sending requests with a spoofed
 source address from completely blocking responses to that address. The leak
 rate is defined as a power of 1/2 and it is 2 by default, i.e. on average at
-least every fourth request has a response. The minimum value is 0, which
-disables the rate limiting, and the maximum value is 4 (one response per 16
-requests).
+least every fourth request has a response. The minimum value is 1 and the
+maximum value is 4.
 ::
 +
 An example use of the directive is:
 +
 ----
-ratelimit interval 1 burst 8
+ratelimit interval 1 burst 16
 ----
 +
 This would reduce the response rate for IP addresses sending packets on average
-more than once per 2 seconds, or sending packets in bursts of more than 8
+more than once per 2 seconds, or sending packets in bursts of more than 16
 packets, by up to 75% (with default *leak* of 2).
-+
-Rate limiting can be disabled by setting the *leak* option to 0, or by the
-<<noclientlog,*noclientlog*>> directive.
 
 [[smoothtime]]*smoothtime* _max-freq_ _max-wander_ [*leaponly*]::
 The *smoothtime* directive can be used to enable smoothing of the time that
@@ -1397,18 +1397,16 @@ This would make *chronyd* use UDP 257 as its command port. (*chronyc* would
 need to be run with the *-p 257* switch to inter-operate correctly.)
 
 [[cmdratelimit]]*cmdratelimit* [_option_]...::
-This directive is identical to the <<ratelimit,*ratelimit*>> directive, except
-it configures rate limiting for command packets and responses to localhost are
-never limited. It is disabled by default (the default *leak* is 0).
+This directive enables response rate limiting for command packets. It is
+similar to the <<ratelimit,*ratelimit*>> directive, except responses to
+localhost are never limited and the default interval is -4 (16 packets per
+second).
 +
 An example of the use of the directive is:
 +
 ----
-cmdratelimit interval -2 burst 128 leak 2
+cmdratelimit interval 2
 ----
-+
-This would reduce response rate for addresses that send more than 4 requests
-per second, or bursts of more than 128 packets, by up to 75%.
 
 === Real-time clock (RTC)
 
@@ -1782,7 +1780,7 @@ sendmail binary.
 
 === Miscellaneous
 
-[[hwtimestamp]]*hwtimestamp* _interface_::
+[[hwtimestamp]]*hwtimestamp* _interface_ [_option_]...::
 This directive enables hardware timestamping of NTP packets sent to and
 received from the specified network interface. The network interface controller
 (NIC) uses its own clock to accurately timestamp the actual transmissions and
@@ -1813,10 +1811,25 @@ and the <<chronyc.adoc#ntpdata,*ntpdata*>> report in *chronyc*.
 If the specified interface is _*_, *chronyd* will try to enable HW timestamping
 on all available interfaces.
 +
-An example of the directive is:
+The *hwtimestamp* directive has the following options:
++
+*txcomp* _compensation_:::
+This option specifies the difference in seconds between the actual transmission
+time at the physical layer and the reported transmit timestamp. This value will
+be added to transmit timestamps obtained from the NIC. The default value is 0.
+*rxcomp* _compensation_:::
+This option specifies the difference in seconds between the reported receive
+timestamp and the actual reception time at the physical layer. This value will
+be subtracted from receive timestamps obtained from the NIC. The default value
+is 0.
+::
++
+Examples of the directive are:
 +
 ----
 hwtimestamp eth0
+hwtimestamp eth1 txcomp 300e-9 rxcomp 645e-9
+hwtimestamp *
 ----
 
 [[include]]*include* _pattern_::
@@ -2225,24 +2238,34 @@ information to be saved.
 *chronyd* can be configured to operate as a public NTP server, e.g. to join the
 http://www.pool.ntp.org/en/join.html[pool.ntp.org] project. The configuration
 is similar to the NTP client with permanent connection, except it needs to
-allow client access from all addresses. It is recommended to handpick at least
-few good servers, and possibly combine them with a random selection of other
-servers in the pool. The rate limiting interval can be increased to save more
-bandwidth on misconfigured and broken NTP clients. The *-r* option with the
-*dumpdir* directive shortens the time for which *chronyd* will not serve time
-to its clients when it needs to be restarted for any reason.
+allow client access from all addresses. It is recommended to find at least four
+good servers (e.g. from the pool, or on the NTP homepage). If the server has a
+hardware reference clock (e.g. a GPS receiver), it can be specified by the
+<<refclock,*refclock*>> directive.
 
-The configuration file might be:
+The amount of memory used for logging client accesses can be increased in order
+to enable clients to use the interleaved mode even when the server has a large
+number of clients, and better support rate limiting if it is enabled by the
+<<ratelimit,*ratelimit*>> directive. The system timezone database, if it is
+kept up to date and includes the *right/UTC* timezone, can be used as a
+reliable source to determine when a leap second will be applied to UTC. The
+*-r* option with the <<dumpdir,*dumpdir*>> directive shortens the time in which
+*chronyd* will not be able to serve time to its clients when it needs to be
+restarted (e.g. after upgrading to a newer version, or a change in the
+configuration).
+
+The configuration file could look like:
 
 ----
 server foo.example.net iburst
 server bar.example.net iburst
 server baz.example.net iburst
-pool pool.ntp.org iburst
+server qux.example.net iburst
 makestep 1.0 3
 rtcsync
 allow
-ratelimit interval 1
+clientloglimit 100000000
+leapsectz right/UTC
 driftfile @CHRONYVARDIR@/drift
 dumpdir @CHRONYRUNDIR@
 dumponexit

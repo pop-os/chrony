@@ -66,7 +66,8 @@ static void parse_log(char *);
 static void parse_mailonchange(char *);
 static void parse_makestep(char *);
 static void parse_maxchange(char *);
-static void parse_ratelimit(char *line, int *interval, int *burst, int *leak);
+static void parse_ratelimit(char *line, int *enabled, int *interval,
+                            int *burst, int *leak);
 static void parse_refclock(char *);
 static void parse_smoothtime(char *);
 static void parse_source(char *line, NTP_Source_Type type, int pool);
@@ -190,12 +191,14 @@ static char *ntp_signd_socket = NULL;
 static char *pidfile;
 
 /* Rate limiting parameters */
-static int ntp_ratelimit_interval = -10;
-static int ntp_ratelimit_burst = 16;
+static int ntp_ratelimit_enabled = 0;
+static int ntp_ratelimit_interval = 3;
+static int ntp_ratelimit_burst = 8;
 static int ntp_ratelimit_leak = 2;
-static int cmd_ratelimit_interval = -10;
-static int cmd_ratelimit_burst = 16;
-static int cmd_ratelimit_leak = 0;
+static int cmd_ratelimit_enabled = 0;
+static int cmd_ratelimit_interval = -4;
+static int cmd_ratelimit_burst = 8;
+static int cmd_ratelimit_leak = 2;
 
 /* Smoothing constants */
 static double smooth_max_freq = 0.0; /* in ppm */
@@ -220,7 +223,13 @@ static char *leapsec_tz = NULL;
 /* Name of the user to which will be dropped root privileges. */
 static char *user;
 
-/* Array of strings for interfaces with HW timestamping */
+typedef struct {
+  char *name;
+  double tx_comp;
+  double rx_comp;
+} HwTs_Interface;
+
+/* Array of HwTs_Interface */
 static ARR_Instance hwts_interfaces;
 
 typedef struct {
@@ -324,7 +333,7 @@ CNF_Initialise(int r)
 {
   restarted = r;
 
-  hwts_interfaces = ARR_CreateInstance(sizeof (char *));
+  hwts_interfaces = ARR_CreateInstance(sizeof (HwTs_Interface));
 
   init_sources = ARR_CreateInstance(sizeof (IPAddr));
   ntp_sources = ARR_CreateInstance(sizeof (NTP_Source));
@@ -351,7 +360,7 @@ CNF_Finalise(void)
   unsigned int i;
 
   for (i = 0; i < ARR_GetSize(hwts_interfaces); i++)
-    Free(*(char **)ARR_GetElement(hwts_interfaces, i));
+    Free(((HwTs_Interface *)ARR_GetElement(hwts_interfaces, i))->name);
   ARR_DestroyInstance(hwts_interfaces);
 
   for (i = 0; i < ARR_GetSize(ntp_sources); i++)
@@ -452,7 +461,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "cmdport")) {
     parse_int(p, &cmd_port);
   } else if (!strcasecmp(command, "cmdratelimit")) {
-    parse_ratelimit(p, &cmd_ratelimit_interval, &cmd_ratelimit_burst, &cmd_ratelimit_leak);
+    parse_ratelimit(p, &cmd_ratelimit_enabled, &cmd_ratelimit_interval,
+                    &cmd_ratelimit_burst, &cmd_ratelimit_leak);
   } else if (!strcasecmp(command, "combinelimit")) {
     parse_double(p, &combine_limit);
   } else if (!strcasecmp(command, "corrtimeratio")) {
@@ -532,7 +542,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "port")) {
     parse_int(p, &ntp_port);
   } else if (!strcasecmp(command, "ratelimit")) {
-    parse_ratelimit(p, &ntp_ratelimit_interval, &ntp_ratelimit_burst, &ntp_ratelimit_leak);
+    parse_ratelimit(p, &ntp_ratelimit_enabled, &ntp_ratelimit_interval,
+                    &ntp_ratelimit_burst, &ntp_ratelimit_leak);
   } else if (!strcasecmp(command, "refclock")) {
     parse_refclock(p);
   } else if (!strcasecmp(command, "reselectdist")) {
@@ -637,10 +648,12 @@ parse_source(char *line, NTP_Source_Type type, int pool)
 /* ================================================== */
 
 static void
-parse_ratelimit(char *line, int *interval, int *burst, int *leak)
+parse_ratelimit(char *line, int *enabled, int *interval, int *burst, int *leak)
 {
   int n, val;
   char *opt;
+
+  *enabled = 1;
 
   while (*line) {
     opt = line;
@@ -1238,8 +1251,39 @@ parse_tempcomp(char *line)
 static void
 parse_hwtimestamp(char *line)
 {
-  check_number_of_args(line, 1);
-  *(char **)ARR_GetNewElement(hwts_interfaces) = Strdup(line);
+  HwTs_Interface *iface;
+  char *p;
+  int n;
+
+  if (!*line) {
+    command_parse_error();
+    return;
+  }
+
+  p = line;
+  line = CPS_SplitWord(line);
+
+  iface = ARR_GetNewElement(hwts_interfaces);
+  iface->name = Strdup(p);
+  iface->tx_comp = 0.0;
+  iface->rx_comp = 0.0;
+
+  for (p = line; *p; line += n, p = line) {
+    line = CPS_SplitWord(line);
+
+    if (!strcasecmp(p, "rxcomp")) {
+      if (sscanf(line, "%lf%n", &iface->rx_comp, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "txcomp")) {
+      if (sscanf(line, "%lf%n", &iface->tx_comp, &n) != 1)
+        break;
+    } else {
+      break;
+    }
+  }
+
+  if (*p)
+    command_parse_error();
 }
 
 /* ================================================== */
@@ -1823,20 +1867,22 @@ CNF_GetLockMemory(void)
 
 /* ================================================== */
 
-void CNF_GetNTPRateLimit(int *interval, int *burst, int *leak)
+int CNF_GetNTPRateLimit(int *interval, int *burst, int *leak)
 {
   *interval = ntp_ratelimit_interval;
   *burst = ntp_ratelimit_burst;
   *leak = ntp_ratelimit_leak;
+  return ntp_ratelimit_enabled;
 }
 
 /* ================================================== */
 
-void CNF_GetCommandRateLimit(int *interval, int *burst, int *leak)
+int CNF_GetCommandRateLimit(int *interval, int *burst, int *leak)
 {
   *interval = cmd_ratelimit_interval;
   *burst = cmd_ratelimit_burst;
   *leak = cmd_ratelimit_leak;
+  return cmd_ratelimit_enabled;
 }
 
 /* ================================================== */
@@ -1921,8 +1967,18 @@ CNF_GetInitStepThreshold(void)
 
 /* ================================================== */
 
-ARR_Instance
-CNF_GetHwTsInterfaces(void)
+int
+CNF_GetHwTsInterface(unsigned int index, char **name, double *tx_comp, double *rx_comp)
 {
-  return hwts_interfaces;
+  HwTs_Interface *iface;
+
+  if (index >= ARR_GetSize(hwts_interfaces))
+    return 0;
+
+  iface = ARR_GetElement(hwts_interfaces, index);
+  *name = iface->name;
+  *tx_comp = iface->tx_comp;
+  *rx_comp = iface->rx_comp;
+
+  return 1;
 }

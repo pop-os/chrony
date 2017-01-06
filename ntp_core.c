@@ -1412,12 +1412,8 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
       sample_rx_tss = rx_ts->source;
     }
 
-    /* Work out 'delay' relative to the source's time */
-    delay = (1.0 - (source_freq_lo + source_freq_hi) / 2.0) *
-              local_interval - remote_interval;
-
-    /* Clamp delay to avoid misleading results later */
-    delay = fabs(delay);
+    /* Calculate delay */
+    delay = fabs(local_interval - remote_interval);
     if (delay < precision)
       delay = precision;
     
@@ -1439,7 +1435,8 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
     skew = (source_freq_hi - source_freq_lo) / 2.0;
     
     /* and then calculate peer dispersion */
-    dispersion = precision + inst->local_tx.err + rx_ts_err + skew * fabs(local_interval);
+    dispersion = MAX(precision, MAX(inst->local_tx.err, rx_ts_err)) +
+                 skew * fabs(local_interval);
     
     /* Additional tests required to pass before accumulating the sample */
 
@@ -1609,13 +1606,14 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
                      UTI_DiffTimespecsToDouble(&inst->local_rx.ts, &inst->local_tx.ts));
 
       if (kod_rate) {
+        LOG(LOGS_WARN, LOGF_NtpCore, "Received KoD RATE from %s",
+            UTI_IPToString(&inst->remote_addr.ip_addr));
+
         /* Back off for a while and stop ongoing burst */
         delay_time += 4 * (1UL << inst->minpoll);
 
         if (inst->opmode == MD_BURST_WAS_OFFLINE || inst->opmode == MD_BURST_WAS_ONLINE) {
           inst->burst_good_samples_to_go = 0;
-          LOG(LOGS_WARN, LOGF_NtpCore, "Received KoD RATE from %s, burst sampling stopped",
-              UTI_IPToString(&inst->remote_addr.ip_addr));
         }
       }
 
