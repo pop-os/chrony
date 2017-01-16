@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2016
+ * Copyright (C) Miroslav Lichvar  2009-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -242,6 +242,11 @@ static ARR_Instance broadcasts;
 
 /* Maximum acceptable delay in transmission for timestamp correction */
 #define MAX_TX_DELAY 1.0
+
+/* Maximum allowed values of maxdelay parameters */
+#define MAX_MAX_DELAY 1.0e3
+#define MAX_MAX_DELAY_RATIO 1.0e6
+#define MAX_MAX_DELAY_DEV_RATIO 1.0e6
 
 /* Minimum and maximum allowed poll interval */
 #define MIN_POLL 0
@@ -513,9 +518,9 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
   if (result->presend_minpoll <= MAX_POLL && result->mode != MODE_CLIENT)
     result->presend_minpoll = MAX_POLL + 1;
 
-  result->max_delay = params->max_delay;
-  result->max_delay_ratio = params->max_delay_ratio;
-  result->max_delay_dev_ratio = params->max_delay_dev_ratio;
+  result->max_delay = CLAMP(0.0, params->max_delay, MAX_MAX_DELAY);
+  result->max_delay_ratio = CLAMP(0.0, params->max_delay_ratio, MAX_MAX_DELAY_RATIO);
+  result->max_delay_dev_ratio = CLAMP(0.0, params->max_delay_dev_ratio, MAX_MAX_DELAY_DEV_RATIO);
   result->offset_correction = params->offset;
   result->auto_offline = params->auto_offline;
   result->poll_target = params->poll_target;
@@ -951,57 +956,63 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
      frequency all along */
   UTI_TimespecToNtp64(&local_receive, &message.receive_ts, &ts_fuzz);
 
-  /* Prepare random bits which will be added to the transmit timestamp. */
-  UTI_GetNtp64Fuzz(&ts_fuzz, precision);
+  do {
+    /* Prepare random bits which will be added to the transmit timestamp */
+    UTI_GetNtp64Fuzz(&ts_fuzz, precision);
 
-  /* Transmit - this our local time right now!  Also, we might need to
-     store this for our own use later, next time we receive a message
-     from the source we're sending to now. */
-  LCL_ReadCookedTime(&local_transmit, &local_transmit_err);
+    /* Transmit - this our local time right now!  Also, we might need to
+       store this for our own use later, next time we receive a message
+       from the source we're sending to now. */
+    LCL_ReadCookedTime(&local_transmit, &local_transmit_err);
 
-  if (smooth_time)
-    UTI_AddDoubleToTimespec(&local_transmit, smooth_offset, &local_transmit);
+    if (smooth_time)
+      UTI_AddDoubleToTimespec(&local_transmit, smooth_offset, &local_transmit);
 
-  length = NTP_NORMAL_PACKET_LENGTH;
+    length = NTP_NORMAL_PACKET_LENGTH;
 
-  /* Authenticate the packet if needed */
+    /* Authenticate the packet */
 
-  if (auth_mode == AUTH_SYMMETRIC || auth_mode == AUTH_MSSNTP) {
-    /* Pre-compensate the transmit time by approx. how long it will
-       take to generate the authentication data. */
-    local_transmit.tv_nsec += auth_mode == AUTH_SYMMETRIC ?
-                              KEY_GetAuthDelay(key_id) : NSD_GetAuthDelay(key_id);
-    UTI_NormaliseTimespec(&local_transmit);
-    UTI_TimespecToNtp64(interleaved ? &local_tx->ts : &local_transmit,
-                        &message.transmit_ts, &ts_fuzz);
+    if (auth_mode == AUTH_SYMMETRIC || auth_mode == AUTH_MSSNTP) {
+      /* Pre-compensate the transmit time by approximately how long it will
+         take to generate the authentication data */
+      local_transmit.tv_nsec += auth_mode == AUTH_SYMMETRIC ?
+                                KEY_GetAuthDelay(key_id) : NSD_GetAuthDelay(key_id);
+      UTI_NormaliseTimespec(&local_transmit);
+      UTI_TimespecToNtp64(interleaved ? &local_tx->ts : &local_transmit,
+                          &message.transmit_ts, &ts_fuzz);
 
-    if (auth_mode == AUTH_SYMMETRIC) {
-      auth_len = KEY_GenerateAuth(key_id, (unsigned char *) &message,
-                                  offsetof(NTP_Packet, auth_keyid),
-                                  (unsigned char *)&message.auth_data,
-                                  sizeof (message.auth_data));
-      if (!auth_len) {
-        DEBUG_LOG(LOGF_NtpCore, "Could not generate auth data with key %"PRIu32, key_id);
-        return 0;
+      if (auth_mode == AUTH_SYMMETRIC) {
+        auth_len = KEY_GenerateAuth(key_id, (unsigned char *) &message,
+                                    offsetof(NTP_Packet, auth_keyid),
+                                    (unsigned char *)&message.auth_data,
+                                    sizeof (message.auth_data));
+        if (!auth_len) {
+          DEBUG_LOG(LOGF_NtpCore, "Could not generate auth data with key %"PRIu32, key_id);
+          return 0;
+        }
+
+        message.auth_keyid = htonl(key_id);
+        mac_len = sizeof (message.auth_keyid) + auth_len;
+
+        /* Truncate MACs in NTPv4 packets to allow deterministic parsing
+           of extension fields (RFC 7822) */
+        if (version == 4 && mac_len > NTP_MAX_V4_MAC_LENGTH)
+          mac_len = NTP_MAX_V4_MAC_LENGTH;
+
+        length += mac_len;
+      } else if (auth_mode == AUTH_MSSNTP) {
+        /* MS-SNTP packets are signed (asynchronously) by ntp_signd */
+        return NSD_SignAndSendPacket(key_id, &message, where_to, from, length);
       }
-
-      message.auth_keyid = htonl(key_id);
-      mac_len = sizeof (message.auth_keyid) + auth_len;
-
-      /* Truncate MACs in NTPv4 packets to allow deterministic parsing
-         of extension fields (RFC 7822) */
-      if (version == 4 && mac_len > NTP_MAX_V4_MAC_LENGTH)
-        mac_len = NTP_MAX_V4_MAC_LENGTH;
-
-      length += mac_len;
-    } else if (auth_mode == AUTH_MSSNTP) {
-      /* MS-SNTP packets are signed (asynchronously) by ntp_signd */
-      return NSD_SignAndSendPacket(key_id, &message, where_to, from, length);
+    } else {
+      UTI_TimespecToNtp64(interleaved ? &local_tx->ts : &local_transmit,
+                          &message.transmit_ts, &ts_fuzz);
     }
-  } else {
-    UTI_TimespecToNtp64(interleaved ? &local_tx->ts : &local_transmit,
-                        &message.transmit_ts, &ts_fuzz);
-  }
+
+    /* Avoid sending messages with non-zero transmit timestamp equal to the
+       receive timestamp to allow reliable detection of the interleaved mode */
+  } while (!UTI_CompareNtp64(&message.transmit_ts, &message.receive_ts) &&
+           !UTI_IsZeroNtp64(&message.transmit_ts));
 
   ret = NIO_SendPacket(&message, where_to, from, length, local_tx != NULL);
 
@@ -2106,9 +2117,9 @@ NCR_ModifyMaxpoll(NCR_Instance inst, int new_maxpoll)
 void
 NCR_ModifyMaxdelay(NCR_Instance inst, double new_max_delay)
 {
-  inst->max_delay = new_max_delay;
+  inst->max_delay = CLAMP(0.0, new_max_delay, MAX_MAX_DELAY);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay %f",
-      UTI_IPToString(&inst->remote_addr.ip_addr), new_max_delay);
+      UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay);
 }
 
 /* ================================================== */
@@ -2116,9 +2127,9 @@ NCR_ModifyMaxdelay(NCR_Instance inst, double new_max_delay)
 void
 NCR_ModifyMaxdelayratio(NCR_Instance inst, double new_max_delay_ratio)
 {
-  inst->max_delay_ratio = new_max_delay_ratio;
+  inst->max_delay_ratio = CLAMP(0.0, new_max_delay_ratio, MAX_MAX_DELAY_RATIO);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay ratio %f",
-      UTI_IPToString(&inst->remote_addr.ip_addr), new_max_delay_ratio);
+      UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay_ratio);
 }
 
 /* ================================================== */
@@ -2126,9 +2137,9 @@ NCR_ModifyMaxdelayratio(NCR_Instance inst, double new_max_delay_ratio)
 void
 NCR_ModifyMaxdelaydevratio(NCR_Instance inst, double new_max_delay_dev_ratio)
 {
-  inst->max_delay_dev_ratio = new_max_delay_dev_ratio;
+  inst->max_delay_dev_ratio = CLAMP(0.0, new_max_delay_dev_ratio, MAX_MAX_DELAY_DEV_RATIO);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay dev ratio %f",
-      UTI_IPToString(&inst->remote_addr.ip_addr), new_max_delay_dev_ratio);
+      UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay_dev_ratio);
 }
 
 /* ================================================== */

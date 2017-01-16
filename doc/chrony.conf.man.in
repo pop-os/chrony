@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-06
+.\"      Date: 2017-01-12
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2017-01-06" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2017-01-12" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -113,7 +113,7 @@ If the user knows that round trip delays above a certain level should cause the
 measurement to be ignored, this level can be defined with the \fBmaxdelay\fP
 option. For example, \fBmaxdelay 0.3\fP would indicate that measurements with a
 round\-trip delay of 0.3 seconds or more should be ignored. The default value is
-3 seconds.
+3 seconds and the maximum value is 1000 seconds.
 .RE
 .sp
 \fBmaxdelayratio\fP \fIratio\fP

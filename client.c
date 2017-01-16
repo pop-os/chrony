@@ -3,6 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
+ * Copyright (C) Lonnie Abelbeck  2016
  * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
@@ -2723,7 +2724,8 @@ process_cmd_waitsync(char *line)
   max_skew_ppm = 0.0;
   interval = 10.0;
 
-  sscanf(line, "%d %lf %lf %lf", &max_tries, &max_correction, &max_skew_ppm, &interval);
+  if (sscanf(line, "%d %lf %lf %lf", &max_tries, &max_correction, &max_skew_ppm, &interval))
+    ;
 
   /* Don't allow shorter interval than 0.1 seconds */
   if (interval < 0.1)
@@ -2831,7 +2833,8 @@ process_cmd_keygen(char *line)
   snprintf(hash_name, sizeof (hash_name), "MD5");
 #endif
 
-  sscanf(line, "%u %16s %d", &id, hash_name, &bits);
+  if (sscanf(line, "%u %16s %d", &id, hash_name, &bits))
+    ;
 
   length = CLAMP(10, (bits + 7) / 8, sizeof (key));
   if (HSH_GetHashId(hash_name) < 0) {
@@ -3094,7 +3097,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2016 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2017 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",
