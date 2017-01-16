@@ -61,8 +61,8 @@ that.
 In order to keep the real-time clock (RTC) close to the true time, so the
 system time is reasonably close to the true time when it's initialized on the
 next boot from the RTC, the `rtcsync` directive enables a mode in which the
-system time is periodically copied to the RTC. It is supported on Linux and Mac
-OS X.
+system time is periodically copied to the RTC. It is supported on Linux and
+macOS.
 
 If you want to use public NTP servers from the
 http://www.pool.ntp.org/[pool.ntp.org] project, the minimal _chrony.conf_ file
@@ -148,14 +148,19 @@ network. It's better to use more than one server, three or four is usually
 recommended as the minimum, so `chronyd` can detect servers that serve false
 time and combine measurements from multiple sources.
 
+If you have a network card with hardware timestamping supported on Linux, it
+can be enabled by the *hwtimestamp* directive in the _chrony.conf_ file. It
+should make local receive and transmit timestamps of NTP packets much more
+accurate.
+
 There are also useful options which can be set in the `server` directive, they
-are `minpoll`, `maxpoll`, `polltarget`, `maxdelay`, `maxdelayratio` and
-`maxdelaydevratio`.
+are `minpoll`, `maxpoll`, `polltarget`, `maxdelay`, `maxdelayratio`,
+`maxdelaydevratio`, and `xleave`.
 
 The first three options set the minimum and maximum allowed polling interval,
 and how should be the actual interval adjusted in the specified range. Their
 default values are 6 (64 seconds) for `minpoll`, 10 (1024 seconds) for
-`maxpoll` and 6 (samples) for `polltarget`. The default values should be used
+`maxpoll` and 8 (samples) for `polltarget`. The default values should be used
 for general servers on the Internet. With your own NTP servers or if have
 permission to poll some servers more frequently, setting these options for
 shorter polling intervals may significantly improve the accuracy of the system
@@ -187,6 +192,16 @@ with local NTP server
 
 ----
 server ntp.local minpoll 2 maxpoll 4 polltarget 30 maxdelaydevratio 2
+----
+
+If your server supports the interleaved mode, the `xleave` option should be
+added to the `server` directive in order to receive server's more accurate
+hardware or kernel transmit timestamps. When combined with local hardware
+timestamping, a sub-microsecond accuracy may be possible. An example could be
+
+----
+server ntp.local minpoll 2 maxpoll 2 xleave
+hwtimestamp eth0
 ----
 
 === What happened to the `commandkey` and `generatecommandkey` directives?
@@ -287,12 +302,15 @@ authentication (`commandkey` directive).
 
 === Why does `chronyc tracking` always print an IPv4 address as reference ID?
 
-The reference ID is a 32-bit value and is always printed in quad-dotted
-notation, even if the reference source doesn't have an IPv4 address. For IPv4
-addresses, the reference ID is equal to the address, but for IPv6 addresses it
-is the first 32 bits of the MD5 sum of the address. For reference clocks, the
-reference ID is the value specified with the `refid` option in the `refclock`
-directive.
+The reference ID is a 32-bit value and in versions before 3.0 it was printed in
+quad-dotted notation, even if the reference source did not actually have an
+IPv4 address. For IPv4 addresses, the reference ID is equal to the address, but
+for IPv6 addresses it is the first 32 bits of the MD5 sum of the address. For
+reference clocks, the reference ID is the value specified with the `refid`
+option in the `refclock` directive.
+
+Since version 3.0, the reference ID is printed as a hexadecimal number to avoid
+confusion with IPv4 addresses.
 
 If you need to get the IP address of the current reference source, use the `-n`
 option to disable resolving of IP addresses and read the second field (printed
@@ -373,7 +391,8 @@ to serve time to clients in the network which support the broadcast client mode
 
 === Can `chronyd` keep the system clock a fixed offset away from real time?
 
-This is not possible as the program currently stands.
+Yes. Starting from version 3.0, an offset can be specified by the `offset`
+option for all time sources in the _chrony.conf_ file.
 
 === What happens if the network connection is dropped without using ``chronyc``'s `offline` command first?
 

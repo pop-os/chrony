@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2016-11-21
+.\"      Date: 2017-01-06
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2016-11-21" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2017-01-06" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -38,7 +38,7 @@ There are two ways \fBchronyc\fP can access \fBchronyd\fP. One is the Internet
 Protocol (IPv4 or IPv6) and the other is a Unix domain socket, which is
 accessible locally by the root or \fIchrony\fP user. By default, \fBchronyc\fP first
 tries to connect to the Unix domain socket. The compiled\-in default path is
-\fI@CHRONYSOCKDIR@/chronyd.sock\fP. If that fails (e.g. because \fBchronyc\fP is
+\fI@CHRONYRUNDIR@/chronyd.sock\fP. If that fails (e.g. because \fBchronyc\fP is
 running under a non\-root user), it will try to connect to 127.0.0.1 and then
 ::1.
 .sp
@@ -72,8 +72,8 @@ With this option hostnames will be resolved only to IPv6 addresses.
 .sp
 \fB\-n\fP
 .RS 4
-This option disables resolving of IP addresses to hostnames (e.g. to avoid slow
-DNS lookups).
+This option disables resolving of IP addresses to hostnames, e.g. to avoid slow
+DNS lookups. Long addresses will not be truncated to fit into the column.
 .RE
 .sp
 \fB\-c\fP
@@ -144,7 +144,7 @@ performance. An example of the output is shown below.
 .RS 4
 .\}
 .nf
-Reference ID    : 203.0.113.15 (foo.example.net)
+Reference ID    : CB00710F (foo.example.net)
 Stratum         : 3
 Ref time (UTC)  : Fri Feb  3 15:00:29 2012
 System time     : 0.000001501 seconds slow of NTP time
@@ -171,10 +171,14 @@ computer is currently synchronised. For IPv4 addresses, the reference ID is
 equal to the address and for IPv6 addresses it is the first 32 bits of the MD5
 sum of the address.
 .sp
-If it is \fI127.127.1.1\fP it means the computer is not synchronised to any
-external source and that you have the \fIlocal\fP mode operating (via the
-\fBlocal\fP command in \fBchronyc\fP, or the
+If the reference ID is \fI7F7F0101\fP and there is no name or IP address, it means
+the computer is not synchronised to any external source and that you have the
+\fIlocal\fP mode operating (via the \fBlocal\fP command in \fBchronyc\fP, or the
 \fBlocal\fP directive in the configuration file).
+.sp
+The reference ID is printed as a hexadecimal number. Note that in older
+versions it used to be printed in quad\-dotted notation and could be confused
+with an IPv4 address.
 .RE
 .sp
 \fBStratum\fP
@@ -656,6 +660,133 @@ the offline state.
 .RS 4
 the name of the server or peer was not resolved to an address yet; this source is
 not visible in the \fBsources\fP and \fBsourcestats\fP reports.
+.RE
+.RE
+.sp
+\fBntpdata\fP [\fIaddress\fP]
+.RS 4
+The \fBntpdata\fP command displays the last valid measurement and other
+NTP\-specific information about the specified NTP source, or all NTP sources if
+no address was specified. An example of the output is shown below.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+Remote address  : 203.0.113.15 (CB00710F)
+Remote port     : 123
+Local address   : 203.0.113.74 (CB00714A)
+Leap status     : Normal
+Version         : 4
+Mode            : Server
+Stratum         : 1
+Poll interval   : 10 (1024 seconds)
+Precision       : \-24 (0.000000060 seconds)
+Root delay      : 0.000015 seconds
+Root dispersion : 0.000015 seconds
+Reference ID    : 47505300 (GPS)
+Reference time  : Fri Nov 25 15:22:12 2016
+Offset          : \-0.000060878 seconds
+Peer delay      : 0.000175634 seconds
+Peer dispersion : 0.000000681 seconds
+Response time   : 0.000053050 seconds
+Jitter asymmetry: +0.00
+NTP tests       : 111 111 1111
+Interleaved     : No
+Authenticated   : No
+TX timestamping : Kernel
+RX timestamping : Kernel
+Total TX        : 24
+Total RX        : 24
+Total valid RX  : 24
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+The fields are explained as follows:
+.sp
+\fBRemote address\fP
+.RS 4
+The IP address of the NTP server or peer, and the corresponding reference ID.
+.RE
+.sp
+\fBRemote port\fP
+.RS 4
+The UDP port number to which the request was sent. The standard NTP port is
+123.
+.RE
+.sp
+\fBLocal address\fP
+.RS 4
+The local IP address which received the response, and the corresponding
+reference ID.
+.RE
+.sp
+\fBLeap status\fP, \fBVersion\fP, \fBMode\fP, \fBStratum\fP, \fBPoll interval\fP, \fBPrecision\fP, \fBRoot delay\fP, \fBRoot dispersion\fP, \fBReference ID\fP, \fBReference time\fP
+.RS 4
+The NTP values from the last valid response.
+.RE
+.sp
+\fBOffset\fP, \fBPeer delay\fP, \fBPeer dispersion\fP
+.RS 4
+The measured values.
+.RE
+.sp
+\fBResponse time\fP
+.RS 4
+The time the server or peer spent in processing of the request and waiting
+before sending the response.
+.RE
+.sp
+\fBJitter asymmetry\fP
+.RS 4
+The estimated asymmetry of network jitter on the path to the source. The
+asymmetry can be between \-0.5 and 0.5. A negative value means the delay of
+packets sent to the source is more variable than the delay of packets sent
+from the source back.
+.RE
+.sp
+\fBNTP tests\fP
+.RS 4
+Results of RFC 5905 tests 1 through 3, 5 through 7, and tests for maximum
+delay, delay ratio, delay dev ratio, and synchronisation loop.
+.RE
+.sp
+\fBInterleaved\fP
+.RS 4
+This shows if the response was in the interleaved mode.
+.RE
+.sp
+\fBAuthenticated\fP
+.RS 4
+This shows if the response was authenticated.
+.RE
+.sp
+\fBTX timestamping\fP
+.RS 4
+The source of the local transmit timestamp. Valid values are \fIDaemon\fP,
+\fIKernel\fP, and \fIHardware\fP.
+.RE
+.sp
+\fBRX timestamping\fP
+.RS 4
+The source of the local receive timestamp.
+.RE
+.sp
+\fBTotal TX\fP
+.RS 4
+The number of packets sent to the source.
+.RE
+.sp
+\fBTotal RX\fP
+.RS 4
+The number of all packets received from the source.
+.RE
+.sp
+\fBTotal valid RX\fP
+.RS 4
+The number of valid packets received from the source.
 .RE
 .RE
 .sp

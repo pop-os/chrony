@@ -133,6 +133,9 @@ static const char permissions[] = {
   PERMIT_AUTH, /* SERVER_STATS */
   PERMIT_AUTH, /* CLIENT_ACCESSES_BY_INDEX2 */
   PERMIT_AUTH, /* LOCAL2 */
+  PERMIT_AUTH, /* NTP_DATA */
+  PERMIT_AUTH, /* ADD_SERVER2 */
+  PERMIT_AUTH, /* ADD_PEER2 */
 };
 
 /* ================================================== */
@@ -143,7 +146,7 @@ static ADF_AuthTable access_auth_table;
 
 /* ================================================== */
 /* Forward prototypes */
-static void read_from_cmd_socket(void *anything);
+static void read_from_cmd_socket(int sock_fd, int event, void *anything);
 
 /* ================================================== */
 
@@ -242,7 +245,7 @@ prepare_socket(int family, int port_number)
   }
 
   /* Register handler for read events on the socket */
-  SCH_AddInputFileHandler(sock_fd, read_from_cmd_socket, (void *)(long)sock_fd);
+  SCH_AddFileHandler(sock_fd, SCH_FILE_INPUT, read_from_cmd_socket, NULL);
 
   return sock_fd;
 }
@@ -325,19 +328,19 @@ void
 CAM_Finalise(void)
 {
   if (sock_fdu >= 0) {
-    SCH_RemoveInputFileHandler(sock_fdu);
+    SCH_RemoveFileHandler(sock_fdu);
     close(sock_fdu);
     unlink(CNF_GetBindCommandPath());
   }
   sock_fdu = -1;
   if (sock_fd4 >= 0) {
-    SCH_RemoveInputFileHandler(sock_fd4);
+    SCH_RemoveFileHandler(sock_fd4);
     close(sock_fd4);
   }
   sock_fd4 = -1;
 #ifdef FEAT_IPV6
   if (sock_fd6 >= 0) {
-    SCH_RemoveInputFileHandler(sock_fd6);
+    SCH_RemoveFileHandler(sock_fd6);
     close(sock_fd6);
   }
   sock_fd6 = -1;
@@ -564,10 +567,10 @@ handle_modify_makestep(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_settime(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  struct timeval ts;
+  struct timespec ts;
   long offset_cs;
   double dfreq_ppm, new_afreq_ppm;
-  UTI_TimevalNetworkToHost(&rx_message->data.settime.ts, &ts);
+  UTI_TimespecNetworkToHost(&rx_message->data.settime.ts, &ts);
   if (!MNL_IsEnabled()) {
     tx_message->status = htons(STT_NOTENABLED);
   } else if (MNL_AcceptTimestamp(&ts, &offset_cs, &dfreq_ppm, &new_afreq_ppm)) {
@@ -634,7 +637,7 @@ static void
 handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   RPT_SourceReport report;
-  struct timeval now_corr;
+  struct timespec now_corr;
 
   /* Get data */
   SCH_GetLastEventTime(&now_corr, NULL, NULL);
@@ -777,26 +780,29 @@ handle_add_source(NTP_Source_Type type, CMD_Request *rx_message, CMD_Reply *tx_m
   params.minpoll = ntohl(rx_message->data.ntp_source.minpoll);
   params.maxpoll = ntohl(rx_message->data.ntp_source.maxpoll);
   params.presend_minpoll = ntohl(rx_message->data.ntp_source.presend_minpoll);
+  params.min_stratum = ntohl(rx_message->data.ntp_source.min_stratum);
+  params.poll_target = ntohl(rx_message->data.ntp_source.poll_target);
+  params.version = ntohl(rx_message->data.ntp_source.version);
+  params.max_sources = ntohl(rx_message->data.ntp_source.max_sources);
+  params.min_samples = ntohl(rx_message->data.ntp_source.min_samples);
+  params.max_samples = ntohl(rx_message->data.ntp_source.max_samples);
   params.authkey = ntohl(rx_message->data.ntp_source.authkey);
+  params.max_delay = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay);
+  params.max_delay_ratio =
+    UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay_ratio);
+  params.max_delay_dev_ratio =
+    UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay_dev_ratio);
+  params.offset = UTI_FloatNetworkToHost(rx_message->data.ntp_source.offset);
+
   params.online  = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_ONLINE ? 1 : 0;
   params.auto_offline = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_AUTOOFFLINE ? 1 : 0;
   params.iburst = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_IBURST ? 1 : 0;
+  params.interleaved = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_INTERLEAVED ? 1 : 0;
   params.sel_options =
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_PREFER ? SRC_SELECT_PREFER : 0) |
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_NOSELECT ? SRC_SELECT_NOSELECT : 0) |
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_TRUST ? SRC_SELECT_TRUST : 0) |
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_REQUIRE ? SRC_SELECT_REQUIRE : 0);
-  params.max_delay = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay);
-  params.max_delay_ratio = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay_ratio);
-
- /* not transmitted in cmdmon protocol yet */
-  params.min_stratum = SRC_DEFAULT_MINSTRATUM;       
-  params.poll_target = SRC_DEFAULT_POLLTARGET;
-  params.max_delay_dev_ratio = SRC_DEFAULT_MAXDELAYDEVRATIO;
-  params.version = NTP_VERSION;
-  params.max_sources = SRC_DEFAULT_MAXSOURCES;
-  params.min_samples = SRC_DEFAULT_MINSAMPLES;
-  params.max_samples = SRC_DEFAULT_MAXSAMPLES;
 
   status = NSR_AddSource(&rem_addr, type, &params);
   switch (status) {
@@ -898,7 +904,7 @@ handle_tracking(CMD_Request *rx_message, CMD_Reply *tx_message)
   UTI_IPHostToNetwork(&rpt.ip_addr, &tx_message->data.tracking.ip_addr);
   tx_message->data.tracking.stratum = htons(rpt.stratum);
   tx_message->data.tracking.leap_status = htons(rpt.leap_status);
-  UTI_TimevalHostToNetwork(&rpt.ref_time, &tx_message->data.tracking.ref_time);
+  UTI_TimespecHostToNetwork(&rpt.ref_time, &tx_message->data.tracking.ref_time);
   tx_message->data.tracking.current_correction = UTI_FloatHostToNetwork(rpt.current_correction);
   tx_message->data.tracking.last_offset = UTI_FloatHostToNetwork(rpt.last_offset);
   tx_message->data.tracking.rms_offset = UTI_FloatHostToNetwork(rpt.rms_offset);
@@ -916,7 +922,7 @@ static void
 handle_smoothing(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   RPT_SmoothingReport report;
-  struct timeval now;
+  struct timespec now;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
 
@@ -940,7 +946,7 @@ handle_smoothing(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_smoothtime(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  struct timeval now;
+  struct timespec now;
   int option;
 
   if (!SMT_IsEnabled()) {
@@ -971,7 +977,7 @@ handle_sourcestats(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   int status;
   RPT_SourcestatsReport report;
-  struct timeval now_corr;
+  struct timespec now_corr;
 
   SCH_GetLastEventTime(&now_corr, NULL, NULL);
   status = SRC_ReportSourcestats(ntohl(rx_message->data.sourcestats.index),
@@ -1004,7 +1010,7 @@ handle_rtcreport(CMD_Request *rx_message, CMD_Reply *tx_message)
   status = RTC_GetReport(&report);
   if (status) {
     tx_message->reply  = htons(RPY_RTC);
-    UTI_TimevalHostToNetwork(&report.ref_time, &tx_message->data.rtc.ref_time);
+    UTI_TimespecHostToNetwork(&report.ref_time, &tx_message->data.rtc.ref_time);
     tx_message->data.rtc.n_samples = htons(report.n_samples);
     tx_message->data.rtc.n_runs = htons(report.n_runs);
     tx_message->data.rtc.span_seconds = htonl(report.span_seconds);
@@ -1041,7 +1047,7 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPY_ClientAccesses_Client *client;
   int n_indices;
   uint32_t i, j, req_first_index, req_n_clients;
-  struct timeval now;
+  struct timespec now;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
 
@@ -1100,7 +1106,7 @@ handle_manual_list(CMD_Request *rx_message, CMD_Reply *tx_message)
   tx_message->data.manual_list.n_samples = htonl(n_samples);
   for (i=0; i<n_samples; i++) {
     sample = &tx_message->data.manual_list.samples[i];
-    UTI_TimevalHostToNetwork(&report[i].when, &sample->when);
+    UTI_TimespecHostToNetwork(&report[i].when, &sample->when);
     sample->slewed_offset = UTI_FloatHostToNetwork(report[i].slewed_offset);
     sample->orig_offset = UTI_FloatHostToNetwork(report[i].orig_offset);
     sample->residual = UTI_FloatHostToNetwork(report[i].residual);
@@ -1186,25 +1192,68 @@ handle_server_stats(CMD_Request *rx_message, CMD_Reply *tx_message)
 }
 
 /* ================================================== */
+
+static void
+handle_ntp_data(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_NTPReport report;
+
+  UTI_IPNetworkToHost(&rx_message->data.ntp_data.ip_addr, &report.remote_addr);
+
+  if (!NSR_GetNTPReport(&report)) {
+    tx_message->status = htons(STT_NOSUCHSOURCE);
+    return;
+  }
+
+  tx_message->reply = htons(RPY_NTP_DATA);
+  UTI_IPHostToNetwork(&report.remote_addr, &tx_message->data.ntp_data.remote_addr);
+  UTI_IPHostToNetwork(&report.local_addr, &tx_message->data.ntp_data.local_addr);
+  tx_message->data.ntp_data.remote_port = htons(report.remote_port);
+  tx_message->data.ntp_data.leap = report.leap;
+  tx_message->data.ntp_data.version = report.version;
+  tx_message->data.ntp_data.mode = report.mode;
+  tx_message->data.ntp_data.stratum = report.stratum;
+  tx_message->data.ntp_data.poll = report.poll;
+  tx_message->data.ntp_data.precision = report.precision;
+  tx_message->data.ntp_data.root_delay = UTI_FloatHostToNetwork(report.root_delay);
+  tx_message->data.ntp_data.root_dispersion = UTI_FloatHostToNetwork(report.root_dispersion);
+  tx_message->data.ntp_data.ref_id = htonl(report.ref_id);
+  UTI_TimespecHostToNetwork(&report.ref_time, &tx_message->data.ntp_data.ref_time);
+  tx_message->data.ntp_data.offset = UTI_FloatHostToNetwork(report.offset);
+  tx_message->data.ntp_data.peer_delay = UTI_FloatHostToNetwork(report.peer_delay);
+  tx_message->data.ntp_data.peer_dispersion = UTI_FloatHostToNetwork(report.peer_dispersion);
+  tx_message->data.ntp_data.response_time = UTI_FloatHostToNetwork(report.response_time);
+  tx_message->data.ntp_data.jitter_asymmetry = UTI_FloatHostToNetwork(report.jitter_asymmetry);
+  tx_message->data.ntp_data.flags = htons((report.tests & RPY_NTP_FLAGS_TESTS) |
+                                          (report.interleaved ? RPY_NTP_FLAG_INTERLEAVED : 0) |
+                                          (report.authenticated ? RPY_NTP_FLAG_AUTHENTICATED : 0));
+  tx_message->data.ntp_data.tx_tss_char = report.tx_tss_char;
+  tx_message->data.ntp_data.rx_tss_char = report.rx_tss_char;
+  tx_message->data.ntp_data.total_tx_count = htonl(report.total_tx_count);
+  tx_message->data.ntp_data.total_rx_count = htonl(report.total_rx_count);
+  tx_message->data.ntp_data.total_valid_count = htonl(report.total_valid_count);
+  memset(tx_message->data.ntp_data.reserved, 0xff, sizeof (tx_message->data.ntp_data.reserved));
+}
+
+/* ================================================== */
 /* Read a packet and process it */
 
 static void
-read_from_cmd_socket(void *anything)
+read_from_cmd_socket(int sock_fd, int event, void *anything)
 {
   CMD_Request rx_message;
   CMD_Reply tx_message;
   int status, read_length, expected_length, rx_message_length;
-  int localhost, allowed, sock_fd, log_index;
+  int localhost, allowed, log_index;
   union sockaddr_all where_from;
   socklen_t from_length;
   IPAddr remote_ip;
   unsigned short remote_port, rx_command;
-  struct timeval now, cooked_now;
+  struct timespec now, cooked_now;
 
   rx_message_length = sizeof(rx_message);
   from_length = sizeof(where_from);
 
-  sock_fd = (long)anything;
   status = recvfrom(sock_fd, (char *)&rx_message, rx_message_length, 0,
                     &where_from.sa, &from_length);
 
@@ -1477,11 +1526,11 @@ read_from_cmd_socket(void *anything)
           handle_cmdaccheck(&rx_message, &tx_message);
           break;
 
-        case REQ_ADD_SERVER:
+        case REQ_ADD_SERVER2:
           handle_add_source(NTP_SERVER, &rx_message, &tx_message);
           break;
 
-        case REQ_ADD_PEER:
+        case REQ_ADD_PEER2:
           handle_add_source(NTP_PEER, &rx_message, &tx_message);
           break;
 
@@ -1571,6 +1620,10 @@ read_from_cmd_socket(void *anything)
 
         case REQ_SERVER_STATS:
           handle_server_stats(&rx_message, &tx_message);
+          break;
+
+        case REQ_NTP_DATA:
+          handle_ntp_data(&rx_message, &tx_message);
           break;
 
         default:

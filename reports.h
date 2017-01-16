@@ -31,8 +31,6 @@
 #include "addressing.h"
 #include "ntp.h"
 
-#define REPORT_INVALID_OFFSET 0x80000000
-
 typedef struct {
   IPAddr ip_addr;
   int stratum;
@@ -53,7 +51,7 @@ typedef struct {
   IPAddr ip_addr;
   int stratum;
   NTP_Leap leap_status;
-  struct timeval ref_time;
+  struct timespec ref_time;
   double current_correction;
   double last_offset;
   double rms_offset;
@@ -79,7 +77,7 @@ typedef struct {
 } RPT_SourcestatsReport;
 
 typedef struct {
-  struct timeval ref_time;
+  struct timespec ref_time;
   unsigned short n_samples;
   unsigned short n_runs;
   unsigned long span_seconds;
@@ -109,7 +107,7 @@ typedef struct {
 } RPT_ServerStatsReport;
 
 typedef struct {
-  struct timeval when;
+  struct timespec when;
   double slewed_offset;
   double orig_offset;
   double residual;
@@ -132,5 +130,34 @@ typedef struct {
   double last_update_ago;
   double remaining_time;
 } RPT_SmoothingReport;
+
+typedef struct {
+  IPAddr remote_addr;
+  IPAddr local_addr;
+  uint16_t remote_port;
+  uint8_t leap;
+  uint8_t version;
+  uint8_t mode;
+  uint8_t stratum;
+  int8_t poll;
+  int8_t precision;
+  double root_delay;
+  double root_dispersion;
+  uint32_t ref_id;
+  struct timespec ref_time;
+  double offset;
+  double peer_delay;
+  double peer_dispersion;
+  double response_time;
+  double jitter_asymmetry;
+  uint16_t tests;
+  int interleaved;
+  int authenticated;
+  char tx_tss_char;
+  char rx_tss_char;
+  uint32_t total_tx_count;
+  uint32_t total_rx_count;
+  uint32_t total_valid_count;
+} RPT_NTPReport;
 
 #endif /* GOT_REPORTS_H */

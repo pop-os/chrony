@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2016-11-21
+.\"      Date: 2017-01-06
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2016-11-21" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2017-01-06" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -83,14 +83,15 @@ corrections of the clock.
 .sp
 \fB\-r\fP
 .RS 4
-This option will reload sample histories for each of the servers and refclocks
-being used. These histories are created by using the
-\fBdump\fP command in \fBchronyc\fP, or by setting the
-\fBdumponexit\fP directive in the configuration
-file. This option is useful if you want to stop and restart \fBchronyd\fP briefly
-for any reason, e.g. to install a new version. However, it should be used only
-on systems where the kernel can maintain clock compensation whilst not under
-\fBchronyd\fP\(cqs control (i.e. Linux, FreeBSD, NetBSD and Solaris).
+This option will try to reload and then delete files containing sample
+histories for each of the servers and reference clocks being used. These
+histories are created by using the \fBdump\fP command in
+\fBchronyc\fP, or by setting the \fBdumponexit\fP
+directive in the configuration file. This option is useful if you want to stop
+and restart \fBchronyd\fP briefly for any reason, e.g. to install a new version.
+However, it should be used only on systems where the kernel can maintain clock
+compensation whilst not under \fBchronyd\fP\(cqs control (i.e. Linux, FreeBSD, NetBSD
+and Solaris).
 .RE
 .sp
 \fB\-R\fP
@@ -122,6 +123,15 @@ when \fBchronyd\fP was previously stopped. This is useful on computers that have
 RTC or the RTC is broken (e.g. it has no battery).
 .RE
 .sp
+\fB\-t\fP \fItimeout\fP
+.RS 4
+This option sets a timeout (in seconds) after which \fBchronyd\fP will exit. If the
+clock is not synchronised, it will exit with a non\-zero status. This is useful
+with the \fB\-q\fP or \fB\-Q\fP option to shorten the maximum time waiting for
+measurements, or with the \fB\-r\fP option to limit the time when \fBchronyd\fP is
+running, but still allow it to adjust the frequency of the system clock.
+.RE
+.sp
 \fB\-u\fP \fIuser\fP
 .RS 4
 This option sets the name of the system user to which \fBchronyd\fP will switch
@@ -129,7 +139,7 @@ after start in order to drop root privileges. It overrides the
 \fBuser\fP directive (default \fI@DEFAULT_USER@\fP).
 .sp
 On Linux, \fBchronyd\fP needs to be compiled with support for the \fBlibcap\fP library.
-On Mac OS X, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
+On macOS, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
 The child process retains root privileges, but can only perform a very limited
 range of privileged system calls on behalf of the parent.
 .RE
@@ -152,7 +162,7 @@ killed even in normal operation.
 \fB\-P\fP \fIpriority\fP
 .RS 4
 On Linux, this option will select the SCHED_FIFO real\-time scheduler at the
-specified priority (which must be between 0 and 100). On Mac OS X, this option
+specified priority (which must be between 0 and 100). On macOS, this option
 must have either a value of 0 (the default) to disable the thread time
 constraint policy or 1 for the policy to be enabled. Other systems do not
 support this option.
@@ -180,4 +190,4 @@ For instructions on how to report bugs, please visit
 .URL "https://chrony.tuxfamily.org/" "" "."
 .SH "AUTHORS"
 .sp
-chrony was written by Richard Curnow, Miroslav Lichvar and others.
+chrony was written by Richard Curnow, Miroslav Lichvar, and others.
