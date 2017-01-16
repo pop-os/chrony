@@ -9,7 +9,6 @@ ConditionCapability=CAP_SYS_TIME
 Type=forking
 PIDFile=/run/chronyd.pid
 ExecStart=/usr/sbin/chronyd
-ExecStartPost=-/usr/lib/chrony/init-helper go_online
 Restart=on-failure
 PrivateTmp=yes
 ProtectHome=yes
