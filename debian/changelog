@@ -1,3 +1,35 @@
+chrony (3.0-1) unstable; urgency=medium
+
+  * Import upstream version 3.0:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * Merge branch “experimental”.
+
+  * debian/chrony.conf:
+    - Make use of the “makestep” directive to step the system clock instead of
+    slewing it when necessary.
+    - Drop the “offline” option as per upstream’s advice to render chrony’s
+    start-up sequence safer.
+
+  * debian/chrony.service:
+    - Reflect init-helper script deletion.
+
+  * debian/copyright:
+    - Add myself as a copyright holder for 2017.
+
+  * debian/init:
+    - Reflect init-helper script deletion.
+
+  * debian/install:
+    - Don’t install the init-helper script, it has been deleted.
+
+  * debian/README.Debian:
+    - Remove obsolete information.
+
+  * Remove the init-helper script as it no longer needed.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 Jan 2017 18:57:51 +0100
+
 chrony (2.4.1-3) unstable; urgency=medium
 
   * debian/apm:
