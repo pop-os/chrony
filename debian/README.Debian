@@ -26,16 +26,4 @@ Chrony for Debian
         # sed -i 's/^user/#user/' /etc/chrony/chrony.conf
         # chown -R _chrony:_chrony /var/l{ib,og}/chrony
 
- Some hints:
-
- The standard Debian chrony installation is designed for systems with an
- intermittent dial-up connection.  If you have such a system the most you
- should need to do is edit /etc/chrony/chrony.conf a bit. If you have not
- such a system you should read the documentation and create an appropriate
- configuration (you should read the documentation anyway).
-
- If chronyd is installed, it will be started on bootup and will attempt to
- contact the default server whenever you connect to your ISP.
-
-
- -- Vincent Blut <vincent.debian@free.fr>  Sat, 28 Nov 2015 16:24:32 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 Jan 2017 18:44:32 +0100
