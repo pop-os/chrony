@@ -39,6 +39,7 @@
 #include "clientlog.h"
 #include "conf.h"
 #include "memory.h"
+#include "ntp.h"
 #include "reports.h"
 #include "util.h"
 #include "logging.h"
@@ -57,6 +58,8 @@ typedef struct {
   int8_t cmd_rate;
   int8_t ntp_timeout_rate;
   uint8_t flags;
+  NTP_int64 ntp_rx_ts;
+  NTP_int64 ntp_tx_ts;
 } Record;
 
 /* Hash table of records, there is a fixed number of records per slot */
@@ -83,6 +86,10 @@ static unsigned int max_slots;
 #define TS_FRAC 4
 #define INVALID_TS 0
 
+/* Static offset included in conversion to the fixed-point timestamps to
+   randomise their alignment */
+static uint32_t ts_offset;
+
 /* Request rates are saved in the record as 8-bit scaled log2 values */
 #define RATE_SCALE 4
 #define MIN_RATE (-14 * RATE_SCALE)
@@ -92,7 +99,7 @@ static unsigned int max_slots;
    number of tokens spent on response are determined from configured
    minimum inverval between responses (in log2) and burst length. */
 
-#define MIN_LIMIT_INTERVAL (-TS_FRAC)
+#define MIN_LIMIT_INTERVAL (-15 - TS_FRAC)
 #define MAX_LIMIT_INTERVAL 12
 #define MIN_LIMIT_BURST 1
 #define MAX_LIMIT_BURST 255
@@ -102,7 +109,8 @@ static uint16_t max_cmd_tokens;
 static uint16_t ntp_tokens_per_packet;
 static uint16_t cmd_tokens_per_packet;
 
-/* Reduction of token rates to avoid overflow of 16-bit counters */
+/* Reduction of token rates to avoid overflow of 16-bit counters.  Negative
+   shift is used for coarse limiting with intervals shorter than -TS_FRAC. */
 static int ntp_token_shift;
 static int cmd_token_shift;
 
@@ -130,6 +138,8 @@ static uint32_t total_ntp_drops;
 static uint32_t total_cmd_drops;
 static uint32_t total_record_drops;
 
+#define NSEC_PER_SEC 1000000000U
+
 /* ================================================== */
 
 static int expand_hashtable(void);
@@ -155,7 +165,7 @@ get_record(IPAddr *ip)
   time_t last_hit, oldest_hit = 0;
   Record *record, *oldest_record;
 
-  if (ip->family != IPADDR_INET4 && ip->family != IPADDR_INET6)
+  if (!active || (ip->family != IPADDR_INET4 && ip->family != IPADDR_INET6))
     return NULL;
 
   while (1) {
@@ -206,6 +216,8 @@ get_record(IPAddr *ip)
   record->ntp_rate = record->cmd_rate = INVALID_RATE;
   record->ntp_timeout_rate = INVALID_RATE;
   record->flags = 0;
+  UTI_ZeroNtp64(&record->ntp_rx_ts);
+  UTI_ZeroNtp64(&record->ntp_tx_ts);
 
   return record;
 }
@@ -266,10 +278,17 @@ set_bucket_params(int interval, int burst, uint16_t *max_tokens,
   interval = CLAMP(MIN_LIMIT_INTERVAL, interval, MAX_LIMIT_INTERVAL);
   burst = CLAMP(MIN_LIMIT_BURST, burst, MAX_LIMIT_BURST);
 
-  /* Find smallest shift with which the maximum number fits in 16 bits */
-  for (*token_shift = 0; *token_shift < interval + TS_FRAC; (*token_shift)++) {
-    if (burst << (TS_FRAC + interval - *token_shift) < 1U << 16)
-      break;
+  if (interval >= -TS_FRAC) {
+    /* Find the smallest shift with which the maximum number fits in 16 bits */
+    for (*token_shift = 0; *token_shift < interval + TS_FRAC; (*token_shift)++) {
+      if (burst << (TS_FRAC + interval - *token_shift) < 1U << 16)
+        break;
+    }
+  } else {
+    /* Coarse rate limiting */
+    *token_shift = interval + TS_FRAC;
+    *tokens_per_packet = 1;
+    burst = MAX(1U << -*token_shift, burst);
   }
 
   *tokens_per_packet = 1U << (TS_FRAC + interval - *token_shift);
@@ -320,6 +339,9 @@ CLG_Initialise(void)
   records = NULL;
 
   expand_hashtable();
+
+  UTI_GetRandomBytes(&ts_offset, sizeof (ts_offset));
+  ts_offset %= NSEC_PER_SEC / (1U << TS_FRAC);
 }
 
 /* ================================================== */
@@ -336,23 +358,30 @@ CLG_Finalise(void)
 /* ================================================== */
 
 static uint32_t
-get_ts_from_timeval(struct timeval *tv)
+get_ts_from_timespec(struct timespec *ts)
 {
-  uint32_t sec = tv->tv_sec, usec = tv->tv_usec;
+  uint32_t sec = ts->tv_sec, nsec = ts->tv_nsec;
 
-  return sec << TS_FRAC | (4295U * usec - (usec >> 5)) >> (32 - TS_FRAC);
+  nsec += ts_offset;
+  if (nsec >= NSEC_PER_SEC) {
+    nsec -= NSEC_PER_SEC;
+    sec++;
+  }
+
+  /* This is fast and accurate enough */
+  return sec << TS_FRAC | (140740U * (nsec >> 15)) >> (32 - TS_FRAC);
 }
 
 /* ================================================== */
 
 static void
-update_record(struct timeval *now, uint32_t *last_hit, uint32_t *hits,
+update_record(struct timespec *now, uint32_t *last_hit, uint32_t *hits,
               uint16_t *tokens, uint32_t max_tokens, int token_shift, int8_t *rate)
 {
   uint32_t interval, now_ts, prev_hit, new_tokens;
   int interval2;
 
-  now_ts = get_ts_from_timeval(now);
+  now_ts = get_ts_from_timespec(now);
 
   prev_hit = *last_hit;
   *last_hit = now_ts;
@@ -363,7 +392,12 @@ update_record(struct timeval *now, uint32_t *last_hit, uint32_t *hits,
   if (prev_hit == INVALID_TS || (int32_t)interval < 0)
     return;
 
-  new_tokens = (now_ts >> token_shift) - (prev_hit >> token_shift);
+  if (token_shift >= 0)
+    new_tokens = (now_ts >> token_shift) - (prev_hit >> token_shift);
+  else if (now_ts - prev_hit > max_tokens)
+    new_tokens = max_tokens;
+  else
+    new_tokens = (now_ts - prev_hit) << -token_shift;
   *tokens = MIN(*tokens + new_tokens, max_tokens);
 
   /* Convert the interval to scaled and rounded log2 */
@@ -405,14 +439,25 @@ get_index(Record *record)
 /* ================================================== */
 
 int
-CLG_LogNTPAccess(IPAddr *client, struct timeval *now)
+CLG_GetClientIndex(IPAddr *client)
+{
+  Record *record;
+
+  record = get_record(client);
+  if (record == NULL)
+    return -1;
+
+  return get_index(record);
+}
+
+/* ================================================== */
+
+int
+CLG_LogNTPAccess(IPAddr *client, struct timespec *now)
 {
   Record *record;
 
   total_ntp_hits++;
-
-  if (!active)
-    return -1;
 
   record = get_record(client);
   if (record == NULL)
@@ -435,14 +480,11 @@ CLG_LogNTPAccess(IPAddr *client, struct timeval *now)
 /* ================================================== */
 
 int
-CLG_LogCommandAccess(IPAddr *client, struct timeval *now)
+CLG_LogCommandAccess(IPAddr *client, struct timespec *now)
 {
   Record *record;
 
   total_cmd_hits++;
-
-  if (!active)
-    return -1;
 
   record = get_record(client);
   if (record == NULL)
@@ -552,7 +594,19 @@ CLG_LimitCommandResponseRate(int index)
 
 /* ================================================== */
 
-extern int
+void CLG_GetNtpTimestamps(int index, NTP_int64 **rx_ts, NTP_int64 **tx_ts)
+{
+  Record *record;
+
+  record = ARR_GetElement(records, index);
+
+  *rx_ts = &record->ntp_rx_ts;
+  *tx_ts = &record->ntp_tx_ts;
+}
+
+/* ================================================== */
+
+int
 CLG_GetNumberOfIndices(void)
 {
   if (!active)
@@ -586,7 +640,7 @@ static uint32_t get_last_ago(uint32_t x, uint32_t y)
 /* ================================================== */
 
 int
-CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timeval *now)
+CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *report, struct timespec *now)
 {
   Record *record;
   uint32_t now_ts;
@@ -599,7 +653,7 @@ CLG_GetClientAccessReportByIndex(int index, RPT_ClientAccessByIndex_Report *repo
   if (record->ip_addr.family == IPADDR_UNSPEC)
     return 0;
 
-  now_ts = get_ts_from_timeval(now);
+  now_ts = get_ts_from_timespec(now);
 
   report->ip_addr = record->ip_addr;
   report->ntp_hits = record->ntp_hits;

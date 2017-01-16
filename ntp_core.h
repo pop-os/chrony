@@ -38,6 +38,18 @@ typedef enum {
   NTP_SERVER, NTP_PEER
 } NTP_Source_Type;
 
+typedef enum {
+  NTP_TS_DAEMON = 0,
+  NTP_TS_KERNEL,
+  NTP_TS_HARDWARE
+} NTP_Timestamp_Source;
+
+typedef struct {
+  struct timespec ts;
+  double err;
+  NTP_Timestamp_Source source;
+} NTP_Local_Timestamp;
+
 /* This is a private data type used for storing the instance record for
    each source that we are chiming with */
 typedef struct NCR_Instance_Record *NCR_Instance;
@@ -58,19 +70,34 @@ extern void NCR_StartInstance(NCR_Instance instance);
 /* Reset an instance */
 extern void NCR_ResetInstance(NCR_Instance inst);
 
+/* Reset polling interval of an instance */
+extern void NCR_ResetPoll(NCR_Instance instance);
+
 /* Change the remote address of an instance */
 extern void NCR_ChangeRemoteAddress(NCR_Instance inst, NTP_Remote_Address *remote_addr);
 
 /* This routine is called when a new packet arrives off the network,
    and it relates to a source we have an ongoing protocol exchange with */
-extern int NCR_ProcessKnown(NTP_Packet *message, struct timeval *now, double now_err, NCR_Instance data, NTP_Local_Address *local_addr, int length);
+extern int NCR_ProcessRxKnown(NCR_Instance inst, NTP_Local_Address *local_addr,
+                              NTP_Local_Timestamp *rx_ts, NTP_Packet *message, int length);
 
 /* This routine is called when a new packet arrives off the network,
    and we do not recognize its source */
-extern void NCR_ProcessUnknown(NTP_Packet *message, struct timeval *now, double now_err, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr, int length);
+extern void NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+                                 NTP_Local_Timestamp *rx_ts, NTP_Packet *message, int length);
+
+/* This routine is called when a packet is sent to a source we have
+   an ongoing protocol exchange with */
+extern void NCR_ProcessTxKnown(NCR_Instance inst, NTP_Local_Address *local_addr,
+                               NTP_Local_Timestamp *tx_ts, NTP_Packet *message, int length);
+
+/* This routine is called when a packet is sent to a destination we
+   do not recognize */
+extern void NCR_ProcessTxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
+                                 NTP_Local_Timestamp *tx_ts, NTP_Packet *message, int length);
 
 /* Slew receive and transmit times in instance records */
-extern void NCR_SlewTimes(NCR_Instance inst, struct timeval *when, double dfreq, double doffset);
+extern void NCR_SlewTimes(NCR_Instance inst, struct timespec *when, double dfreq, double doffset);
 
 /* Take a particular source online (i.e. start sampling it) */
 extern void NCR_TakeSourceOnline(NCR_Instance inst);
@@ -95,7 +122,8 @@ extern void NCR_ModifyPolltarget(NCR_Instance inst, int new_poll_target);
 
 extern void NCR_InitiateSampleBurst(NCR_Instance inst, int n_good_samples, int n_total_samples);
 
-extern void NCR_ReportSource(NCR_Instance inst, RPT_SourceReport *report, struct timeval *now);
+extern void NCR_ReportSource(NCR_Instance inst, RPT_SourceReport *report, struct timespec *now);
+extern void NCR_GetNTPReport(NCR_Instance inst, RPT_NTPReport *report);
 
 extern int NCR_AddAccessRestriction(IPAddr *ip_addr, int subnet_bits, int allow, int all);
 extern int NCR_CheckAccessRestriction(IPAddr *ip_addr);

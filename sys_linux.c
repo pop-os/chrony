@@ -51,7 +51,7 @@
 #include <sys/prctl.h>
 #include <seccomp.h>
 #include <termios.h>
-#ifdef FEAT_PHC
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
 #include <linux/ptp_clock.h>
 #endif
 #ifdef FEAT_PPS
@@ -59,6 +59,9 @@
 #endif
 #ifdef FEAT_RTC
 #include <linux/rtc.h>
+#endif
+#ifdef HAVE_LINUX_TIMESTAMPING
+#include <linux/sockios.h>
 #endif
 #endif
 
@@ -271,6 +274,22 @@ kernelvercmp(int major1, int minor1, int patch1,
 }
 
 /* ================================================== */
+
+static void
+get_kernel_version(int *major, int *minor, int *patch)
+{
+  struct utsname uts;
+
+  if (uname(&uts) < 0)
+    LOG_FATAL(LOGF_SysLinux, "uname() failed");
+
+  *patch = 0;
+  if (sscanf(uts.release, "%d.%d.%d", major, minor, patch) < 2)
+    LOG_FATAL(LOGF_SysLinux, "Could not parse kernel version");
+}
+
+/* ================================================== */
+
 /* Compute the scaling to use on any frequency we set, according to
    the vintage of the Linux kernel being used. */
 
@@ -278,7 +297,6 @@ static void
 get_version_specific_details(void)
 {
   int major, minor, patch;
-  struct utsname uts;
   
   hz = get_hz();
 
@@ -293,15 +311,7 @@ get_version_specific_details(void)
      (CONFIG_NO_HZ aka tickless), assume the lowest commonly used fixed rate */
   tick_update_hz = 100;
 
-  if (uname(&uts) < 0) {
-    LOG_FATAL(LOGF_SysLinux, "Cannot uname(2) to get kernel version, sorry.");
-  }
-
-  patch = 0;
-  if (sscanf(uts.release, "%d.%d.%d", &major, &minor, &patch) < 2) {
-    LOG_FATAL(LOGF_SysLinux, "Cannot read information from uname, sorry");
-  }
-
+  get_kernel_version(&major, &minor, &patch);
   DEBUG_LOG(LOGF_SysLinux, "Linux kernel major=%d minor=%d patch=%d", major, minor, patch);
 
   if (kernelvercmp(major, minor, patch, 2, 2, 0) < 0) {
@@ -452,8 +462,8 @@ SYS_Linux_EnableSystemCallFilter(int level)
 {
   const int syscalls[] = {
     /* Clock */
-    SCMP_SYS(adjtimex), SCMP_SYS(gettimeofday), SCMP_SYS(settimeofday),
-    SCMP_SYS(time),
+    SCMP_SYS(adjtimex), SCMP_SYS(clock_gettime), SCMP_SYS(gettimeofday),
+    SCMP_SYS(settimeofday), SCMP_SYS(time),
     /* Process */
     SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getrlimit),
     SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn), SCMP_SYS(rt_sigprocmask),
@@ -463,17 +473,17 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(mprotect), SCMP_SYS(mremap), SCMP_SYS(munmap), SCMP_SYS(shmdt),
     /* Filesystem */
     SCMP_SYS(access), SCMP_SYS(chmod), SCMP_SYS(chown), SCMP_SYS(chown32),
-    SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(lseek), SCMP_SYS(rename),
-    SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs), SCMP_SYS(statfs64),
-    SCMP_SYS(unlink),
+    SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(getdents), SCMP_SYS(getdents64),
+    SCMP_SYS(lseek), SCMP_SYS(rename), SCMP_SYS(stat), SCMP_SYS(stat64),
+    SCMP_SYS(statfs), SCMP_SYS(statfs64), SCMP_SYS(unlink),
     /* Socket */
     SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname),
-    SCMP_SYS(recvfrom), SCMP_SYS(recvmsg), SCMP_SYS(sendmmsg),
-    SCMP_SYS(sendmsg), SCMP_SYS(sendto),
+    SCMP_SYS(recvfrom), SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg),
+    SCMP_SYS(sendmmsg), SCMP_SYS(sendmsg), SCMP_SYS(sendto),
     /* TODO: check socketcall arguments */
     SCMP_SYS(socketcall),
     /* General I/O */
-    SCMP_SYS(_newselect), SCMP_SYS(close), SCMP_SYS(open), SCMP_SYS(pipe),
+    SCMP_SYS(_newselect), SCMP_SYS(close), SCMP_SYS(open), SCMP_SYS(openat), SCMP_SYS(pipe),
     SCMP_SYS(poll), SCMP_SYS(read), SCMP_SYS(futex), SCMP_SYS(select),
     SCMP_SYS(set_robust_list), SCMP_SYS(write),
     /* Miscellaneous */
@@ -493,14 +503,17 @@ SYS_Linux_EnableSystemCallFilter(int level)
     { SOL_IPV6, IPV6_V6ONLY }, { SOL_IPV6, IPV6_RECVPKTINFO },
 #endif
     { SOL_SOCKET, SO_BROADCAST }, { SOL_SOCKET, SO_REUSEADDR },
-    { SOL_SOCKET, SO_TIMESTAMP },
+    { SOL_SOCKET, SO_TIMESTAMP }, { SOL_SOCKET, SO_TIMESTAMPNS },
+#ifdef HAVE_LINUX_TIMESTAMPING
+    { SOL_SOCKET, SO_SELECT_ERR_QUEUE }, { SOL_SOCKET, SO_TIMESTAMPING },
+#endif
   };
 
   const static int fcntls[] = { F_GETFD, F_SETFD };
 
   const static unsigned long ioctls[] = {
     FIONREAD, TCGETS,
-#ifdef FEAT_PPS
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
     PTP_SYS_OFFSET,
 #endif
 #ifdef FEAT_PPS
@@ -508,6 +521,9 @@ SYS_Linux_EnableSystemCallFilter(int level)
 #endif
 #ifdef FEAT_RTC
     RTC_RD_TIME, RTC_SET_TIME, RTC_UIE_ON, RTC_UIE_OFF,
+#endif
+#ifdef HAVE_LINUX_TIMESTAMPING
+    SIOCETHTOOL,
 #endif
   };
 
@@ -633,3 +649,15 @@ void SYS_Linux_MemLockAll(int LockAll)
   }
 }
 #endif /* HAVE_MLOCKALL */
+
+/* ================================================== */
+
+int
+SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
+{
+  int major, minor, patch;
+
+  get_kernel_version(&major, &minor, &patch);
+
+  return kernelvercmp(req_major, req_minor, 0, major, minor, patch) <= 0;
+}

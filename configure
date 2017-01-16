@@ -4,7 +4,8 @@
 # chronyd/chronyc - Programs for keeping computer clocks accurate.
 #
 # Copyright (C) Richard P. Curnow  1997-2003
-# Copyright (C) Miroslav Lichvar  2009, 2012-2015
+# Copyright (C) Bryan Christianson  2016
+# Copyright (C) Miroslav Lichvar  2009, 2012-2016
 #
 # =======================================================================
 
@@ -24,6 +25,7 @@ test_code () {
   printf "%s" "Checking for $name : "
 
   (
+    echo "#include \"config.h\""
     for h in $headers; do
       echo "#include <$h>"
     done
@@ -79,9 +81,8 @@ For better control, use the options below.
   --disable-readline     Disable line editing support
   --without-readline     Don't use GNU readline even if it is available
   --without-editline     Don't use editline even if it is available
-  --readline-dir=DIR     Specify parent of readline include and lib directories
-  --readline-inc-dir=DIR Specify where readline include directory is
-  --readline-lib-dir=DIR Specify where readline lib directory is
+  --with-readline-includes=DIR Specify where readline include directory is
+  --with-readline-library=DIR Specify where readline lib directory is
   --with-ncurses-library=DIR Specify where ncurses lib directory is
   --disable-sechash      Disable support for hashes other than MD5
   --without-nss          Don't use NSS even if it is available
@@ -99,10 +100,15 @@ For better control, use the options below.
   --without-seccomp      Don't use seccomp even if it is available
   --disable-asyncdns     Disable asynchronous name resolving
   --disable-forcednsretry Don't retry on permanent DNS error
+  --without-clock-gettime Don't use clock_gettime() even if it is available
+  --disable-timestamping Disable support for SW/HW timestamping
+  --enable-ntp-signd     Enable support for MS-SNTP authentication in Samba
   --with-ntp-era=SECONDS Specify earliest assumed NTP time in seconds
                          since 1970-01-01 [50*365 days ago]
   --with-user=USER       Specify default chronyd user [root]
   --with-hwclockfile=PATH Specify default path to hwclock(8) adjtime file
+  --with-pidfile=PATH    Specify default pidfile [/var/run/chronyd.pid]
+  --with-rtcdevice=PATH  Specify default path to RTC device [/dev/rtc]
   --with-sendmail=PATH   Path to sendmail binary [/usr/lib/sendmail]
   --enable-debug         Enable debugging support
 
@@ -114,7 +120,7 @@ Fine tuning of the installation directories:
   --mandir=DIR           man documentation [DATAROOTDIR/man]
   --docdir=DIR           documentation root [DATAROOTDIR/doc/chrony]
   --localstatedir=DIR    modifiable single-machine data [/var]
-  --chronysockdir=DIR    location for chrony sockets [LOCALSTATEDIR/run/chrony]
+  --chronyrundir=DIR     location for chrony sockets [LOCALSTATEDIR/run/chrony]
   --chronyvardir=DIR     location for chrony data [LOCALSTATEDIR/lib/chrony]
 
 Overriding system detection when cross-compiling:
@@ -213,9 +219,16 @@ try_setsched=0
 try_lockmem=0
 feat_asyncdns=1
 feat_forcednsretry=1
+try_clock_gettime=1
+try_recvmmsg=1
+feat_timestamping=1
+try_timestamping=0
+feat_ntp_signd=0
 ntp_era_split=""
 default_user="root"
 default_hwclockfile=""
+default_pidfile="/var/run/chronyd.pid"
+default_rtcdevice="/dev/rtc"
 mail_program="/usr/lib/sendmail"
 
 for option
@@ -269,8 +282,8 @@ do
     --localstatedir=* )
       SETLOCALSTATEDIR=`echo $option | sed -e 's/^.*=//;'`
     ;;
-    --chronysockdir=* )
-      SETCHRONYSOCKDIR=`echo $option | sed -e 's/^.*=//;'`
+    --chronyrundir=* | --chronysockdir=* )
+      SETCHRONYRUNDIR=`echo $option | sed -e 's/^.*=//;'`
     ;;
     --chronyvardir=* )
       SETCHRONYVARDIR=`echo $option | sed -e 's/^.*=//;'`
@@ -317,6 +330,15 @@ do
     --disable-forcednsretry)
       feat_forcednsretry=0
     ;;
+    --without-clock-gettime)
+      try_clock_gettime=0
+    ;;
+    --disable-timestamping)
+      feat_timestamping=0
+    ;;
+    --enable-ntp-signd)
+      feat_ntp_signd=1
+    ;;
     --with-ntp-era=* )
       ntp_era_split=`echo $option | sed -e 's/^.*=//;'`
     ;;
@@ -325,6 +347,12 @@ do
     ;;
     --with-hwclockfile=* )
       default_hwclockfile=`echo $option | sed -e 's/^.*=//;'`
+    ;;
+    --with-pidfile=* )
+      default_pidfile=`echo $option | sed -e 's/^.*=//;'`
+    ;;
+    --with-rtcdevice=* )
+      default_rtcdevice=`echo $option | sed -e 's/^.*=//;'`
     ;;
     --with-sendmail=* )
       mail_program=`echo $option | sed -e 's/^.*=//;'`
@@ -366,6 +394,7 @@ case $OPERATINGSYSTEM in
         [ $try_libcap != "0" ] && try_libcap=1
         try_rtc=1
         [ $try_seccomp != "0" ] && try_seccomp=1
+        try_timestamping=1
         try_setsched=1
         try_lockmem=1
         try_phc=1
@@ -373,6 +402,9 @@ case $OPERATINGSYSTEM in
         echo "Configuring for " $SYSTEM
     ;;
     FreeBSD)
+        # recvmmsg() seems to be broken on FreeBSD 11.0 and it's just
+        # a wrapper around recvmsg()
+        try_recvmmsg=0
         EXTRA_OBJECTS="sys_generic.o sys_netbsd.o sys_timex.o"
         add_def FREEBSD
         if [ $feat_droproot = "1" ]; then
@@ -396,7 +428,7 @@ case $OPERATINGSYSTEM in
           add_def FEAT_PRIVDROP
           priv_ops="ADJUSTTIME SETTIME BINDSOCKET"
         fi
-        echo "Configuring for MacOS X (" $SYSTEM "MacOS X version" $VERSION ")"
+        echo "Configuring for macOS (" $SYSTEM "macOS version" $VERSION ")"
     ;;
     SunOS)
         EXTRA_OBJECTS="sys_generic.o sys_solaris.o sys_timex.o"
@@ -432,8 +464,13 @@ fi
 if [ $feat_ntp = "1" ]; then
   add_def FEAT_NTP
   EXTRA_OBJECTS="$EXTRA_OBJECTS ntp_core.o ntp_io.o ntp_sources.o"
+  if [ $feat_ntp_signd = "1" ]; then
+    add_def FEAT_SIGND
+    EXTRA_OBJECTS="$EXTRA_OBJECTS ntp_signd.o"
+  fi
 else
   feat_asyncdns=0
+  feat_timestamping=0
 fi
 
 if [ "$feat_cmdmon" = "1" ] || [ $feat_ntp = "1" ]; then
@@ -559,6 +596,21 @@ then
   fi
 fi
 
+if [ $try_clock_gettime = "1" ]; then
+  if test_code 'clock_gettime()' 'time.h' '' '' \
+    'clock_gettime(CLOCK_REALTIME, NULL);'
+  then
+    add_def HAVE_CLOCK_GETTIME
+  else
+    if test_code 'clock_gettime() in -lrt' 'time.h' '' '-lrt' \
+      'clock_gettime(CLOCK_REALTIME, NULL);'
+    then
+      add_def HAVE_CLOCK_GETTIME
+      EXTRA_LIBS="$EXTRA_LIBS -lrt"
+    fi
+  fi
+fi
+
 if test_code 'getaddrinfo()' 'sys/types.h sys/socket.h netdb.h' '' "$EXTRA_LIBS" \
   'return getaddrinfo(0, 0, 0, 0);'
 then
@@ -577,6 +629,35 @@ fi
 
 if test_code 'arc4random_buf()' 'stdlib.h' '' '' 'arc4random_buf(NULL, 0);'; then
   add_def HAVE_ARC4RANDOM
+fi
+
+RECVMMSG_CODE='
+  struct mmsghdr hdr;
+  return !recvmmsg(0, &hdr, 1, MSG_DONTWAIT, 0);'
+if [ $try_recvmmsg = "1" ]; then
+  if test_code 'recvmmsg()' 'sys/socket.h' '' "$EXTRA_LIBS" "$RECVMMSG_CODE"; then
+    add_def HAVE_RECVMMSG
+  else
+    if test_code 'recvmmsg() with _GNU_SOURCE' 'sys/socket.h' '-D_GNU_SOURCE' \
+      "$EXTRA_LIBS" "$RECVMMSG_CODE"
+    then
+      add_def _GNU_SOURCE
+      add_def HAVE_RECVMMSG
+    fi
+  fi
+fi
+
+if [ $feat_timestamping = "1" ] && [ $try_timestamping = "1" ] &&
+  test_code 'SW/HW timestamping' 'sys/types.h sys/socket.h linux/net_tstamp.h
+                                  linux/errqueue.h linux/ptp_clock.h' '' '' '
+    int val = SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RX_SOFTWARE |
+              SOF_TIMESTAMPING_RAW_HARDWARE | SOF_TIMESTAMPING_OPT_CMSG;
+    return sizeof (struct scm_timestamping) + SCM_TSTAMP_SND + PTP_SYS_OFFSET +
+           setsockopt(0, SOL_SOCKET, SO_SELECT_ERR_QUEUE + SO_TIMESTAMPING,
+                      &val, sizeof (val));'
+then
+  add_def HAVE_LINUX_TIMESTAMPING
+  EXTRA_OBJECTS="$EXTRA_OBJECTS hwclock.o ntp_io_linux.o"
 fi
 
 timepps_h=""
@@ -649,19 +730,11 @@ then
 fi
 
 if [ $feat_refclock = "1" ] && [ $feat_phc = "1" ] && [ $try_phc = "1" ] && \
+  grep '#define HAVE_CLOCK_GETTIME' config.h > /dev/null && \
   test_code '<linux/ptp_clock.h>' 'sys/ioctl.h linux/ptp_clock.h' '' '' \
     'ioctl(1, PTP_CLOCK_GETCAPS, 0);'
 then
-  if test_code 'clock_gettime()' 'time.h' '' '' 'clock_gettime(0, NULL);'; then
-    add_def FEAT_PHC
-  else
-    if test_code 'clock_gettime() in -lrt' 'time.h' '' '-lrt' \
-      'clock_gettime(0, NULL);'
-    then
-      EXTRA_LIBS="$EXTRA_LIBS -lrt"
-      add_def FEAT_PHC
-    fi
-  fi
+  add_def FEAT_PHC
 fi
 
 if [ $try_setsched = "1" ] && \
@@ -691,7 +764,6 @@ then
   add_def FORCE_DNSRETRY
 fi
 
-READLINE_COMPILE=""
 READLINE_LINK=""
 if [ $feat_readline = "1" ]; then
   if [ $try_editline = "1" ]; then
@@ -701,7 +773,7 @@ if [ $feat_readline = "1" ]; then
     then
       add_def FEAT_READLINE
       add_def USE_EDITLINE
-      READLINE_COMPILE="$readline_inc"
+      MYCPPFLAGS="$MYCPPFLAGS $readline_inc"
       READLINE_LINK="$readline_lib -ledit"
     fi
   fi
@@ -712,7 +784,7 @@ if [ $feat_readline = "1" ]; then
       'add_history(readline("prompt"));'
     then
       add_def FEAT_READLINE
-      READLINE_COMPILE="$readline_inc"
+      MYCPPFLAGS="$MYCPPFLAGS $readline_inc"
       READLINE_LINK="$readline_lib -lreadline"
     fi
   fi
@@ -724,7 +796,7 @@ if [ $feat_readline = "1" ]; then
       'add_history(readline("prompt"));'
     then
       add_def FEAT_READLINE
-      READLINE_COMPILE="$readline_inc"
+      MYCPPFLAGS="$MYCPPFLAGS $readline_inc"
       READLINE_LINK="$readline_lib $ncurses_lib -lreadline -lncurses"
     fi
   fi
@@ -733,7 +805,6 @@ if [ $feat_readline = "1" ]; then
 fi
 
 HASH_OBJ="hash_intmd5.o"
-HASH_COMPILE=""
 HASH_LINK=""
 
 if [ $feat_sechash = "1" ] && [ $try_nss = "1" ]; then
@@ -744,9 +815,9 @@ if [ $feat_sechash = "1" ] && [ $try_nss = "1" ]; then
     'NSSLOWHASH_Begin(NSSLOWHASH_NewContext(NSSLOW_Init(), HASH_AlgSHA512));'
   then
     HASH_OBJ="hash_nss.o"
-    HASH_COMPILE="$test_cflags"
     HASH_LINK="$test_link"
     LIBS="$LIBS $HASH_LINK"
+    MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
     add_def FEAT_SECHASH
   fi
 fi
@@ -756,9 +827,9 @@ if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_tomcrypt = "1" ]
     'hash_memory_multi(find_hash("md5"), NULL, NULL, NULL, 0, NULL, 0);'
   then
     HASH_OBJ="hash_tomcrypt.o"
-    HASH_COMPILE="-I/usr/include/tomcrypt"
     HASH_LINK="-ltomcrypt"
     LIBS="$LIBS $HASH_LINK"
+    MYCPPFLAGS="$MYCPPFLAGS -I/usr/include/tomcrypt"
     add_def FEAT_SECHASH
   fi
 fi
@@ -808,9 +879,9 @@ if [ "x$SETLOCALSTATEDIR" != "x" ]; then
   LOCALSTATEDIR=$SETLOCALSTATEDIR
 fi
 
-CHRONYSOCKDIR=${LOCALSTATEDIR}/run/chrony
-if [ "x$SETCHRONYSOCKDIR" != "x" ]; then
-  CHRONYSOCKDIR=$SETCHRONYSOCKDIR
+CHRONYRUNDIR=${LOCALSTATEDIR}/run/chrony
+if [ "x$SETCHRONYRUNDIR" != "x" ]; then
+  CHRONYRUNDIR=$SETCHRONYRUNDIR
 fi
 
 CHRONYVARDIR=${LOCALSTATEDIR}/lib/chrony
@@ -820,13 +891,15 @@ fi
 
 add_def DEFAULT_CONF_FILE "\"$SYSCONFDIR/chrony.conf\""
 add_def DEFAULT_HWCLOCK_FILE "\"$default_hwclockfile\""
+add_def DEFAULT_PID_FILE "\"$default_pidfile\""
+add_def DEFAULT_RTC_DEVICE "\"$default_rtcdevice\""
 add_def DEFAULT_USER "\"$default_user\""
-add_def DEFAULT_COMMAND_SOCKET "\"$CHRONYSOCKDIR/chronyd.sock\""
+add_def DEFAULT_COMMAND_SOCKET "\"$CHRONYRUNDIR/chronyd.sock\""
 add_def MAIL_PROGRAM "\"$mail_program\""
 
 common_features="`get_features IPV6 DEBUG`"
 chronyc_features="`get_features READLINE`"
-chronyd_features="`get_features CMDMON NTP REFCLOCK RTC PRIVDROP SCFILTER SECHASH ASYNCDNS`"
+chronyd_features="`get_features CMDMON NTP REFCLOCK RTC PRIVDROP SCFILTER SECHASH SIGND ASYNCDNS`"
 add_def CHRONYC_FEATURES "\"$chronyc_features $common_features\""
 add_def CHRONYD_FEATURES "\"$chronyd_features $common_features\""
 echo "Features : $chronyd_features $chronyc_features $common_features"
@@ -850,18 +923,18 @@ do
           s%@LDFLAGS@%${MYLDFLAGS}%;\
           s%@EXTRA_LIBS@%${EXTRA_LIBS}%;\
           s%@EXTRA_CLI_LIBS@%${EXTRA_CLI_LIBS}%;\
-          s%@READLINE_COMPILE@%${READLINE_COMPILE}%;\
           s%@HASH_OBJ@%${HASH_OBJ}%;\
-          s%@HASH_COMPILE@%${HASH_COMPILE}%;\
           s%@SYSCONFDIR@%${SYSCONFDIR}%;\
           s%@BINDIR@%${BINDIR}%;\
           s%@SBINDIR@%${SBINDIR}%;\
           s%@DOCDIR@%${DOCDIR}%;\
           s%@MANDIR@%${MANDIR}%;\
           s%@LOCALSTATEDIR@%${LOCALSTATEDIR}%;\
-          s%@CHRONYSOCKDIR@%${CHRONYSOCKDIR}%;\
+          s%@CHRONYRUNDIR@%${CHRONYRUNDIR}%;\
           s%@CHRONYVARDIR@%${CHRONYVARDIR}%;\
           s%@DEFAULT_HWCLOCK_FILE@%${default_hwclockfile}%;\
+          s%@DEFAULT_PID_FILE@%${default_pidfile}%;\
+          s%@DEFAULT_RTC_DEVICE@%${default_rtcdevice}%;\
           s%@DEFAULT_USER@%${default_user}%;\
           s%@CHRONY_VERSION@%${CHRONY_VERSION}%;" \
           < ${f}.in > $f

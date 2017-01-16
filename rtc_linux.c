@@ -50,7 +50,7 @@
 
 static void measurement_timeout(void *any);
 
-static void read_from_device(void *any);
+static void read_from_device(int fd_, int event, void *any);
 
 /* ================================================== */
 
@@ -92,9 +92,8 @@ static double *rtc_trim = NULL;
 static time_t rtc_ref;
 
 
-/* System clock (gettimeofday) samples associated with the above
-   samples. */
-static struct timeval *system_times = NULL;
+/* System clock samples associated with the above samples. */
+static struct timespec *system_times = NULL;
 
 /* Number of samples currently stored. */
 static int n_samples;   
@@ -170,7 +169,7 @@ discard_samples(int new_first)
 
   memmove(rtc_sec, rtc_sec + new_first, n_to_save * sizeof(time_t));
   memmove(rtc_trim, rtc_trim + new_first, n_to_save * sizeof(double));
-  memmove(system_times, system_times + new_first, n_to_save * sizeof(struct timeval));
+  memmove(system_times, system_times + new_first, n_to_save * sizeof(struct timespec));
 
   n_samples = n_to_save;
 }
@@ -180,7 +179,7 @@ discard_samples(int new_first)
 #define NEW_FIRST_WHEN_FULL 4
 
 static void
-accumulate_sample(time_t rtc, struct timeval *sys)
+accumulate_sample(time_t rtc, struct timespec *sys)
 {
 
   if (n_samples == MAX_SAMPLES) {
@@ -188,6 +187,11 @@ accumulate_sample(time_t rtc, struct timeval *sys)
     discard_samples(NEW_FIRST_WHEN_FULL);
   }
 
+  /* Discard all samples if the RTC was stepped back (not our trim) */
+  if (n_samples > 0 && rtc_sec[n_samples - 1] - rtc >= rtc_trim[n_samples - 1]) {
+    DEBUG_LOG(LOGF_RtcLinux, "RTC samples discarded");
+    n_samples = 0;
+  }
 
   /* Always use most recent sample as reference */
   /* use sample only if n_sample is not negative*/
@@ -225,7 +229,7 @@ run_regression(int new_sample,
     for (i=0; i<n_samples; i++) {
       rtc_rel[i] = rtc_trim[i] + (double)(rtc_sec[i] - rtc_ref);
       offsets[i] = ((double) (rtc_ref - system_times[i].tv_sec) -
-                    (1.0e-6 * (double) system_times[i].tv_usec) +
+                    (1.0e-9 * system_times[i].tv_nsec) +
                     rtc_rel[i]);
 
     }
@@ -262,7 +266,7 @@ run_regression(int new_sample,
 
 static void
 slew_samples
-(struct timeval *raw, struct timeval *cooked,
+(struct timespec *raw, struct timespec *cooked,
  double dfreq,
  double doffset,
  LCL_ChangeType change_type,
@@ -278,7 +282,7 @@ slew_samples
   }
 
   for (i=0; i<n_samples; i++) {
-    UTI_AdjustTimeval(system_times + i, cooked, system_times + i, &delta_time,
+    UTI_AdjustTimespec(system_times + i, cooked, system_times + i, &delta_time,
         dfreq, doffset);
   }
 
@@ -534,7 +538,7 @@ RTC_Linux_Initialise(void)
 {
   rtc_sec = MallocArray(time_t, MAX_SAMPLES);
   rtc_trim = MallocArray(double, MAX_SAMPLES);
-  system_times = MallocArray(struct timeval, MAX_SAMPLES);
+  system_times = MallocArray(struct timespec, MAX_SAMPLES);
 
   /* Setup details depending on configuration options */
   setup_config();
@@ -564,7 +568,7 @@ RTC_Linux_Initialise(void)
   operating_mode = OM_NORMAL;
 
   /* Register file handler */
-  SCH_AddInputFileHandler(fd, read_from_device, NULL);
+  SCH_AddFileHandler(fd, SCH_FILE_INPUT, read_from_device, NULL);
 
   /* Register slew handler */
   LCL_AddParameterChangeHandler(slew_samples, NULL);
@@ -585,7 +589,7 @@ RTC_Linux_Finalise(void)
 
   /* Remove input file handler */
   if (fd >= 0) {
-    SCH_RemoveInputFileHandler(fd);
+    SCH_RemoveFileHandler(fd);
     close(fd);
 
     /* Save the RTC data */
@@ -758,7 +762,7 @@ maybe_autotrim(void)
 /* ================================================== */
 
 static void
-process_reading(time_t rtc_time, struct timeval *system_time)
+process_reading(time_t rtc_time, struct timespec *system_time)
 {
   double rtc_fast;
 
@@ -791,7 +795,7 @@ process_reading(time_t rtc_time, struct timeval *system_time)
 
 
   if (logfileid != -1) {
-    rtc_fast = (double)(rtc_time - system_time->tv_sec) - 1.0e-6 * (double) system_time->tv_usec;
+    rtc_fast = (rtc_time - system_time->tv_sec) - 1.0e-9 * system_time->tv_nsec;
 
     LOG_FileWrite(logfileid, "%s %14.6f %1d  %14.6f  %12.3f  %2d  %2d %4d",
             UTI_TimeToLogForm(system_time->tv_sec),
@@ -805,11 +809,11 @@ process_reading(time_t rtc_time, struct timeval *system_time)
 /* ================================================== */
 
 static void
-read_from_device(void *any)
+read_from_device(int fd_, int event, void *any)
 {
   int status;
   unsigned long data;
-  struct timeval sys_time;
+  struct timespec sys_time;
   struct rtc_time rtc_raw;
   struct tm rtc_tm;
   time_t rtc_t;
@@ -821,7 +825,7 @@ read_from_device(void *any)
     /* This looks like a bad error : the file descriptor was indicating it was
      * ready to read but we couldn't read anything.  Give up. */
     LOG(LOGS_ERR, LOGF_RtcLinux, "Could not read flags %s : %s", CNF_GetRtcDevice(), strerror(errno));
-    SCH_RemoveInputFileHandler(fd);
+    SCH_RemoveFileHandler(fd);
     switch_interrupts(0); /* Likely to raise error too, but just to be sure... */
     close(fd);
     fd = -1;
@@ -849,7 +853,7 @@ read_from_device(void *any)
       goto turn_off_interrupt;
     }
 
-    /* Convert RTC time into a struct timeval */
+    /* Convert RTC time into a struct timespec */
     rtc_tm.tm_sec = rtc_raw.tm_sec;
     rtc_tm.tm_min = rtc_raw.tm_min;
     rtc_tm.tm_hour = rtc_raw.tm_hour;
@@ -978,7 +982,7 @@ RTC_Linux_TimePreInit(time_t driftfile_time)
   struct tm rtc_tm;
   time_t rtc_t;
   double accumulated_error, sys_offset;
-  struct timeval new_sys_time, old_sys_time;
+  struct timespec new_sys_time, old_sys_time;
 
   coefs_file_name = CNF_GetRtcFile();
 
@@ -1032,16 +1036,16 @@ RTC_Linux_TimePreInit(time_t driftfile_time)
 
       new_sys_time.tv_sec = rtc_t;
       /* Average error in the RTC reading */
-      new_sys_time.tv_usec = 500000;
+      new_sys_time.tv_nsec = 500000000;
 
-      UTI_AddDoubleToTimeval(&new_sys_time, -accumulated_error, &new_sys_time);
+      UTI_AddDoubleToTimespec(&new_sys_time, -accumulated_error, &new_sys_time);
 
       if (new_sys_time.tv_sec < driftfile_time) {
         LOG(LOGS_WARN, LOGF_RtcLinux, "RTC time before last driftfile modification (ignored)");
         return 0;
       }
 
-      UTI_DiffTimevalsToDouble(&sys_offset, &old_sys_time, &new_sys_time);
+      sys_offset = UTI_DiffTimespecsToDouble(&old_sys_time, &new_sys_time);
 
       /* Set system time only if the step is larger than 1 second */
       if (fabs(sys_offset) >= 1.0) {
@@ -1064,7 +1068,7 @@ int
 RTC_Linux_GetReport(RPT_RTC_Report *report)
 {
   report->ref_time.tv_sec = coef_ref_time;
-  report->ref_time.tv_usec = 0;
+  report->ref_time.tv_nsec = 0;
   report->n_samples = n_samples;
   report->n_runs = n_runs;
   if (n_samples > 1) {
@@ -1083,8 +1087,7 @@ RTC_Linux_GetReport(RPT_RTC_Report *report)
 int
 RTC_Linux_Trim(void)
 {
-  struct timeval now;
-
+  struct timespec now;
 
   /* Remember the slope coefficient - we won't be able to determine a
      good one in a few seconds when we determine the new offset! */
@@ -1114,7 +1117,7 @@ RTC_Linux_Trim(void)
 
     /* Estimate the offset in case writertc is called or chronyd
        is terminated during rapid sampling */
-    coef_seconds_fast = -now.tv_usec / 1e6 + 0.5;
+    coef_seconds_fast = -now.tv_nsec / 1.0e9 + 0.5;
     coef_ref_time = now.tv_sec;
 
     /* And start rapid sampling, interrupts on now */

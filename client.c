@@ -3,6 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
+ * Copyright (C) Lonnie Abelbeck  2016
  * Copyright (C) Miroslav Lichvar  2009-2016
  * 
  * This program is free software; you can redistribute it and/or modify
@@ -94,8 +95,11 @@ void LOG_Message(LOG_Severity severity,
 }
 
 /* ================================================== */
-/* Read a single line of commands from standard input.  Eventually we
-   might want to use the GNU readline library. */
+/* Read a single line of commands from standard input */
+
+#ifdef FEAT_READLINE
+static char **command_name_completion(const char *text, int start, int end);
+#endif
 
 static char *
 read_line(void)
@@ -106,6 +110,9 @@ read_line(void)
   if (on_terminal) {
 #ifdef FEAT_READLINE
     char *cmd;
+
+    rl_attempted_completion_function = command_name_completion;
+    rl_basic_word_break_characters = "\t\n\r";
 
     /* save line only if not empty */
     cmd = readline(prompt);
@@ -1059,51 +1066,24 @@ static int
 process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
 {
   CPS_NTP_Source data;
-  CPS_Status status;
   IPAddr ip_addr;
-  char str[64];
-  int result = 0;
+  int result = 0, status;
+  const char *opt_name;
   
   status = CPS_ParseNTPSourceAdd(line, &data);
   switch (status) {
-    case CPS_Success:
+    case 0:
+      LOG(LOGS_ERR, LOGF_Client, "Invalid syntax for add command");
+      break;
+    default:
       if (DNS_Name2IPAddress(data.name, &ip_addr, 1) != DNS_Success) {
         LOG(LOGS_ERR, LOGF_Client, "Invalid host/IP address");
         break;
       }
 
-      if (data.params.min_stratum != SRC_DEFAULT_MINSTRATUM) {
-        LOG(LOGS_WARN, LOGF_Client, "Option minstratum not supported");
-        break;
-      }
-
-      if (data.params.poll_target != SRC_DEFAULT_POLLTARGET) {
-        LOG(LOGS_WARN, LOGF_Client, "Option polltarget not supported");
-        break;
-      }
-
-      if (data.params.max_delay_dev_ratio != SRC_DEFAULT_MAXDELAYDEVRATIO) {
-        LOG(LOGS_WARN, LOGF_Client, "Option maxdelaydevratio not supported");
-        break;
-      }
-
-      if (data.params.version != NTP_VERSION) {
-        LOG(LOGS_WARN, LOGF_Client, "Option version not supported");
-        break;
-      }
-
-      if (data.params.max_sources != SRC_DEFAULT_MAXSOURCES) {
-        LOG(LOGS_WARN, LOGF_Client, "Option maxsources not supported");
-        break;
-      }
-
-      if (data.params.min_samples != SRC_DEFAULT_MINSAMPLES) {
-        LOG(LOGS_WARN, LOGF_Client, "Option minsamples not supported");
-        break;
-      }
-
-      if (data.params.max_samples != SRC_DEFAULT_MAXSAMPLES) {
-        LOG(LOGS_WARN, LOGF_Client, "Option maxsamples not supported");
+      opt_name = NULL;
+      if (opt_name) {
+        LOG(LOGS_ERR, LOGF_Client, "%s can't be set in chronyc", opt_name);
         break;
       }
 
@@ -1112,23 +1092,29 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       msg->data.ntp_source.minpoll = htonl(data.params.minpoll);
       msg->data.ntp_source.maxpoll = htonl(data.params.maxpoll);
       msg->data.ntp_source.presend_minpoll = htonl(data.params.presend_minpoll);
+      msg->data.ntp_source.min_stratum = htonl(data.params.min_stratum);
+      msg->data.ntp_source.poll_target = htonl(data.params.poll_target);
+      msg->data.ntp_source.version = htonl(data.params.version);
+      msg->data.ntp_source.max_sources = htonl(data.params.max_sources);
+      msg->data.ntp_source.min_samples = htonl(data.params.min_samples);
+      msg->data.ntp_source.max_samples = htonl(data.params.max_samples);
       msg->data.ntp_source.authkey = htonl(data.params.authkey);
       msg->data.ntp_source.max_delay = UTI_FloatHostToNetwork(data.params.max_delay);
       msg->data.ntp_source.max_delay_ratio = UTI_FloatHostToNetwork(data.params.max_delay_ratio);
+      msg->data.ntp_source.max_delay_dev_ratio =
+        UTI_FloatHostToNetwork(data.params.max_delay_dev_ratio);
+      msg->data.ntp_source.offset = UTI_FloatHostToNetwork(data.params.offset);
       msg->data.ntp_source.flags = htonl(
           (data.params.online ? REQ_ADDSRC_ONLINE : 0) |
           (data.params.auto_offline ? REQ_ADDSRC_AUTOOFFLINE : 0) |
           (data.params.iburst ? REQ_ADDSRC_IBURST : 0) |
+          (data.params.interleaved ? REQ_ADDSRC_INTERLEAVED : 0) |
           (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
           (data.params.sel_options & SRC_SELECT_REQUIRE ? REQ_ADDSRC_REQUIRE : 0));
       result = 1;
 
-      break;
-    default:
-      CPS_StatusToString(status, str, sizeof (str));
-      LOG(LOGS_ERR, LOGF_Client, "%s", str);
       break;
   }
 
@@ -1140,7 +1126,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
 static int
 process_cmd_add_server(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_ADD_SERVER);
+  msg->command = htons(REQ_ADD_SERVER2);
   return process_cmd_add_server_or_peer(msg, line);
 }
 
@@ -1149,7 +1135,7 @@ process_cmd_add_server(CMD_Request *msg, char *line)
 static int
 process_cmd_add_peer(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_ADD_PEER);
+  msg->command = htons(REQ_ADD_PEER2);
   return process_cmd_add_server_or_peer(msg, line);
 }
 
@@ -1206,6 +1192,7 @@ give_help(void)
     "\0\0"
     "NTP sources:\0\0"
     "activity\0Check how many NTP sources are online/offline\0"
+    "ntpdata [<address>]\0Display information about last valid measurement\0"
     "add server <address> [options]\0Add new NTP server\0"
     "add peer <address> [options]\0Add new NTP peer\0"
     "delete <address>\0Remove server or peer\0"
@@ -1275,8 +1262,53 @@ give_help(void)
 }
 
 /* ================================================== */
+/* Tab-completion when editline/readline is available */
 
-static unsigned long sequence = 0;
+#ifdef FEAT_READLINE
+static char *
+command_name_generator(const char *text, int state)
+{
+  const char *name, *names[] = {
+    "accheck", "activity", "add peer", "add server", "allow", "burst",
+    "clients", "cmdaccheck", "cmdallow", "cmddeny", "cyclelogs", "delete",
+    "deny", "dns", "dump", "exit", "help", "keygen", "local", "makestep",
+    "manual on", "manual off", "manual delete", "manual list", "manual reset",
+    "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
+    "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online",
+    "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist",
+    "retries", "rtcdata", "serverstats", "settime", "smoothing", "smoothtime",
+    "sources", "sources -v", "sourcestats", "sourcestats -v", "timeout",
+    "tracking", "trimrtc", "waitsync", "writertc",
+    NULL
+  };
+  static int list_index, len;
+
+  if (!state) {
+    list_index = 0;
+    len = strlen(text);
+  }
+
+  while ((name = names[list_index++])) {
+    if (strncmp(name, text, len) == 0) {
+      return strdup(name);
+    }
+  }
+
+  return NULL;
+}
+
+/* ================================================== */
+
+static char **
+command_name_completion(const char *text, int start, int end)
+{
+  rl_attempted_completion_over = 1;
+  return rl_completion_matches(text, command_name_generator);
+}
+#endif
+
+/* ================================================== */
+
 static int max_retries = 2;
 static int initial_timeout = 1000;
 static int proto_version = PROTO_VERSION_NUMBER;
@@ -1289,7 +1321,6 @@ static int proto_version = PROTO_VERSION_NUMBER;
 static int
 submit_request(CMD_Request *request, CMD_Reply *reply)
 {
-  unsigned long tx_sequence;
   int bad_length, bad_sequence, bad_header;
   int select_status;
   int recv_status;
@@ -1297,52 +1328,72 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
   int expected_length;
   int command_length;
   int padding_length;
+  struct timespec ts_now, ts_start;
   struct timeval tv;
-  int timeout;
-  int n_attempts;
+  int n_attempts, new_attempt;
+  double timeout;
   fd_set rdfd, wrfd, exfd;
 
   request->pkt_type = PKT_TYPE_CMD_REQUEST;
   request->res1 = 0;
   request->res2 = 0;
-  tx_sequence = sequence++;
-  request->sequence = htonl(tx_sequence);
-  request->attempt = 0;
   request->pad1 = 0;
   request->pad2 = 0;
 
-  timeout = initial_timeout;
-
   n_attempts = 0;
+  new_attempt = 1;
 
   do {
-    request->version = proto_version;
-    command_length = PKL_CommandLength(request);
-    padding_length = PKL_CommandPaddingLength(request);
-    assert(command_length > 0 && command_length > padding_length);
+    if (new_attempt) {
+      new_attempt = 0;
 
-    /* Zero the padding to avoid sending uninitialized data */
-    memset(((char *)request) + command_length - padding_length, 0, padding_length);
+      if (n_attempts > max_retries)
+        return 0;
 
-    if (sock_fd < 0) {
-      DEBUG_LOG(LOGF_Client, "No socket to send request");
-      return 0;
+      if (gettimeofday(&tv, NULL))
+        return 0;
+
+      UTI_TimevalToTimespec(&tv, &ts_start);
+
+      UTI_GetRandomBytes(&request->sequence, sizeof (request->sequence));
+      request->attempt = htons(n_attempts);
+      request->version = proto_version;
+      command_length = PKL_CommandLength(request);
+      padding_length = PKL_CommandPaddingLength(request);
+      assert(command_length > 0 && command_length > padding_length);
+
+      n_attempts++;
+
+      /* Zero the padding to not send any uninitialized data */
+      memset(((char *)request) + command_length - padding_length, 0, padding_length);
+
+      if (sock_fd < 0) {
+        DEBUG_LOG(LOGF_Client, "No socket to send request");
+        return 0;
+      }
+
+      if (send(sock_fd, (void *)request, command_length, 0) < 0) {
+        DEBUG_LOG(LOGF_Client, "Could not send %d bytes : %s",
+                  command_length, strerror(errno));
+        return 0;
+      }
+
+      DEBUG_LOG(LOGF_Client, "Sent %d bytes", command_length);
     }
 
-    if (send(sock_fd, (void *)request, command_length, 0) < 0) {
-      DEBUG_LOG(LOGF_Client, "Could not send %d bytes : %s",
-                command_length, strerror(errno));
+    if (gettimeofday(&tv, NULL))
       return 0;
-    }
 
-    DEBUG_LOG(LOGF_Client, "Sent %d bytes", command_length);
+    UTI_TimevalToTimespec(&tv, &ts_now);
 
-    /* Increment this for next time */
-    ++ request->attempt;
-      
-    tv.tv_sec = timeout / 1000;
-    tv.tv_usec = timeout % 1000 * 1000;
-    timeout *= 2;
+    /* Check if the clock wasn't stepped back */
+    if (UTI_CompareTimespecs(&ts_now, &ts_start) < 0)
+      ts_start = ts_now;
+
+    timeout = initial_timeout / 1000.0 * (1U << (n_attempts - 1)) -
+              UTI_DiffTimespecsToDouble(&ts_now, &ts_start);
+    UTI_DoubleToTimeval(timeout, &tv);
+    DEBUG_LOG(LOGF_Client, "Timeout %f seconds", timeout);
 
     FD_ZERO(&rdfd);
     FD_ZERO(&wrfd);
@@ -1359,14 +1410,7 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
       DEBUG_LOG(LOGF_Client, "select failed : %s", strerror(errno));
     } else if (select_status == 0) {
       /* Timeout must have elapsed, try a resend? */
-      n_attempts ++;
-      if (n_attempts > max_retries) {
-        return 0;
-      }
-
-      /* Back to top of loop to do resend */
-      continue;
-      
+      new_attempt = 1;
     } else {
       recv_status = recv(sock_fd, (void *)reply, sizeof(CMD_Reply), 0);
       
@@ -1374,11 +1418,7 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
         /* If we get connrefused here, it suggests the sendto is
            going to a dead port */
         DEBUG_LOG(LOGF_Client, "Could not receive : %s", strerror(errno));
-
-        n_attempts++;
-        if (n_attempts > max_retries) {
-          return 0;
-        }
+        new_attempt = 1;
       } else {
         DEBUG_LOG(LOGF_Client, "Received %d bytes", recv_status);
         
@@ -1393,16 +1433,12 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
                       expected_length < offsetof(CMD_Reply, data));
         
         if (!bad_length) {
-          bad_sequence = (ntohl(reply->sequence) != tx_sequence);
+          bad_sequence = reply->sequence != request->sequence;
         } else {
           bad_sequence = 0;
         }
         
         if (bad_length || bad_sequence) {
-          n_attempts++;
-          if (n_attempts > max_retries) {
-            return 0;
-          }
           continue;
         }
         
@@ -1415,10 +1451,6 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
                       (reply->command != request->command));
         
         if (bad_header) {
-          n_attempts++;
-          if (n_attempts > max_retries) {
-            return 0;
-          }
           continue;
         }
         
@@ -1429,6 +1461,8 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
         if (proto_version == PROTO_VERSION_NUMBER &&
             reply->version == PROTO_VERSION_NUMBER - 1) {
           proto_version = PROTO_VERSION_NUMBER - 1;
+          n_attempts--;
+          new_attempt = 1;
           continue;
         }
 #else
@@ -1436,9 +1470,8 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
 #endif
 
         /* Good packet received, print out results */
-        DEBUG_LOG(LOGF_Client, "Reply cmd=%d reply=%d stat=%d seq=%d",
-                  ntohs(reply->command), ntohs(reply->reply), ntohs(reply->status),
-                  ntohl(reply->sequence));
+        DEBUG_LOG(LOGF_Client, "Reply cmd=%d reply=%d stat=%d",
+                  ntohs(reply->command), ntohs(reply->reply), ntohs(reply->status));
         break;
       }
     }
@@ -1554,7 +1587,7 @@ print_seconds(unsigned long s)
 
   if (s == (uint32_t)-1) {
     printf("   -");
-  } else if (s <= 1024) {
+  } else if (s < 1200) {
     printf("%4ld", s);
   } else if (s < 36000) {
     printf("%3ldm", s / 60);
@@ -1699,7 +1732,7 @@ print_report(const char *format, ...)
   unsigned long long_uinteger;
   unsigned int uinteger;
   int integer;
-  struct timeval *tv;
+  struct timespec *ts;
   struct tm *tm;
   double dbl;
 
@@ -1780,6 +1813,10 @@ print_report(const char *format, ...)
     }
 
     switch (spec) {
+      case 'B': /* boolean */
+        integer = va_arg(ap, int);
+        printf("%s", integer ? "Yes" : "No");
+        break;
       case 'C': /* clientlog interval */
         integer = va_arg(ap, int);
         print_clientlog_interval(integer);
@@ -1795,6 +1832,63 @@ print_report(const char *format, ...)
         long_uinteger = va_arg(ap, unsigned long);
         print_seconds(long_uinteger);
         break;
+      case 'L': /* leap status */
+        integer = va_arg(ap, int);
+        switch (integer) {
+          case LEAP_Normal:
+            string = "Normal";
+            break;
+          case LEAP_InsertSecond:
+            string = "Insert second";
+            break;
+          case LEAP_DeleteSecond:
+            string = "Delete second";
+            break;
+          case LEAP_Unsynchronised:
+            string = "Not synchronised";
+            break;
+          default:
+            string = "Invalid";
+            break;
+        }
+        printf("%s", string);
+        break;
+      case 'M': /* NTP mode */
+        integer = va_arg(ap, int);
+        switch (integer) {
+          case MODE_ACTIVE:
+            string = "Symmetric active";
+            break;
+          case MODE_PASSIVE:
+            string = "Symmetric passive";
+            break;
+          case MODE_SERVER:
+            string = "Server";
+            break;
+          default:
+            string = "Invalid";
+            break;
+        }
+        printf("%s", string);
+        break;
+      case 'N': /* Timestamp source */
+        integer = va_arg(ap, int);
+        switch (integer) {
+          case 'D':
+            string = "Daemon";
+            break;
+          case 'K':
+            string = "Kernel";
+            break;
+          case 'H':
+            string = "Hardware";
+            break;
+          default:
+            string = "Invalid";
+            break;
+        }
+        printf("%s", string);
+        break;
       case 'P': /* frequency in ppm */
         dbl = va_arg(ap, double);
         if (sign)
@@ -1802,10 +1896,9 @@ print_report(const char *format, ...)
         else
           print_freq_ppm(dbl);
         break;
-      case 'R': /* reference ID in quad-dotted notation */
+      case 'R': /* reference ID in hexdecimal */
         long_uinteger = va_arg(ap, unsigned long);
-        printf("%lu.%lu.%lu.%lu", long_uinteger >> 24, (long_uinteger >> 16) & 0xff,
-               (long_uinteger >> 8) & 0xff, long_uinteger & 0xff);
+        printf("%08lX", long_uinteger);
         break;
       case 'S': /* offset with unit */
         dbl = va_arg(ap, double);
@@ -1814,9 +1907,9 @@ print_report(const char *format, ...)
         else
           print_nanoseconds(dbl);
         break;
-      case 'T': /* timeval as date and time in UTC */
-        tv = va_arg(ap, struct timeval *);
-        tm = gmtime(&tv->tv_sec);
+      case 'T': /* timespec as date and time in UTC */
+        ts = va_arg(ap, struct timespec *);
+        tm = gmtime(&ts->tv_sec);
         if (!tm)
           break;
         strftime(buf, sizeof (buf), "%a %b %d %T %Y", tm);
@@ -1826,9 +1919,14 @@ print_report(const char *format, ...)
         long_uinteger = va_arg(ap, unsigned long);
         printf("%*lu", width, long_uinteger);
         break;
-      case 'V': /* timeval as seconds since epoch */
-        tv = va_arg(ap, struct timeval *);
-        printf("%s", UTI_TimevalToString(tv));
+      case 'V': /* timespec as seconds since epoch */
+        ts = va_arg(ap, struct timespec *);
+        printf("%s", UTI_TimespecToString(ts));
+        break;
+      case 'b': /* unsigned int in binary */
+        uinteger = va_arg(ap, unsigned int);
+        for (i = prec - 1; i >= 0; i--)
+          printf("%c", uinteger & 1U << i ? '1' : '0');
         break;
 
       /* Classic printf specifiers */
@@ -1899,8 +1997,10 @@ format_name(char *buf, int size, int trunc_dns, int ref, uint32_t ref_id,
     snprintf(buf, size, "%s", UTI_IPToString(ip_addr));
   } else {
     DNS_IPAddress2Name(ip_addr, buf, size);
-    if (size > trunc_dns)
+    if (trunc_dns > 0 && strlen(buf) > trunc_dns) {
+      buf[trunc_dns - 1] = '>';
       buf[trunc_dns] = '\0';
+    }
   }
 }
 
@@ -2067,7 +2167,7 @@ process_cmd_sourcestats(char *line)
     format_name(name, sizeof (name), 25, ip_addr.family == IPADDR_UNSPEC,
                 ntohl(reply.data.sourcestats.ref_id), &ip_addr);
 
-    print_report("%-25s %3u %3u  %I %+P %P  %+S  %S\n",
+    print_report("%-25s %3U %3U  %I %+P %P  %+S  %S\n",
                  name,
                  (unsigned long)ntohl(reply.data.sourcestats.n_samples),
                  (unsigned long)ntohl(reply.data.sourcestats.n_runs),
@@ -2092,8 +2192,7 @@ process_cmd_tracking(char *line)
   IPAddr ip_addr;
   uint32_t ref_id;
   char name[50];
-  struct timeval ref_time;
-  const char *leap_status;
+  struct timespec ref_time;
   
   request.command = htons(REQ_TRACKING);
   if (!request_reply(&request, &reply, RPY_TRACKING, 0))
@@ -2105,25 +2204,7 @@ process_cmd_tracking(char *line)
   format_name(name, sizeof (name), sizeof (name),
               ip_addr.family == IPADDR_UNSPEC, ref_id, &ip_addr);
 
-  switch (ntohs(reply.data.tracking.leap_status)) {
-    case LEAP_Normal:
-      leap_status = "Normal";
-      break;
-    case LEAP_InsertSecond:
-      leap_status = "Insert second";
-      break;
-    case LEAP_DeleteSecond:
-      leap_status = "Delete second";
-      break;
-    case LEAP_Unsynchronised:
-      leap_status = "Not synchronised";
-      break;
-    default:
-      leap_status = "Unknown";
-      break;
-  }
-
-  UTI_TimevalNetworkToHost(&reply.data.tracking.ref_time, &ref_time);
+  UTI_TimespecNetworkToHost(&reply.data.tracking.ref_time, &ref_time);
 
   print_report("Reference ID    : %R (%s)\n"
                "Stratum         : %u\n"
@@ -2137,7 +2218,7 @@ process_cmd_tracking(char *line)
                "Root delay      : %.6f seconds\n"
                "Root dispersion : %.6f seconds\n"
                "Update interval : %.1f seconds\n"
-               "Leap status     : %s\n",
+               "Leap status     : %L\n",
                (unsigned long)ref_id, name,
                ntohs(reply.data.tracking.stratum),
                &ref_time,
@@ -2150,7 +2231,121 @@ process_cmd_tracking(char *line)
                UTI_FloatNetworkToHost(reply.data.tracking.root_delay),
                UTI_FloatNetworkToHost(reply.data.tracking.root_dispersion),
                UTI_FloatNetworkToHost(reply.data.tracking.last_update_interval),
-               leap_status, REPORT_END);
+               ntohs(reply.data.tracking.leap_status), REPORT_END);
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
+process_cmd_ntpdata(char *line)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  IPAddr remote_addr, local_addr;
+  struct timespec ref_time;
+  uint32_t i, n_sources;
+  uint16_t mode;
+  int specified_addr;
+
+  if (*line) {
+    specified_addr = 1;
+    n_sources = 1;
+  } else {
+    specified_addr = 0;
+    request.command = htons(REQ_N_SOURCES);
+    if (!request_reply(&request, &reply, RPY_N_SOURCES, 0))
+      return 0;
+    n_sources = ntohl(reply.data.n_sources.n_sources);
+  }
+
+  for (i = 0; i < n_sources; i++) {
+    if (specified_addr) {
+      if (DNS_Name2IPAddress(line, &remote_addr, 1) != DNS_Success) {
+        LOG(LOGS_ERR, LOGF_Client, "Could not get address for hostname");
+        return 0;
+      }
+    } else {
+      request.command = htons(REQ_SOURCE_DATA);
+      request.data.source_data.index = htonl(i);
+      if (!request_reply(&request, &reply, RPY_SOURCE_DATA, 0))
+        return 0;
+
+      mode = ntohs(reply.data.source_data.mode);
+      if (mode != RPY_SD_MD_CLIENT && mode != RPY_SD_MD_PEER)
+        continue;
+
+      UTI_IPNetworkToHost(&reply.data.source_data.ip_addr, &remote_addr);
+    }
+
+    request.command = htons(REQ_NTP_DATA);
+    UTI_IPHostToNetwork(&remote_addr, &request.data.ntp_data.ip_addr);
+    if (!request_reply(&request, &reply, RPY_NTP_DATA, 0))
+      return 0;
+
+    UTI_IPNetworkToHost(&reply.data.ntp_data.remote_addr, &remote_addr);
+    UTI_IPNetworkToHost(&reply.data.ntp_data.local_addr, &local_addr);
+    UTI_TimespecNetworkToHost(&reply.data.ntp_data.ref_time, &ref_time);
+
+    if (!specified_addr && !csv_mode)
+      printf("\n");
+
+    print_report("Remote address  : %s (%R)\n"
+                 "Remote port     : %u\n"
+                 "Local address   : %s (%R)\n"
+                 "Leap status     : %L\n"
+                 "Version         : %u\n"
+                 "Mode            : %M\n"
+                 "Stratum         : %u\n"
+                 "Poll interval   : %d (%.0f seconds)\n"
+                 "Precision       : %d (%.9f seconds)\n"
+                 "Root delay      : %.6f seconds\n"
+                 "Root dispersion : %.6f seconds\n"
+                 "Reference ID    : %R (%s)\n"
+                 "Reference time  : %T\n"
+                 "Offset          : %+.9f seconds\n"
+                 "Peer delay      : %.9f seconds\n"
+                 "Peer dispersion : %.9f seconds\n"
+                 "Response time   : %.9f seconds\n"
+                 "Jitter asymmetry: %+.2f\n"
+                 "NTP tests       : %.3b %.3b %.4b\n"
+                 "Interleaved     : %B\n"
+                 "Authenticated   : %B\n"
+                 "TX timestamping : %N\n"
+                 "RX timestamping : %N\n"
+                 "Total TX        : %U\n"
+                 "Total RX        : %U\n"
+                 "Total valid RX  : %U\n",
+                 UTI_IPToString(&remote_addr), (unsigned long)UTI_IPToRefid(&remote_addr),
+                 ntohs(reply.data.ntp_data.remote_port),
+                 UTI_IPToString(&local_addr), (unsigned long)UTI_IPToRefid(&local_addr),
+                 reply.data.ntp_data.leap, reply.data.ntp_data.version,
+                 reply.data.ntp_data.mode, reply.data.ntp_data.stratum,
+                 reply.data.ntp_data.poll, UTI_Log2ToDouble(reply.data.ntp_data.poll),
+                 reply.data.ntp_data.precision, UTI_Log2ToDouble(reply.data.ntp_data.precision),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.root_delay),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.root_dispersion),
+                 (unsigned long)ntohl(reply.data.ntp_data.ref_id),
+                 reply.data.ntp_data.stratum <= 1 ?
+                   UTI_RefidToString(ntohl(reply.data.ntp_data.ref_id)) : "",
+                 &ref_time,
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.offset),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.peer_delay),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.peer_dispersion),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.response_time),
+                 UTI_FloatNetworkToHost(reply.data.ntp_data.jitter_asymmetry),
+                 ntohs(reply.data.ntp_data.flags) >> 7,
+                 ntohs(reply.data.ntp_data.flags) >> 4,
+                 ntohs(reply.data.ntp_data.flags),
+                 ntohs(reply.data.ntp_data.flags) & RPY_NTP_FLAG_INTERLEAVED,
+                 ntohs(reply.data.ntp_data.flags) & RPY_NTP_FLAG_AUTHENTICATED,
+                 reply.data.ntp_data.tx_tss_char, reply.data.ntp_data.rx_tss_char,
+                 (unsigned long)ntohl(reply.data.ntp_data.total_tx_count),
+                 (unsigned long)ntohl(reply.data.ntp_data.total_rx_count),
+                 (unsigned long)ntohl(reply.data.ntp_data.total_valid_count),
+                 REPORT_END);
+  }
 
   return 1;
 }
@@ -2197,13 +2392,13 @@ process_cmd_smoothing(char *line)
 
   flags = ntohl(reply.data.smoothing.flags);
 
-  print_report("Active         : %s %s\n"
+  print_report("Active         : %B %s\n"
                "Offset         : %+.9f seconds\n"
                "Frequency      : %+.6f ppm\n"
                "Wander         : %+.6f ppm per second\n"
                "Last update    : %.1f seconds ago\n"
                "Remaining time : %.1f seconds\n",
-               flags & RPY_SMT_FLAG_ACTIVE ? "Yes" : "No",
+               !!(flags & RPY_SMT_FLAG_ACTIVE),
                flags & RPY_SMT_FLAG_LEAPONLY ? "(leap second only)" : "",
                UTI_FloatNetworkToHost(reply.data.smoothing.offset),
                UTI_FloatNetworkToHost(reply.data.smoothing.freq_ppm),
@@ -2241,13 +2436,13 @@ process_cmd_rtcreport(char *line)
 {
   CMD_Request request;
   CMD_Reply reply;
-  struct timeval ref_time;
+  struct timespec ref_time;
   
   request.command = htons(REQ_RTCREPORT);
   if (!request_reply(&request, &reply, RPY_RTC, 0))
     return 0;
 
-  UTI_TimevalNetworkToHost(&reply.data.rtc.ref_time, &ref_time);
+  UTI_TimespecNetworkToHost(&reply.data.rtc.ref_time, &ref_time);
 
   print_report("RTC ref time (UTC) : %T\n"
                "Number of samples  : %u\n"
@@ -2303,7 +2498,7 @@ process_cmd_clients(char *line)
       if (ip.family == IPADDR_UNSPEC)
         continue;
 
-      format_name(name, sizeof (name), sizeof (name), 0, 0, &ip);
+      format_name(name, sizeof (name), 25, 0, 0, &ip);
 
       print_report("%-25s  %6U  %5U  %C  %C  %I  %6U  %5U  %C  %I\n",
                    name,
@@ -2339,7 +2534,7 @@ process_cmd_manual_list(const char *line)
   CMD_Reply reply;
   uint32_t i, n_samples;
   RPY_ManualListSample *sample;
-  struct timeval when;
+  struct timespec when;
 
   request.command = htons(REQ_MANUAL_LIST);
   if (!request_reply(&request, &reply, RPY_MANUAL_LIST, 0))
@@ -2352,7 +2547,7 @@ process_cmd_manual_list(const char *line)
 
   for (i = 0; i < n_samples; i++) {
     sample = &reply.data.manual_list.samples[i];
-    UTI_TimevalNetworkToHost(&sample->when, &when);
+    UTI_TimespecNetworkToHost(&sample->when, &when);
 
     print_report("%2d %s %10.2f %10.2f %10.2f\n",
                  i, UTI_TimeToLogForm(when.tv_sec),
@@ -2387,7 +2582,7 @@ process_cmd_manual_delete(CMD_Request *msg, const char *line)
 static int
 process_cmd_settime(char *line)
 {
-  struct timeval ts;
+  struct timespec ts;
   time_t now, new_time;
   CMD_Request request;
   CMD_Reply reply;
@@ -2402,8 +2597,8 @@ process_cmd_settime(char *line)
     printf("510 - Could not parse date string\n");
   } else {
     ts.tv_sec = new_time;
-    ts.tv_usec = 0;
-    UTI_TimevalHostToNetwork(&ts, &request.data.settime.ts);
+    ts.tv_nsec = 0;
+    UTI_TimespecHostToNetwork(&ts, &request.data.settime.ts);
     request.command = htons(REQ_SETTIME);
     if (request_reply(&request, &reply, RPY_MANUAL_TIMESTAMP, 1)) {
           offset_cs = ntohl(reply.data.manual_timestamp.centiseconds);
@@ -2518,6 +2713,7 @@ process_cmd_waitsync(char *line)
 {
   CMD_Request request;
   CMD_Reply reply;
+  IPAddr ip_addr;
   uint32_t ref_id;
   double correction, skew_ppm, max_correction, max_skew_ppm, interval;
   int ret = 0, max_tries, i;
@@ -2528,7 +2724,8 @@ process_cmd_waitsync(char *line)
   max_skew_ppm = 0.0;
   interval = 10.0;
 
-  sscanf(line, "%d %lf %lf %lf", &max_tries, &max_correction, &max_skew_ppm, &interval);
+  if (sscanf(line, "%d %lf %lf %lf", &max_tries, &max_correction, &max_skew_ppm, &interval))
+    ;
 
   /* Don't allow shorter interval than 0.1 seconds */
   if (interval < 0.1)
@@ -2539,6 +2736,7 @@ process_cmd_waitsync(char *line)
   for (i = 1; ; i++) {
     if (request_reply(&request, &reply, RPY_TRACKING, 0)) {
       ref_id = ntohl(reply.data.tracking.ref_id);
+      UTI_IPNetworkToHost(&reply.data.tracking.ip_addr, &ip_addr);
 
       correction = UTI_FloatNetworkToHost(reply.data.tracking.current_correction);
       correction = fabs(correction);
@@ -2547,7 +2745,8 @@ process_cmd_waitsync(char *line)
       print_report("try: %d, refid: %R, correction: %.9f, skew: %.3f\n",
                    i, (unsigned long)ref_id, correction, skew_ppm, REPORT_END);
 
-      if (ref_id != 0 && ref_id != 0x7f7f0101L /* LOCAL refid */ &&
+      if ((ip_addr.family != IPADDR_UNSPEC ||
+           (ref_id != 0 && ref_id != 0x7f7f0101L /* LOCAL refid */)) &&
           (max_correction == 0.0 || correction <= max_correction) &&
           (max_skew_ppm == 0.0 || skew_ppm <= max_skew_ppm)) {
         ret = 1;
@@ -2634,7 +2833,8 @@ process_cmd_keygen(char *line)
   snprintf(hash_name, sizeof (hash_name), "MD5");
 #endif
 
-  sscanf(line, "%u %16s %d", &id, hash_name, &bits);
+  if (sscanf(line, "%u %16s %d", &id, hash_name, &bits))
+    ;
 
   length = CLAMP(10, (bits + 7) / 8, sizeof (key));
   if (HSH_GetHashId(hash_name) < 0) {
@@ -2770,6 +2970,9 @@ process_line(char *line)
     do_normal_submit = process_cmd_minpoll(&tx_message, line);
   } else if (!strcmp(command, "minstratum")) {
     do_normal_submit = process_cmd_minstratum(&tx_message, line);
+  } else if (!strcmp(command, "ntpdata")) {
+    do_normal_submit = 0;
+    ret = process_cmd_ntpdata(line);
   } else if (!strcmp(command, "offline")) {
     do_normal_submit = process_cmd_offline(&tx_message, line);
   } else if (!strcmp(command, "online")) {
@@ -2894,7 +3097,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2016 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2017 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",

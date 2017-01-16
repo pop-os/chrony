@@ -35,6 +35,7 @@
 #include "local.h"
 #include "sys.h"
 #include "ntp_io.h"
+#include "ntp_signd.h"
 #include "ntp_sources.h"
 #include "ntp_core.h"
 #include "sources.h"
@@ -107,6 +108,7 @@ MAI_CleanupAndExit(void)
   TMC_Finalise();
   MNL_Finalise();
   CLG_Finalise();
+  NSD_Finalise();
   NSR_Finalise();
   SST_Finalise();
   NCR_Finalise();
@@ -144,6 +146,16 @@ signal_cleanup(int x)
 /* ================================================== */
 
 static void
+quit_timeout(void *arg)
+{
+  /* Return with non-zero status if the clock is not synchronised */
+  exit_status = REF_GetOurStratum() >= NTP_MAX_STRATUM;
+  SCH_QuitProgram();
+}
+
+/* ================================================== */
+
+static void
 ntp_source_resolving_end(void)
 {
   NSR_SetSourceResolvingEndHandler(NULL);
@@ -156,6 +168,7 @@ ntp_source_resolving_end(void)
     SRC_ReloadSources();
   }
 
+  SRC_RemoveDumpFiles();
   RTC_StartMeasurements();
   RCL_StartRefclocks();
   NSR_StartSources();
@@ -294,14 +307,14 @@ go_daemon(void)
   /* Create pipe which will the daemon use to notify the grandparent
      when it's initialised or send an error message */
   if (pipe(pipefd)) {
-    LOG_FATAL(LOGF_Logging, "Could not detach, pipe failed : %s", strerror(errno));
+    LOG_FATAL(LOGF_Main, "Could not detach, pipe failed : %s", strerror(errno));
   }
 
   /* Does this preserve existing signal handlers? */
   pid = fork();
 
   if (pid < 0) {
-    LOG_FATAL(LOGF_Logging, "Could not detach, fork failed : %s", strerror(errno));
+    LOG_FATAL(LOGF_Main, "Could not detach, fork failed : %s", strerror(errno));
   } else if (pid > 0) {
     /* In the 'grandparent' */
     char message[1024];
@@ -312,7 +325,8 @@ go_daemon(void)
     if (r) {
       if (r > 0) {
         /* Print the error message from the child */
-        fprintf(stderr, "%.1024s\n", message);
+        message[sizeof (message) - 1] = '\0';
+        fprintf(stderr, "%s\n", message);
       }
       exit(1);
     } else
@@ -326,7 +340,7 @@ go_daemon(void)
     pid = fork();
 
     if (pid < 0) {
-      LOG_FATAL(LOGF_Logging, "Could not detach, fork failed : %s", strerror(errno));
+      LOG_FATAL(LOGF_Main, "Could not detach, fork failed : %s", strerror(errno));
     } else if (pid > 0) {
       exit(0); /* In the 'parent' */
     } else {
@@ -334,7 +348,7 @@ go_daemon(void)
 
       /* Change current directory to / */
       if (chdir("/") < 0) {
-        LOG_FATAL(LOGF_Logging, "Could not chdir to / : %s", strerror(errno));
+        LOG_FATAL(LOGF_Main, "Could not chdir to / : %s", strerror(errno));
       }
 
       /* Don't keep stdin/out/err from before. But don't close
@@ -359,7 +373,7 @@ int main
   char *user = NULL;
   struct passwd *pw;
   int debug = 0, nofork = 0, address_family = IPADDR_UNSPEC;
-  int do_init_rtc = 0, restarted = 0;
+  int do_init_rtc = 0, restarted = 0, timeout = 0;
   int other_pid;
   int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
   int system_log = 1;
@@ -417,12 +431,16 @@ int main
       ref_mode = REF_ModePrintOnce;
       nofork = 1;
       system_log = 0;
+    } else if (!strcmp("-t", *argv)) {
+      ++argv, --argc;
+      if (argc == 0 || sscanf(*argv, "%d", &timeout) != 1 || timeout <= 0)
+        LOG_FATAL(LOGF_Main, "Bad timeout");
     } else if (!strcmp("-4", *argv)) {
       address_family = IPADDR_INET4;
     } else if (!strcmp("-6", *argv)) {
       address_family = IPADDR_INET6;
     } else if (!strcmp("-h", *argv) || !strcmp("--help", *argv)) {
-      printf("Usage: %s [-4|-6] [-n|-d] [-q|-Q] [-r] [-R] [-s] [-f FILE|COMMAND...]\n",
+      printf("Usage: %s [-4|-6] [-n|-d] [-q|-Q] [-r] [-R] [-s] [-t TIMEOUT] [-f FILE|COMMAND...]\n",
              progname);
       return 0;
     } else if (*argv[0] == '-') {
@@ -523,6 +541,7 @@ int main
   REF_Initialise();
   SST_Initialise();
   NSR_Initialise();
+  NSD_Initialise();
   CLG_Initialise();
   MNL_Initialise();
   TMC_Initialise();
@@ -544,6 +563,9 @@ int main
 
   REF_SetModeEndHandler(reference_mode_end);
   REF_SetMode(ref_mode);
+
+  if (timeout)
+    SCH_AddTimeoutByDelay(timeout, quit_timeout, NULL);
 
   if (do_init_rtc) {
     RTC_TimeInit(post_init_rtc_hook, NULL);

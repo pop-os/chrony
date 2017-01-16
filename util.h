@@ -34,45 +34,68 @@
 #include "candm.h"
 #include "hash.h"
 
+/* Zero a timespec */
+extern void UTI_ZeroTimespec(struct timespec *ts);
+
+/* Check if a timespec is zero */
+extern int UTI_IsZeroTimespec(struct timespec *ts);
+
+/* Convert a timeval into a timespec */
+extern void UTI_TimevalToTimespec(struct timeval *tv, struct timespec *ts);
+
+/* Convert a timespec into a timeval */
+extern void UTI_TimespecToTimeval(struct timespec *ts, struct timeval *tv);
+
+/* Convert a timespec into a floating point number of seconds */
+extern double UTI_TimespecToDouble(struct timespec *ts);
+
+/* Convert a number of seconds expressed in floating point into a
+   timespec */
+extern void UTI_DoubleToTimespec(double d, struct timespec *ts);
+
+/* Normalise a timespec, by adding or subtracting seconds to bring
+   its nanosecond field into range */
+extern void UTI_NormaliseTimespec(struct timespec *ts);
+
 /* Convert a timeval into a floating point number of seconds */
-extern void UTI_TimevalToDouble(struct timeval *a, double *b);
+extern double UTI_TimevalToDouble(struct timeval *tv);
 
 /* Convert a number of seconds expressed in floating point into a
    timeval */
 extern void UTI_DoubleToTimeval(double a, struct timeval *b);
 
-/* Returns -1 if a comes earlier than b, 0 if a is the same time as b,
-   and +1 if a comes after b */
-extern int UTI_CompareTimevals(struct timeval *a, struct timeval *b);
-
 /* Normalise a struct timeval, by adding or subtracting seconds to bring
    its microseconds field into range */
 extern void UTI_NormaliseTimeval(struct timeval *x);
 
+/* Returns -1 if a comes earlier than b, 0 if a is the same time as b,
+   and +1 if a comes after b */
+extern int UTI_CompareTimespecs(struct timespec *a, struct timespec *b);
+
 /* Calculate result = a - b */
-extern void UTI_DiffTimevals(struct timeval *result, struct timeval *a, struct timeval *b);
+extern void UTI_DiffTimespecs(struct timespec *result, struct timespec *a, struct timespec *b);
 
 /* Calculate result = a - b and return as a double */
-extern void UTI_DiffTimevalsToDouble(double *result, struct timeval *a, struct timeval *b);
+extern double UTI_DiffTimespecsToDouble(struct timespec *a, struct timespec *b);
 
-/* Add a double increment to a timeval to get a new one. 'start' is
+/* Add a double increment to a timespec to get a new one. 'start' is
    the starting time, 'end' is the result that we return.  This is
    safe to use if start and end are the same */
-extern void UTI_AddDoubleToTimeval(struct timeval *start, double increment, struct timeval *end);
+extern void UTI_AddDoubleToTimespec(struct timespec *start, double increment, struct timespec *end);
 
-/* Calculate the average and difference (as a double) of two timevals */
-extern void UTI_AverageDiffTimevals(struct timeval *earlier, struct timeval *later, struct timeval *average, double *diff);
+/* Calculate the average and difference (as a double) of two timespecs */
+extern void UTI_AverageDiffTimespecs(struct timespec *earlier, struct timespec *later, struct timespec *average, double *diff);
 
 /* Calculate result = a - b + c */
-extern void UTI_AddDiffToTimeval(struct timeval *a, struct timeval *b, struct timeval *c, struct timeval *result);
+extern void UTI_AddDiffToTimespec(struct timespec *a, struct timespec *b, struct timespec *c, struct timespec *result);
 
-/* Convert a timeval into a temporary string, largely for diagnostic
+/* Convert a timespec into a temporary string, largely for diagnostic
    display */
-extern char *UTI_TimevalToString(struct timeval *tv);
+extern char *UTI_TimespecToString(struct timespec *ts);
 
 /* Convert an NTP timestamp into a temporary string, largely for
    diagnostic display */
-extern char *UTI_TimestampToString(NTP_int64 *ts);
+extern char *UTI_Ntp64ToString(NTP_int64 *ts);
 
 /* Convert ref_id into a temporary string, for diagnostics */
 extern char *UTI_RefidToString(uint32_t ref_id);
@@ -95,40 +118,44 @@ extern const char *UTI_SockaddrFamilyToString(int family);
 extern char *UTI_TimeToLogForm(time_t t);
 
 /* Adjust time following a frequency/offset change */
-extern void UTI_AdjustTimeval(struct timeval *old_tv, struct timeval *when, struct timeval *new_tv, double *delta, double dfreq, double doffset);
+extern void UTI_AdjustTimespec(struct timespec *old_ts, struct timespec *when, struct timespec *new_ts, double *delta_time, double dfreq, double doffset);
 
 /* Get zero NTP timestamp with random bits below precision */
-extern void UTI_GetInt64Fuzz(NTP_int64 *ts, int precision);
+extern void UTI_GetNtp64Fuzz(NTP_int64 *ts, int precision);
 
-extern double UTI_Int32ToDouble(NTP_int32 x);
-extern NTP_int32 UTI_DoubleToInt32(double x);
+extern double UTI_Ntp32ToDouble(NTP_int32 x);
+extern NTP_int32 UTI_DoubleToNtp32(double x);
 
-extern void UTI_TimevalToInt64(struct timeval *src, NTP_int64 *dest, NTP_int64 *fuzz);
+/* Zero an NTP timestamp */
+extern void UTI_ZeroNtp64(NTP_int64 *ts);
 
-extern void UTI_Int64ToTimeval(NTP_int64 *src, struct timeval *dest);
+/* Check if an NTP timestamp is zero */
+extern int UTI_IsZeroNtp64(NTP_int64 *ts);
+
+/* Compare two NTP timestamps.  Returns -1 if a is before b, 0 if a is equal to
+   b, and 1 if a is after b. */
+extern int UTI_CompareNtp64(NTP_int64 *a, NTP_int64 *b);
+
+/* Convert a timespec into an NTP timestamp */
+extern void UTI_TimespecToNtp64(struct timespec *src, NTP_int64 *dest, NTP_int64 *fuzz);
+
+/* Convert an NTP timestamp into a timespec */
+extern void UTI_Ntp64ToTimespec(NTP_int64 *src, struct timespec *dest);
 
 /* Check if time + offset is sane */
-extern int UTI_IsTimeOffsetSane(struct timeval *tv, double offset);
+extern int UTI_IsTimeOffsetSane(struct timespec *ts, double offset);
 
 /* Get 2 raised to power of a signed integer */
 extern double UTI_Log2ToDouble(int l);
 
-extern void UTI_TimevalNetworkToHost(Timeval *src, struct timeval *dest);
-extern void UTI_TimevalHostToNetwork(struct timeval *src, Timeval *dest);
+extern void UTI_TimespecNetworkToHost(Timespec *src, struct timespec *dest);
+extern void UTI_TimespecHostToNetwork(struct timespec *src, Timespec *dest);
 
 extern double UTI_FloatNetworkToHost(Float x);
 extern Float UTI_FloatHostToNetwork(double x);
 
 /* Set FD_CLOEXEC on descriptor */
 extern int UTI_FdSetCloexec(int fd);
-
-extern int UTI_GenerateNTPAuth(int hash_id, const unsigned char *key, int key_len,
-    const unsigned char *data, int data_len, unsigned char *auth, int auth_len);
-extern int UTI_CheckNTPAuth(int hash_id, const unsigned char *key, int key_len,
-    const unsigned char *data, int data_len, const unsigned char *auth, int auth_len);
-
-/* Decode password encoded in ASCII or HEX */
-extern int UTI_DecodePasswordFromText(char *key);
 
 extern int UTI_SetQuitSignalsHandler(void (*handler)(int));
 

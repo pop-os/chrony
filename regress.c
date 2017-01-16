@@ -109,7 +109,7 @@ double
 RGR_GetTCoef(int dof)
 {
   /* Assuming now the 99.95% quantile */
-  static double coefs[] =
+  static const float coefs[] =
   { 636.6, 31.6, 12.92, 8.61, 6.869,
     5.959, 5.408, 5.041, 4.781, 4.587,
     4.437, 4.318, 4.221, 4.140, 4.073,
@@ -132,7 +132,7 @@ RGR_GetTCoef(int dof)
 double
 RGR_GetChi2Coef(int dof)
 {
-  static double coefs[] = {
+  static const float coefs[] = {
     2.706, 4.605, 6.251, 7.779, 9.236, 10.645, 12.017, 13.362,
     14.684, 15.987, 17.275, 18.549, 19.812, 21.064, 22.307, 23.542,
     24.769, 25.989, 27.204, 28.412, 29.615, 30.813, 32.007, 33.196,
@@ -149,20 +149,6 @@ RGR_GetChi2Coef(int dof)
     return 1.2 * dof; /* Until I can be bothered to do something better */
   }
 }
-
-/* ================================================== */
-/* Structure used for holding results of each regression */
-
-typedef struct {
-  double variance;
-  double slope_sd;
-  double slope;
-  double offset;
-  double offset_sd;
-  double K2; /* Variance / slope_var */
-  int n; /* Number of points */
-  int dof; /* Number of degrees of freedom */
-} RegressionResult;
 
 /* ================================================== */
 /* Critical value for number of runs of residuals with same sign.
@@ -653,3 +639,57 @@ RGR_FindBestRobustRegression
 }
 
 /* ================================================== */
+/* This routine performs linear regression with two independent variables.
+   It returns non-zero status if there were enough data points and there
+   was a solution. */
+
+int
+RGR_MultipleRegress
+(double *x1,                    /* first independent variable */
+ double *x2,                    /* second independent variable */
+ double *y,                     /* measured data */
+
+ int n,                         /* number of data points */
+
+ /* The results */
+ double *b2                     /* estimated second slope */
+                                /* other values are not needed yet */
+)
+{
+  double Sx1, Sx2, Sx1x1, Sx1x2, Sx2x2, Sx1y, Sx2y, Sy;
+  double U, V, V1, V2, V3;
+  int i;
+
+  if (n < 4)
+    return 0;
+
+  Sx1 = Sx2 = Sx1x1 = Sx1x2 = Sx2x2 = Sx1y = Sx2y = Sy = 0.0;
+
+  for (i = 0; i < n; i++) {
+    Sx1 += x1[i];
+    Sx2 += x2[i];
+    Sx1x1 += x1[i] * x1[i];
+    Sx1x2 += x1[i] * x2[i];
+    Sx2x2 += x2[i] * x2[i];
+    Sx1y += x1[i] * y[i];
+    Sx2y += x2[i] * y[i];
+    Sy += y[i];
+  }
+
+  U = n * (Sx1x2 * Sx1y - Sx1x1 * Sx2y) +
+      Sx1 * Sx1 * Sx2y - Sx1 * Sx2 * Sx1y +
+      Sy * (Sx2 * Sx1x1 - Sx1 * Sx1x2);
+
+  V1 = n * (Sx1x2 * Sx1x2 - Sx1x1 * Sx2x2);
+  V2 = Sx1 * Sx1 * Sx2x2 + Sx2 * Sx2 * Sx1x1;
+  V3 = -2.0 * Sx1 * Sx2 * Sx1x2;
+  V = V1 + V2 + V3;
+
+  /* Check if there is a (numerically stable) solution */
+  if (fabs(V) * 1.0e10 <= -V1 + V2 + fabs(V3))
+    return 0;
+
+  *b2 = U / V;
+
+  return 1;
+}

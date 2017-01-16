@@ -103,9 +103,9 @@ static int
 determine_hash_delay(uint32_t key_id)
 {
   NTP_Packet pkt;
-  struct timeval before, after;
-  unsigned long usecs, min_usecs=0;
-  int i;
+  struct timespec before, after;
+  double diff, min_diff;
+  int i, nsecs;
 
   for (i = 0; i < 10; i++) {
     LCL_ReadRawTime(&before);
@@ -113,19 +113,49 @@ determine_hash_delay(uint32_t key_id)
         (unsigned char *)&pkt.auth_data, sizeof (pkt.auth_data));
     LCL_ReadRawTime(&after);
 
-    usecs = (after.tv_sec - before.tv_sec) * 1000000 + (after.tv_usec - before.tv_usec);
+    diff = UTI_DiffTimespecsToDouble(&after, &before);
 
-    if (i == 0 || usecs < min_usecs) {
-      min_usecs = usecs;
-    }
+    if (i == 0 || min_diff > diff)
+      min_diff = diff;
   }
 
   /* Add on a bit extra to allow for copying, conversions etc */
-  min_usecs += min_usecs >> 4;
+  nsecs = 1.0625e9 * min_diff;
 
-  DEBUG_LOG(LOGF_Keys, "authentication delay for key %"PRIu32": %ld useconds", key_id, min_usecs);
+  DEBUG_LOG(LOGF_Keys, "authentication delay for key %"PRIu32": %d nsecs", key_id, nsecs);
 
-  return min_usecs;
+  return nsecs;
+}
+
+/* ================================================== */
+/* Decode password encoded in ASCII or HEX */
+
+static int
+decode_password(char *key)
+{
+  int i, j, len = strlen(key);
+  char buf[3], *p;
+
+  if (!strncmp(key, "ASCII:", 6)) {
+    memmove(key, key + 6, len - 6);
+    return len - 6;
+  } else if (!strncmp(key, "HEX:", 4)) {
+    if ((len - 4) % 2)
+      return 0;
+
+    for (i = 0, j = 4; j + 1 < len; i++, j += 2) {
+      buf[0] = key[j], buf[1] = key[j + 1], buf[2] = '\0';
+      key[i] = strtol(buf, &p, 16);
+
+      if (p != buf + 2)
+        return 0;
+    }
+
+    return i;
+  } else {
+    /* assume ASCII */
+    return len;
+  }
 }
 
 /* ================================================== */
@@ -192,7 +222,7 @@ KEY_Reload(void)
       continue;
     }
 
-    key.len = UTI_DecodePasswordFromText(keyval);
+    key.len = decode_password(keyval);
     if (!key.len) {
       LOG(LOGS_WARN, LOGF_Keys, "Could not decode password in key %"PRIu32, key_id);
       continue;
@@ -293,6 +323,22 @@ KEY_GetAuthDelay(uint32_t key_id)
 /* ================================================== */
 
 int
+KEY_GetAuthLength(uint32_t key_id)
+{
+  unsigned char buf[MAX_HASH_LENGTH];
+  Key *key;
+
+  key = get_key_by_id(key_id);
+
+  if (!key)
+    return 0;
+
+  return HSH_Hash(key->hash_id, buf, 0, buf, 0, buf, sizeof (buf));
+}
+
+/* ================================================== */
+
+int
 KEY_CheckKeyLength(uint32_t key_id)
 {
   Key *key;
@@ -303,6 +349,31 @@ KEY_CheckKeyLength(uint32_t key_id)
     return 0;
 
   return key->len >= MIN_SECURE_KEY_LENGTH;
+}
+
+/* ================================================== */
+
+static int
+generate_ntp_auth(int hash_id, const unsigned char *key, int key_len,
+                  const unsigned char *data, int data_len,
+                  unsigned char *auth, int auth_len)
+{
+  return HSH_Hash(hash_id, key, key_len, data, data_len, auth, auth_len);
+}
+
+/* ================================================== */
+
+static int
+check_ntp_auth(int hash_id, const unsigned char *key, int key_len,
+               const unsigned char *data, int data_len,
+               const unsigned char *auth, int auth_len, int trunc_len)
+{
+  unsigned char buf[MAX_HASH_LENGTH];
+  int hash_len;
+
+  hash_len = generate_ntp_auth(hash_id, key, key_len, data, data_len, buf, sizeof (buf));
+
+  return MIN(hash_len, trunc_len) == auth_len && !memcmp(buf, auth, auth_len);
 }
 
 /* ================================================== */
@@ -318,15 +389,15 @@ KEY_GenerateAuth(uint32_t key_id, const unsigned char *data, int data_len,
   if (!key)
     return 0;
 
-  return UTI_GenerateNTPAuth(key->hash_id, (unsigned char *)key->val,
-                             key->len, data, data_len, auth, auth_len);
+  return generate_ntp_auth(key->hash_id, (unsigned char *)key->val, key->len,
+                           data, data_len, auth, auth_len);
 }
 
 /* ================================================== */
 
 int
 KEY_CheckAuth(uint32_t key_id, const unsigned char *data, int data_len,
-    const unsigned char *auth, int auth_len)
+              const unsigned char *auth, int auth_len, int trunc_len)
 {
   Key *key;
 
@@ -335,6 +406,6 @@ KEY_CheckAuth(uint32_t key_id, const unsigned char *data, int data_len,
   if (!key)
     return 0;
 
-  return UTI_CheckNTPAuth(key->hash_id, (unsigned char *)key->val,
-                          key->len, data, data_len, auth, auth_len);
+  return check_ntp_auth(key->hash_id, (unsigned char *)key->val, key->len,
+                        data, data_len, auth, auth_len, trunc_len);
 }
