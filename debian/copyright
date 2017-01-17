@@ -56,7 +56,7 @@ Copyright: 2015, Bryan Christianson
 License: GPL-2
 
 Files: test/unit/*
-Copyright: 2016, Miroslav Lichvar
+Copyright: 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: hwclock.?
@@ -64,11 +64,35 @@ Copyright: 2016, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_io_linux.?
-Copyright: 2016, Miroslav Lichvar
+Copyright: 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_signd.?
 Copyright: 2016, Miroslav Lichvar
+License: GPL-2
+
+Files: client.c
+Copyright: 1997-2003, Richard P. Curnow
+           2016, Lonnie Abelbeck
+           2009-2016, Miroslav Lichvar
+License: GPL-2
+
+Files: configure
+Copyright: 1997-2003, Richard P. Curnow
+           2016, Bryan Christianson
+           2009, 2012-2016, Miroslav Lichvar
+License: GPL-2
+
+Files: doc/chrony.conf.adoc
+Copyright: 1997-2003, Richard P. Curnow
+           2016, Stephen Wadeley
+           2009-2017, Miroslav Lichvar
+License: GPL-2
+
+Files: doc/chronyc.adoc
+Copyright: 1997-2003, Richard P. Curnow
+           2016, Stephen Wadeley
+           2009-2016, Miroslav Lichvar
 License: GPL-2
 
 Files: md5.*
