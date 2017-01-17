@@ -3,7 +3,10 @@ chrony (3.0-1) unstable; urgency=medium
   * Import upstream version 3.0:
     - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
 
-  * Merge branch “experimental”.
+  * Merge branch “experimental”:
+    - Enable support for MS-SNTP authentication in Samba.
+    - Rename --chronysockdir to --chronyrundir.
+    - Enable seccomp facility on powerpcspe.
 
   * debian/chrony.conf:
     - Make use of the “makestep” directive to step the system clock instead of
@@ -16,6 +19,8 @@ chrony (3.0-1) unstable; urgency=medium
 
   * debian/copyright:
     - Add myself as a copyright holder for 2017.
+    - Adjust copyright holders and update some copyright years. Kudos to Paul
+    Gevers <elbrus@debian.org> for spotting the necessary updates.
 
   * debian/init:
     - Reflect init-helper script deletion.
@@ -28,7 +33,7 @@ chrony (3.0-1) unstable; urgency=medium
 
   * Remove the init-helper script as it no longer needed.
 
- -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 Jan 2017 18:57:51 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 17 Jan 2017 22:05:31 +0100
 
 chrony (2.4.1-3) unstable; urgency=medium
 
