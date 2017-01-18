@@ -1,3 +1,21 @@
+chrony (3.0-2) unstable; urgency=medium
+
+  * debian/chrony.conf:
+    - Disable logging by default, it waste some disk space and users are
+    probably better served by “chronyc sources” and “chronyc sourcestats”
+    commands anyway.
+
+  * debian/chrony.service:
+    - Remove the “Restart=on-failure” option. There are possible security
+    implications for NTP clients.
+
+  * debian/dirs:
+    - Add etc/logrotate.d to avoid build failure.
+
+  * Remove our logrotate configuration file in favour of the upstream’s one.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 18 Jan 2017 15:26:31 +0100
+
 chrony (3.0-1) unstable; urgency=medium
 
   * Import upstream version 3.0:
