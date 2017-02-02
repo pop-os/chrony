@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014
+ * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -503,6 +503,12 @@ RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
     instance->driver_polled++;
 
   return 1;
+}
+
+double
+RCL_GetPrecision(RCL_Instance instance)
+{
+  return instance->precision;
 }
 
 static int

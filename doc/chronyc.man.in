@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-12
+.\"      Date: 2017-01-31
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2017-01-12" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2017-01-31" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -146,15 +146,15 @@ performance. An example of the output is shown below.
 .nf
 Reference ID    : CB00710F (foo.example.net)
 Stratum         : 3
-Ref time (UTC)  : Fri Feb  3 15:00:29 2012
-System time     : 0.000001501 seconds slow of NTP time
-Last offset     : \-0.000001632 seconds
-RMS offset      : 0.000002360 seconds
-Frequency       : 331.898 ppm fast
-Residual freq   : 0.004 ppm
-Skew            : 0.154 ppm
-Root delay      : 0.373169 seconds
-Root dispersion : 0.024780 seconds
+Ref time (UTC)  : Fri Jan 27 09:49:17 2017
+System time     : 0.000006523 seconds slow of NTP time
+Last offset     : \-0.000006747 seconds
+RMS offset      : 0.000035822 seconds
+Frequency       : 3.225 ppm slow
+Residual freq   : \-0.000 ppm
+Skew            : 0.129 ppm
+Root delay      : 0.013639022 seconds
+Root dispersion : 0.001100737 seconds
 Update interval : 64.2 seconds
 Leap status     : Normal
 .fi
@@ -225,9 +225,6 @@ The \(oqfrequency\(cq is the rate by which the system\(cqs clock would be wrong 
 For example, a value of 1 ppm would mean that when the system\(cqs clock thinks it
 has advanced 1 second, it has actually advanced by 1.000001 seconds relative to
 true time.
-.sp
-As you can see in the example, the clock in the computer is not a very
-good one; it would gain about 30 seconds per day if it was not corrected!
 .RE
 .sp
 \fBResidual freq\fP
@@ -1789,6 +1786,12 @@ To use the \fBdump\fP command, you might want to configure the name of the
 directory into which the dump files will be written. This can only be
 done in the configuration file with the \fBdumpdir\fP
 directive.
+.RE
+.sp
+\fBrekey\fP
+.RS 4
+The \fBrekey\fP command causes \fBchronyd\fP to re\-read the key file specified in the
+configuration file by the \fBkeyfile\fP directive.
 .RE
 .SS "Client commands"
 .sp

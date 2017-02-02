@@ -97,6 +97,7 @@ static double combine_limit = 3.0;
 
 static int cmd_port = DEFAULT_CANDM_PORT;
 
+static int raw_measurements = 0;
 static int do_log_measurements = 0;
 static int do_log_statistics = 0;
 static int do_log_tracking = 0;
@@ -223,13 +224,7 @@ static char *leapsec_tz = NULL;
 /* Name of the user to which will be dropped root privileges. */
 static char *user;
 
-typedef struct {
-  char *name;
-  double tx_comp;
-  double rx_comp;
-} HwTs_Interface;
-
-/* Array of HwTs_Interface */
+/* Array of CNF_HwTsInterface */
 static ARR_Instance hwts_interfaces;
 
 typedef struct {
@@ -333,7 +328,7 @@ CNF_Initialise(int r)
 {
   restarted = r;
 
-  hwts_interfaces = ARR_CreateInstance(sizeof (HwTs_Interface));
+  hwts_interfaces = ARR_CreateInstance(sizeof (CNF_HwTsInterface));
 
   init_sources = ARR_CreateInstance(sizeof (IPAddr));
   ntp_sources = ARR_CreateInstance(sizeof (NTP_Source));
@@ -360,7 +355,7 @@ CNF_Finalise(void)
   unsigned int i;
 
   for (i = 0; i < ARR_GetSize(hwts_interfaces); i++)
-    Free(((HwTs_Interface *)ARR_GetElement(hwts_interfaces, i))->name);
+    Free(((CNF_HwTsInterface *)ARR_GetElement(hwts_interfaces, i))->name);
   ARR_DestroyInstance(hwts_interfaces);
 
   for (i = 0; i < ARR_GetSize(ntp_sources); i++)
@@ -820,7 +815,10 @@ parse_log(char *line)
     log_name = line;
     line = CPS_SplitWord(line);
     if (*log_name) {
-      if (!strcmp(log_name, "measurements")) {
+      if (!strcmp(log_name, "rawmeasurements")) {
+        do_log_measurements = 1;
+        raw_measurements = 1;
+      } else if (!strcmp(log_name, "measurements")) {
         do_log_measurements = 1;
       } else if (!strcmp(log_name, "statistics")) {
         do_log_statistics = 1;
@@ -1251,7 +1249,7 @@ parse_tempcomp(char *line)
 static void
 parse_hwtimestamp(char *line)
 {
-  HwTs_Interface *iface;
+  CNF_HwTsInterface *iface;
   char *p;
   int n;
 
@@ -1265,18 +1263,30 @@ parse_hwtimestamp(char *line)
 
   iface = ARR_GetNewElement(hwts_interfaces);
   iface->name = Strdup(p);
+  iface->minpoll = 0;
+  iface->nocrossts = 0;
+  iface->precision = 100.0e-9;
   iface->tx_comp = 0.0;
   iface->rx_comp = 0.0;
 
   for (p = line; *p; line += n, p = line) {
     line = CPS_SplitWord(line);
 
-    if (!strcasecmp(p, "rxcomp")) {
+    if (!strcasecmp(p, "minpoll")) {
+      if (sscanf(line, "%d%n", &iface->minpoll, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "precision")) {
+      if (sscanf(line, "%lf%n", &iface->precision, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "rxcomp")) {
       if (sscanf(line, "%lf%n", &iface->rx_comp, &n) != 1)
         break;
     } else if (!strcasecmp(p, "txcomp")) {
       if (sscanf(line, "%lf%n", &iface->tx_comp, &n) != 1)
         break;
+    } else if (!strcasecmp(p, "nocrossts")) {
+      n = 0;
+      iface->nocrossts = 1;
     } else {
       break;
     }
@@ -1462,8 +1472,9 @@ CNF_GetDumpDir(void)
 /* ================================================== */
 
 int
-CNF_GetLogMeasurements(void)
+CNF_GetLogMeasurements(int *raw)
 {
+  *raw = raw_measurements;
   return do_log_measurements;
 }
 
@@ -1968,17 +1979,11 @@ CNF_GetInitStepThreshold(void)
 /* ================================================== */
 
 int
-CNF_GetHwTsInterface(unsigned int index, char **name, double *tx_comp, double *rx_comp)
+CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface)
 {
-  HwTs_Interface *iface;
-
   if (index >= ARR_GetSize(hwts_interfaces))
     return 0;
 
-  iface = ARR_GetElement(hwts_interfaces, index);
-  *name = iface->name;
-  *tx_comp = iface->tx_comp;
-  *rx_comp = iface->rx_comp;
-
+  *iface = (CNF_HwTsInterface *)ARR_GetElement(hwts_interfaces, index);
   return 1;
 }

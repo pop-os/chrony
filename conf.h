@@ -52,7 +52,7 @@ extern char *CNF_GetDriftFile(void);
 extern char *CNF_GetLogDir(void);
 extern char *CNF_GetDumpDir(void);
 extern int CNF_GetLogBanner(void);
-extern int CNF_GetLogMeasurements(void);
+extern int CNF_GetLogMeasurements(int *raw);
 extern int CNF_GetLogStatistics(void);
 extern int CNF_GetLogTracking(void);
 extern int CNF_GetLogRtc(void);
@@ -119,6 +119,15 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
-extern int CNF_GetHwTsInterface(unsigned int index, char **name, double *tx_comp, double *rx_comp);
+typedef struct {
+  char *name;
+  int minpoll;
+  int nocrossts;
+  double precision;
+  double tx_comp;
+  double rx_comp;
+} CNF_HwTsInterface;
+
+extern int CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface);
 
 #endif /* GOT_CONF_H */

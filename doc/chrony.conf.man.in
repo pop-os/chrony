@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-12
+.\"      Date: 2017-01-31
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2017-01-12" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2017-01-31" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -63,14 +63,18 @@ options:
 Although \fBchronyd\fP will trim the rate at which it samples the server during
 normal operation, the user might want to constrain the minimum polling interval.
 This is always defined as a power of 2, so \fBminpoll 5\fP would mean that the
-polling interval cannot drop below 32 seconds. The default is 6 (64 seconds).
+polling interval cannot drop below 32 seconds. The default is 6 (64 seconds),
+the minimum is \-4 (1/16th of a second), and the maximum is 24 (6 months). Note
+that intervals shorter than 6 (64 seconds) should generally not be used with
+public servers on the Internet, because it might be considered abuse.
 .RE
 .sp
 \fBmaxpoll\fP \fIpoll\fP
 .RS 4
 In a similar way, the user might want to constrain the maximum polling interval.
 Again this is specified as a power of 2, \fBmaxpoll 9\fP indicates that the polling
-interval must stay at or below 512 seconds. The default is 10 (1024 seconds).
+interval must stay at or below 512 seconds. The default is 10 (1024 seconds),
+the minimum is 0 (1 second), and the maximum is 24 (6 months).
 .RE
 .sp
 \fBiburst\fP
@@ -215,9 +219,12 @@ the interleaved mode requires the servers to keep some state for each client
 and the state might be dropped when there are too many clients (e.g.
 \fBclientloglimit\fP is too small), or it might be overwritten
 by other clients that have the same IP address (e.g. computers behind NAT or
-someone sending requests with a spoofed source address). The \fBpresend\fP option
-can be used to shorten the interval in which the server has to keep the state
-for this computer and be able to respond in the interleaved mode.
+someone sending requests with a spoofed source address).
+.sp
+With longer polling intervals, it is recommended to combine the \fBxleave\fP option
+with the \fBpresend\fP option in order to shorten the interval in which the server
+has to keep the state to be able to respond in the interleaved mode. The
+shorter interval also improves accuracy of the measured offset and delay.
 .RE
 .sp
 \fBpolltarget\fP \fItarget\fP
@@ -510,9 +517,10 @@ refclock SOCK /var/run/chrony.ttyS0.sock
 PTP hardware clock (PHC) driver. The parameter is the path to the device of
 the PTP clock, which for example can be synchronised by \fBptp4l\fP from
 .URL "http://linuxptp.sourceforge.net" "\fBlinuxptp\fP" "."
-PTP clocks are typically kept in
-TAI instead of UTC, so the \fBoffset\fP option should be used to compensate for the
-current UTC\-TAI offset. For example:
+String \fB:nocrossts\fP can be
+appended to the path to disable use of precise cross timestamping. PTP clocks
+are typically kept in TAI instead of UTC, so the \fBoffset\fP option should be used
+to compensate for the current UTC\-TAI offset. For example:
 .sp
 .if n \{\
 .RS 4
@@ -2026,11 +2034,13 @@ The log files are written to the directory specified by the \fBlogdir\fP
 directive. A banner is periodically written to the files to indicate the
 meanings of the columns.
 .sp
-\fBmeasurements\fP
+\fBrawmeasurements\fP
 .RS 4
 This option logs the raw NTP measurements and related information to a file
-called \fImeasurements.log\fP. An example line (which actually appears as a single
-line in the file) from the log file is shown below.
+called \fImeasurements.log\fP. An entry is made for each packet received from the
+source. This can be useful when debugging a problem. An example line (which
+actually appears as a single line in the file) from the log file is shown
+below.
 .sp
 .if n \{\
 .RS 4
@@ -2276,6 +2286,14 @@ Source of the local transmit timestamp
 Source of the local receive timestamp
 (\fID\fP=daemon, \fIK\fP=kernel, \fIH\fP=hardware). [K]
 .RE
+.RE
+.sp
+\fBmeasurements\fP
+.RS 4
+This option is identical to the \fBrawmeasurements\fP option, except it logs only
+valid measurements from synchronised sources, i.e. measurements which passed
+the RFC 5905 tests 1 through 7. This can be useful for producing graphs of the
+source\(cqs performance.
 .RE
 .sp
 \fBstatistics\fP
@@ -3067,6 +3085,21 @@ on all available interfaces.
 .sp
 The \fBhwtimestamp\fP directive has the following options:
 .sp
+\fBminpoll\fP \fIpoll\fP
+.RS 4
+This option specifies the minimum interval between readings of the NIC clock.
+It\(cqs defined as a power of two. It should correspond to the minimum polling
+interval of all NTP sources and the minimum expected polling interval of NTP
+clients. The default value is 0 (1 second) and the minimum value is \-6 (1/64th
+of a second).
+.RE
+.sp
+\fBprecision\fP \fIprecision\fP
+.RS 4
+This option specifies the assumed precision of reading of the NIC clock. The
+default value is 100e\-9 (100 nanoseconds).
+.RE
+.sp
 \fBtxcomp\fP \fIcompensation\fP
 .RS 4
 This option specifies the difference in seconds between the actual transmission
@@ -3080,6 +3113,12 @@ This option specifies the difference in seconds between the reported receive
 timestamp and the actual reception time at the physical layer. This value will
 be subtracted from receive timestamps obtained from the NIC. The default value
 is 0.
+.RE
+.sp
+\fBnocrossts\fP
+.RS 4
+Some hardware can precisely cross timestamp the NIC clock with the system
+clock. This option disables the use of the cross timestamping.
 .RE
 .RE
 .sp

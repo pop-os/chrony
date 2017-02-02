@@ -1242,6 +1242,7 @@ give_help(void)
     "Other daemon commands:\0\0"
     "cyclelogs\0Close and re-open log files\0"
     "dump\0Dump all measurements to save files\0"
+    "rekey\0Re-read keys from key file\0"
     "\0\0"
     "Client commands:\0\0"
     "dns -n|+n\0Disable/enable resolving IP addresses to hostnames\0"
@@ -2215,8 +2216,8 @@ process_cmd_tracking(char *line)
                "Frequency       : %.3F\n"
                "Residual freq   : %+.3f ppm\n"
                "Skew            : %.3f ppm\n"
-               "Root delay      : %.6f seconds\n"
-               "Root dispersion : %.6f seconds\n"
+               "Root delay      : %.9f seconds\n"
+               "Root dispersion : %.9f seconds\n"
                "Update interval : %.1f seconds\n"
                "Leap status     : %L\n",
                (unsigned long)ref_id, name,

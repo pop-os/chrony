@@ -49,6 +49,7 @@
 /* ================================================== */
 
 static LOG_FileID logfileid;
+static int log_raw_measurements;
 
 /* ================================================== */
 /* Enumeration used for remembering the operating mode of one of the
@@ -205,7 +206,8 @@ static ARR_Instance broadcasts;
 
 /* Spacing required between samples for any two servers/peers (to
    minimise risk of network collisions) (in seconds) */
-#define SAMPLING_SEPARATION 0.2
+#define MIN_SAMPLING_SEPARATION 0.02
+#define MAX_SAMPLING_SEPARATION 0.2
 
 /* Randomness added to spacing between samples for one server/peer */
 #define SAMPLING_RANDOMNESS 0.02
@@ -244,12 +246,13 @@ static ARR_Instance broadcasts;
 #define MAX_TX_DELAY 1.0
 
 /* Maximum allowed values of maxdelay parameters */
-#define MAX_MAX_DELAY 1.0e3
-#define MAX_MAX_DELAY_RATIO 1.0e6
-#define MAX_MAX_DELAY_DEV_RATIO 1.0e6
+#define MAX_MAXDELAY 1.0e3
+#define MAX_MAXDELAYRATIO 1.0e6
+#define MAX_MAXDELAYDEVRATIO 1.0e6
 
 /* Minimum and maximum allowed poll interval */
-#define MIN_POLL 0
+#define MIN_MINPOLL -4
+#define MIN_MAXPOLL 0
 #define MAX_POLL 24
 
 /* Kiss-o'-Death codes */
@@ -278,6 +281,7 @@ static const char tss_chars[3] = {'D', 'K', 'H'};
 
 static void transmit_timeout(void *arg);
 static double get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx);
+static double get_separation(int poll);
 
 /* ================================================== */
 
@@ -350,7 +354,7 @@ NCR_Initialise(void)
   do_size_checks();
   do_time_checks();
 
-  logfileid = CNF_GetLogMeasurements() ? LOG_FileOpen("measurements",
+  logfileid = CNF_GetLogMeasurements(&log_raw_measurements) ? LOG_FileOpen("measurements",
       "   Date (UTC) Time     IP Address   L St 123 567 ABCD  LP RP Score    Offset  Peer del. Peer disp.  Root del. Root disp. Refid     MTxRx")
     : -1;
 
@@ -398,7 +402,7 @@ restart_timeout(NCR_Instance inst, double delay)
   SCH_RemoveTimeout(inst->tx_timeout_id);
 
   /* Start new timer for transmission */
-  inst->tx_timeout_id = SCH_AddTimeoutInClass(delay, SAMPLING_SEPARATION,
+  inst->tx_timeout_id = SCH_AddTimeoutInClass(delay, get_separation(inst->local_poll),
                                               SAMPLING_RANDOMNESS,
                                               SCH_NtpSamplingClass,
                                               transmit_timeout, (void *)inst);
@@ -479,6 +483,7 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
 
   result->remote_addr = *remote_addr;
   result->local_addr.ip_addr.family = IPADDR_UNSPEC;
+  result->local_addr.if_index = INVALID_IF_INDEX;
 
   switch (type) {
     case NTP_SERVER:
@@ -497,12 +502,12 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
   result->interleaved = params->interleaved;
 
   result->minpoll = params->minpoll;
-  if (result->minpoll < MIN_POLL)
+  if (result->minpoll < MIN_MINPOLL)
     result->minpoll = SRC_DEFAULT_MINPOLL;
   else if (result->minpoll > MAX_POLL)
     result->minpoll = MAX_POLL;
   result->maxpoll = params->maxpoll;
-  if (result->maxpoll < MIN_POLL)
+  if (result->maxpoll < MIN_MAXPOLL)
     result->maxpoll = SRC_DEFAULT_MAXPOLL;
   else if (result->maxpoll > MAX_POLL)
     result->maxpoll = MAX_POLL;
@@ -518,9 +523,9 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
   if (result->presend_minpoll <= MAX_POLL && result->mode != MODE_CLIENT)
     result->presend_minpoll = MAX_POLL + 1;
 
-  result->max_delay = CLAMP(0.0, params->max_delay, MAX_MAX_DELAY);
-  result->max_delay_ratio = CLAMP(0.0, params->max_delay_ratio, MAX_MAX_DELAY_RATIO);
-  result->max_delay_dev_ratio = CLAMP(0.0, params->max_delay_dev_ratio, MAX_MAX_DELAY_DEV_RATIO);
+  result->max_delay = CLAMP(0.0, params->max_delay, MAX_MAXDELAY);
+  result->max_delay_ratio = CLAMP(0.0, params->max_delay_ratio, MAX_MAXDELAYRATIO);
+  result->max_delay_dev_ratio = CLAMP(0.0, params->max_delay_dev_ratio, MAX_MAXDELAYDEVRATIO);
   result->offset_correction = params->offset;
   result->auto_offline = params->auto_offline;
   result->poll_target = params->poll_target;
@@ -653,6 +658,7 @@ NCR_ResetPoll(NCR_Instance instance)
 void
 NCR_ChangeRemoteAddress(NCR_Instance inst, NTP_Remote_Address *remote_addr)
 {
+  memset(&inst->report, 0, sizeof (inst->report));
   NCR_ResetInstance(inst);
   inst->remote_addr = *remote_addr;
 
@@ -661,6 +667,7 @@ NCR_ChangeRemoteAddress(NCR_Instance inst, NTP_Remote_Address *remote_addr)
   else {
     NIO_CloseServerSocket(inst->local_addr.sock_fd);
     inst->local_addr.ip_addr.family = IPADDR_UNSPEC;
+    inst->local_addr.if_index = INVALID_IF_INDEX;
     inst->local_addr.sock_fd = NIO_OpenServerSocket(remote_addr);
   }
 
@@ -764,7 +771,7 @@ get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx)
              approx the poll interval away */
           poll_to_use = inst->local_poll;
 
-          delay_time = (double) (1UL<<poll_to_use);
+          delay_time = UTI_Log2ToDouble(poll_to_use);
           if (inst->presend_done)
             delay_time = WARM_UP_DELAY;
 
@@ -782,7 +789,7 @@ get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx)
           if (poll_to_use < inst->minpoll)
             poll_to_use = inst->minpoll;
 
-          delay_time = (double) (1UL<<poll_to_use);
+          delay_time = UTI_Log2ToDouble(poll_to_use);
 
           /* If the remote stratum is higher than ours, try to lock on the
              peer's polling to minimize our response time by slightly extending
@@ -819,6 +826,21 @@ get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx)
   }
 
   return delay_time;
+}
+
+/* ================================================== */
+/* Calculate sampling separation for given polling interval */
+
+static double
+get_separation(int poll)
+{
+  double separation;
+
+  /* Allow up to 8 sources using the same short interval to not be limited
+     by the separation */
+  separation = UTI_Log2ToDouble(poll - 3);
+
+  return CLAMP(MIN_SAMPLING_SEPARATION, separation, MAX_SAMPLING_SEPARATION);
 }
 
 /* ================================================== */
@@ -1075,6 +1097,7 @@ transmit_timeout(void *arg)
 
   /* Don't require the packet to be sent from the same address as before */
   local_addr.ip_addr.family = IPADDR_UNSPEC;
+  local_addr.if_index = INVALID_IF_INDEX;
   local_addr.sock_fd = inst->local_addr.sock_fd;
 
   /* Check whether we need to 'warm up' the link to the other end by
@@ -1456,7 +1479,7 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
        processing time is sane, and in the interleaved symmetric mode that
        the delay is not longer than half of the remote polling interval to
        detect missed packets */
-    testA = delay - dispersion <= inst->max_delay &&
+    testA = delay - dispersion <= inst->max_delay && precision <= inst->max_delay &&
             !(inst->mode == MODE_CLIENT && server_interval > MAX_SERVER_INTERVAL) &&
             !(inst->mode == MODE_ACTIVE && interleaved_packet &&
               delay > UTI_Log2ToDouble(message->poll - 1));
@@ -1608,8 +1631,9 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
        server and the socket can be closed */
     close_client_socket(inst);
 
-    /* Update the local address */
+    /* Update the local address and interface */
     inst->local_addr.ip_addr = local_addr->ip_addr;
+    inst->local_addr.if_index = local_addr->if_index;
 
     /* And now, requeue the timer */
     if (inst->opmode != MD_OFFLINE) {
@@ -1621,7 +1645,7 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
             UTI_IPToString(&inst->remote_addr.ip_addr));
 
         /* Back off for a while and stop ongoing burst */
-        delay_time += 4 * (1UL << inst->minpoll);
+        delay_time += 4 * UTI_Log2ToDouble(inst->local_poll);
 
         if (inst->opmode == MD_BURST_WAS_OFFLINE || inst->opmode == MD_BURST_WAS_ONLINE) {
           inst->burst_good_samples_to_go = 0;
@@ -1664,7 +1688,7 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
   }
 
   /* Do measurement logging */
-  if (logfileid != -1) {
+  if (logfileid != -1 && (log_raw_measurements || synced_packet)) {
     LOG_FileWrite(logfileid, "%s %-15s %1c %2d %1d%1d%1d %1d%1d%1d %1d%1d%1d%d  %2d %2d %4.2f %10.3e %10.3e %10.3e %10.3e %10.3e %08"PRIX32" %1d%1c %1c %1c",
             UTI_TimeToLogForm(sample_time.tv_sec),
             UTI_IPToString(&inst->remote_addr.ip_addr),
@@ -1920,10 +1944,7 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
                   !UTI_CompareNtp64(&message->originate_ts, local_ntp_rx);
 
     if (interleaved) {
-      if (!UTI_IsZeroNtp64(local_ntp_tx))
-        UTI_Ntp64ToTimespec(local_ntp_tx, &local_tx.ts);
-      else
-        interleaved = 0;
+      UTI_Ntp64ToTimespec(local_ntp_tx, &local_tx.ts);
       tx_ts = &local_tx;
     } else {
       UTI_ZeroNtp64(local_ntp_tx);
@@ -2016,10 +2037,10 @@ NCR_ProcessTxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   if (log_index < 0)
     return;
 
-  CLG_GetNtpTimestamps(log_index, &local_ntp_rx, &local_ntp_tx);
+  if (SMT_IsEnabled() && NTP_LVM_TO_MODE(message->lvm) == MODE_SERVER)
+    UTI_AddDoubleToTimespec(&tx_ts->ts, SMT_GetOffset(&tx_ts->ts), &tx_ts->ts);
 
-  if (UTI_IsZeroNtp64(local_ntp_tx))
-    return;
+  CLG_GetNtpTimestamps(log_index, &local_ntp_rx, &local_ntp_tx);
 
   UTI_Ntp64ToTimespec(local_ntp_tx, &local_tx.ts);
   update_tx_timestamp(&local_tx, tx_ts, local_ntp_rx, NULL, message);
@@ -2091,7 +2112,7 @@ NCR_TakeSourceOffline(NCR_Instance inst)
 void
 NCR_ModifyMinpoll(NCR_Instance inst, int new_minpoll)
 {
-  if (new_minpoll < MIN_POLL || new_minpoll > MAX_POLL)
+  if (new_minpoll < MIN_MINPOLL || new_minpoll > MAX_POLL)
     return;
   inst->minpoll = new_minpoll;
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new minpoll %d", UTI_IPToString(&inst->remote_addr.ip_addr), new_minpoll);
@@ -2104,7 +2125,7 @@ NCR_ModifyMinpoll(NCR_Instance inst, int new_minpoll)
 void
 NCR_ModifyMaxpoll(NCR_Instance inst, int new_maxpoll)
 {
-  if (new_maxpoll < MIN_POLL || new_maxpoll > MAX_POLL)
+  if (new_maxpoll < MIN_MAXPOLL || new_maxpoll > MAX_POLL)
     return;
   inst->maxpoll = new_maxpoll;
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new maxpoll %d", UTI_IPToString(&inst->remote_addr.ip_addr), new_maxpoll);
@@ -2117,7 +2138,7 @@ NCR_ModifyMaxpoll(NCR_Instance inst, int new_maxpoll)
 void
 NCR_ModifyMaxdelay(NCR_Instance inst, double new_max_delay)
 {
-  inst->max_delay = CLAMP(0.0, new_max_delay, MAX_MAX_DELAY);
+  inst->max_delay = CLAMP(0.0, new_max_delay, MAX_MAXDELAY);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay %f",
       UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay);
 }
@@ -2127,7 +2148,7 @@ NCR_ModifyMaxdelay(NCR_Instance inst, double new_max_delay)
 void
 NCR_ModifyMaxdelayratio(NCR_Instance inst, double new_max_delay_ratio)
 {
-  inst->max_delay_ratio = CLAMP(0.0, new_max_delay_ratio, MAX_MAX_DELAY_RATIO);
+  inst->max_delay_ratio = CLAMP(0.0, new_max_delay_ratio, MAX_MAXDELAYRATIO);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay ratio %f",
       UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay_ratio);
 }
@@ -2137,7 +2158,7 @@ NCR_ModifyMaxdelayratio(NCR_Instance inst, double new_max_delay_ratio)
 void
 NCR_ModifyMaxdelaydevratio(NCR_Instance inst, double new_max_delay_dev_ratio)
 {
-  inst->max_delay_dev_ratio = CLAMP(0.0, new_max_delay_dev_ratio, MAX_MAX_DELAY_DEV_RATIO);
+  inst->max_delay_dev_ratio = CLAMP(0.0, new_max_delay_dev_ratio, MAX_MAXDELAYDEVRATIO);
   LOG(LOGS_INFO, LOGF_NtpCore, "Source %s new max delay dev ratio %f",
       UTI_IPToString(&inst->remote_addr.ip_addr), inst->max_delay_dev_ratio);
 }
@@ -2343,20 +2364,21 @@ broadcast_timeout(void *arg)
   BroadcastDestination *destination;
   NTP_int64 orig_ts;
   NTP_Local_Timestamp recv_ts;
+  int poll;
 
   destination = ARR_GetElement(broadcasts, (long)arg);
+  poll = log(destination->interval) / log(2.0) + 0.5;
 
   UTI_ZeroNtp64(&orig_ts);
   UTI_ZeroTimespec(&recv_ts.ts);
   recv_ts.source = NTP_TS_DAEMON;
   recv_ts.err = 0.0;
 
-  transmit_packet(MODE_BROADCAST, 0, log(destination->interval) / log(2.0) + 0.5,
-                  NTP_VERSION, 0, 0, &orig_ts, &orig_ts, &recv_ts, NULL, NULL, NULL,
-                  &destination->addr, &destination->local_addr);
+  transmit_packet(MODE_BROADCAST, 0, poll, NTP_VERSION, 0, 0, &orig_ts, &orig_ts, &recv_ts,
+                  NULL, NULL, NULL, &destination->addr, &destination->local_addr);
 
   /* Requeue timeout.  We don't care if interval drifts gradually. */
-  SCH_AddTimeoutInClass(destination->interval, SAMPLING_SEPARATION, SAMPLING_RANDOMNESS,
+  SCH_AddTimeoutInClass(destination->interval, get_separation(poll), SAMPLING_RANDOMNESS,
                         SCH_NtpBroadcastClass, broadcast_timeout, arg);
 }
 
@@ -2372,10 +2394,11 @@ NCR_AddBroadcastDestination(IPAddr *addr, unsigned short port, int interval)
   destination->addr.ip_addr = *addr;
   destination->addr.port = port;
   destination->local_addr.ip_addr.family = IPADDR_UNSPEC;
+  destination->local_addr.if_index = INVALID_IF_INDEX;
   destination->local_addr.sock_fd = NIO_OpenServerSocket(&destination->addr);
-  destination->interval = CLAMP(1 << MIN_POLL, interval, 1 << MAX_POLL);
+  destination->interval = CLAMP(1, interval, 1 << MAX_POLL);
 
-  SCH_AddTimeoutInClass(destination->interval, SAMPLING_SEPARATION, SAMPLING_RANDOMNESS,
+  SCH_AddTimeoutInClass(destination->interval, MAX_SAMPLING_SEPARATION, SAMPLING_RANDOMNESS,
                         SCH_NtpBroadcastClass, broadcast_timeout,
                         (void *)(long)(ARR_GetSize(broadcasts) - 1));
 }
