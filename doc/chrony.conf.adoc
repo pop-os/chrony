@@ -68,11 +68,15 @@ options:
 Although *chronyd* will trim the rate at which it samples the server during
 normal operation, the user might want to constrain the minimum polling interval.
 This is always defined as a power of 2, so *minpoll 5* would mean that the
-polling interval cannot drop below 32 seconds. The default is 6 (64 seconds).
+polling interval cannot drop below 32 seconds. The default is 6 (64 seconds),
+the minimum is -4 (1/16th of a second), and the maximum is 24 (6 months). Note
+that intervals shorter than 6 (64 seconds) should generally not be used with
+public servers on the Internet, because it might be considered abuse.
 *maxpoll* _poll_:::
 In a similar way, the user might want to constrain the maximum polling interval.
 Again this is specified as a power of 2, *maxpoll 9* indicates that the polling
-interval must stay at or below 512 seconds. The default is 10 (1024 seconds).
+interval must stay at or below 512 seconds. The default is 10 (1024 seconds),
+the minimum is 0 (1 second), and the maximum is 24 (6 months).
 *iburst*:::
 If this option is set, the interval between the first four polls will be 2
 seconds instead of _minpoll_. This is useful to quickly get the first update of
@@ -172,9 +176,12 @@ the interleaved mode requires the servers to keep some state for each client
 and the state might be dropped when there are too many clients (e.g.
 <<clientloglimit,*clientloglimit*>> is too small), or it might be overwritten
 by other clients that have the same IP address (e.g. computers behind NAT or
-someone sending requests with a spoofed source address). The *presend* option
-can be used to shorten the interval in which the server has to keep the state
-for this computer and be able to respond in the interleaved mode.
+someone sending requests with a spoofed source address).
++
+With longer polling intervals, it is recommended to combine the *xleave* option
+with the *presend* option in order to shorten the interval in which the server
+has to keep the state to be able to respond in the interleaved mode. The
+shorter interval also improves accuracy of the measured offset and delay.
 *polltarget* _target_:::
 Target number of measurements to use for the regression algorithm which
 *chronyd* will try to maintain by adjusting the polling interval between
@@ -398,9 +405,10 @@ refclock SOCK /var/run/chrony.ttyS0.sock
 *PHC*:::
 PTP hardware clock (PHC) driver. The parameter is the path to the device of
 the PTP clock, which for example can be synchronised by *ptp4l* from
-http://linuxptp.sourceforge.net[*linuxptp*]. PTP clocks are typically kept in
-TAI instead of UTC, so the *offset* option should be used to compensate for the
-current UTC-TAI offset. For example:
+http://linuxptp.sourceforge.net[*linuxptp*]. String *:nocrossts* can be
+appended to the path to disable use of precise cross timestamping. PTP clocks
+are typically kept in TAI instead of UTC, so the *offset* option should be used
+to compensate for the current UTC-TAI offset. For example:
 +
 ----
 refclock PHC /dev/ptp0 poll 3 dpoll -2 offset -36
@@ -1510,10 +1518,12 @@ The log files are written to the directory specified by the <<logdir,*logdir*>>
 directive. A banner is periodically written to the files to indicate the
 meanings of the columns.
 +
-*measurements*:::
+*rawmeasurements*:::
 This option logs the raw NTP measurements and related information to a file
-called _measurements.log_. An example line (which actually appears as a single
-line in the file) from the log file is shown below.
+called _measurements.log_. An entry is made for each packet received from the
+source. This can be useful when debugging a problem. An example line (which
+actually appears as a single line in the file) from the log file is shown
+below.
 +
 ----
 2016-11-09 05:40:50 203.0.113.15    N  2 111 111 1111  10 10 1.0 \
@@ -1554,6 +1564,12 @@ from the example line above):
   (_D_=daemon, _K_=kernel, _H_=hardware). [D]
 . Source of the local receive timestamp
   (_D_=daemon, _K_=kernel, _H_=hardware). [K]
++
+*measurements*:::
+This option is identical to the *rawmeasurements* option, except it logs only
+valid measurements from synchronised sources, i.e. measurements which passed
+the RFC 5905 tests 1 through 7. This can be useful for producing graphs of the
+source's performance.
 +
 *statistics*:::
 This option logs information about the regression processing to a file called
@@ -1814,6 +1830,15 @@ on all available interfaces.
 +
 The *hwtimestamp* directive has the following options:
 +
+*minpoll* _poll_:::
+This option specifies the minimum interval between readings of the NIC clock.
+It's defined as a power of two. It should correspond to the minimum polling
+interval of all NTP sources and the minimum expected polling interval of NTP
+clients. The default value is 0 (1 second) and the minimum value is -6 (1/64th
+of a second).
+*precision* _precision_:::
+This option specifies the assumed precision of reading of the NIC clock. The
+default value is 100e-9 (100 nanoseconds).
 *txcomp* _compensation_:::
 This option specifies the difference in seconds between the actual transmission
 time at the physical layer and the reported transmit timestamp. This value will
@@ -1823,6 +1848,9 @@ This option specifies the difference in seconds between the reported receive
 timestamp and the actual reception time at the physical layer. This value will
 be subtracted from receive timestamps obtained from the NIC. The default value
 is 0.
+*nocrossts*:::
+Some hardware can precisely cross timestamp the NIC clock with the system
+clock. This option disables the use of the cross timestamping.
 ::
 +
 Examples of the directive are:

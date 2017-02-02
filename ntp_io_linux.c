@@ -61,11 +61,15 @@ struct Interface {
   char name[IF_NAMESIZE];
   int if_index;
   int phc_fd;
+  int phc_mode;
+  int phc_nocrossts;
   /* Link speed in mbit/s */
   int link_speed;
   /* Start of UDP data at layer 2 for IPv4 and IPv6 */
   int l2_udp4_ntp_start;
   int l2_udp6_ntp_start;
+  /* Precision of PHC readings */
+  double precision;
   /* Compensation of errors in TX and RX timestamping */
   double tx_comp;
   double rx_comp;
@@ -74,6 +78,9 @@ struct Interface {
 
 /* Number of PHC readings per HW clock sample */
 #define PHC_READINGS 10
+
+/* Minimum interval between PHC readings */
+#define MIN_PHC_POLL -6
 
 /* Maximum acceptable offset between HW and daemon/kernel timestamp */
 #define MAX_TS_DELAY 1.0
@@ -91,19 +98,18 @@ static int permanent_ts_options;
 /* ================================================== */
 
 static int
-add_interface(const char *name, double tx_comp, double rx_comp)
+add_interface(CNF_HwTsInterface *conf_iface)
 {
   struct ethtool_ts_info ts_info;
   struct hwtstamp_config ts_config;
   struct ifreq req;
-  int sock_fd, if_index, phc_index, phc_fd;
+  int sock_fd, if_index, phc_fd, req_hwts_flags;
   unsigned int i;
   struct Interface *iface;
-  char phc_path[64];
 
   /* Check if the interface was not already added */
   for (i = 0; i < ARR_GetSize(interfaces); i++) {
-    if (!strcmp(name, ((struct Interface *)ARR_GetElement(interfaces, i))->name))
+    if (!strcmp(conf_iface->name, ((struct Interface *)ARR_GetElement(interfaces, i))->name))
       return 1;
   }
 
@@ -114,7 +120,8 @@ add_interface(const char *name, double tx_comp, double rx_comp)
   memset(&req, 0, sizeof (req));
   memset(&ts_info, 0, sizeof (ts_info));
 
-  if (snprintf(req.ifr_name, sizeof (req.ifr_name), "%s", name) >= sizeof (req.ifr_name)) {
+  if (snprintf(req.ifr_name, sizeof (req.ifr_name), "%s", conf_iface->name) >=
+      sizeof (req.ifr_name)) {
     close(sock_fd);
     return 0;
   }
@@ -136,6 +143,14 @@ add_interface(const char *name, double tx_comp, double rx_comp)
     return 0;
   }
 
+  req_hwts_flags = SOF_TIMESTAMPING_RX_HARDWARE | SOF_TIMESTAMPING_TX_HARDWARE |
+                   SOF_TIMESTAMPING_RAW_HARDWARE;
+  if ((ts_info.so_timestamping & req_hwts_flags) != req_hwts_flags) {
+    DEBUG_LOG(LOGF_NtpIOLinux, "HW timestamping not supported on %s", req.ifr_name);
+    close(sock_fd);
+    return 0;
+  }
+
   ts_config.flags = 0;
   ts_config.tx_type = HWTSTAMP_TX_ON;
   ts_config.rx_filter = HWTSTAMP_FILTER_ALL;
@@ -148,36 +163,31 @@ add_interface(const char *name, double tx_comp, double rx_comp)
   }
 
   close(sock_fd);
-  phc_index = ts_info.phc_index;
 
-  if (snprintf(phc_path, sizeof (phc_path), "/dev/ptp%d", phc_index) >= sizeof (phc_path))
+  phc_fd = SYS_Linux_OpenPHC(NULL, ts_info.phc_index);
+  if (phc_fd < 0)
     return 0;
-
-  phc_fd = open(phc_path, O_RDONLY);
-  if (phc_fd < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIOLinux, "Could not open %s : %s", phc_path, strerror(errno));
-    return 0;
-  }
-
-  UTI_FdSetCloexec(phc_fd);
 
   iface = ARR_GetNewElement(interfaces);
 
-  snprintf(iface->name, sizeof (iface->name), "%s", name);
+  snprintf(iface->name, sizeof (iface->name), "%s", conf_iface->name);
   iface->if_index = if_index;
   iface->phc_fd = phc_fd;
+  iface->phc_mode = 0;
+  iface->phc_nocrossts = conf_iface->nocrossts;
 
   /* Start with 1 gbit and no VLANs or IPv4/IPv6 options */
   iface->link_speed = 1000;
   iface->l2_udp4_ntp_start = 42;
   iface->l2_udp6_ntp_start = 62;
 
-  iface->tx_comp = tx_comp;
-  iface->rx_comp = rx_comp;
+  iface->precision = conf_iface->precision;
+  iface->tx_comp = conf_iface->tx_comp;
+  iface->rx_comp = conf_iface->rx_comp;
 
-  iface->clock = HCL_CreateInstance();
+  iface->clock = HCL_CreateInstance(UTI_Log2ToDouble(MAX(conf_iface->minpoll, MIN_PHC_POLL)));
 
-  DEBUG_LOG(LOGF_NtpIOLinux, "Enabled HW timestamping on %s", name);
+  LOG(LOGS_INFO, LOGF_NtpIOLinux, "Enabled HW timestamping on %s", iface->name);
 
   return 1;
 }
@@ -185,10 +195,13 @@ add_interface(const char *name, double tx_comp, double rx_comp)
 /* ================================================== */
 
 static int
-add_all_interfaces(double tx_comp, double rx_comp)
+add_all_interfaces(CNF_HwTsInterface *conf_iface_all)
 {
+  CNF_HwTsInterface conf_iface;
   struct ifaddrs *ifaddr, *ifa;
   int r;
+
+  conf_iface = *conf_iface_all;
 
   if (getifaddrs(&ifaddr)) {
     DEBUG_LOG(LOGF_NtpIOLinux, "getifaddrs() failed : %s", strerror(errno));
@@ -196,7 +209,8 @@ add_all_interfaces(double tx_comp, double rx_comp)
   }
 
   for (r = 0, ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
-    if (add_interface(ifa->ifa_name, tx_comp, rx_comp))
+    conf_iface.name = ifa->ifa_name;
+    if (add_interface(&conf_iface))
       r = 1;
   }
   
@@ -242,8 +256,7 @@ update_interface_speed(struct Interface *iface)
 void
 NIO_Linux_Initialise(void)
 {
-  double tx_comp, rx_comp;
-  char *name;
+  CNF_HwTsInterface *conf_iface;
   unsigned int i;
   int hwts;
 
@@ -252,18 +265,18 @@ NIO_Linux_Initialise(void)
   /* Enable HW timestamping on specified interfaces.  If "*" was specified, try
      all interfaces.  If no interface was specified, enable SW timestamping. */
 
-  for (i = hwts = 0; CNF_GetHwTsInterface(i, &name, &tx_comp, &rx_comp); i++) {
-    if (!strcmp("*", name))
+  for (i = hwts = 0; CNF_GetHwTsInterface(i, &conf_iface); i++) {
+    if (!strcmp("*", conf_iface->name))
       continue;
-    if (!add_interface(name, tx_comp, rx_comp))
-      LOG_FATAL(LOGF_NtpIO, "Could not enable HW timestamping on %s", name);
+    if (!add_interface(conf_iface))
+      LOG_FATAL(LOGF_NtpIO, "Could not enable HW timestamping on %s", conf_iface->name);
     hwts = 1;
   }
 
-  for (i = 0; CNF_GetHwTsInterface(i, &name, &tx_comp, &rx_comp); i++) {
-    if (strcmp("*", name))
+  for (i = 0; CNF_GetHwTsInterface(i, &conf_iface); i++) {
+    if (strcmp("*", conf_iface->name))
       continue;
-    if (add_all_interfaces(tx_comp, rx_comp))
+    if (add_all_interfaces(conf_iface))
       hwts = 1;
     break;
   }
@@ -337,68 +350,6 @@ NIO_Linux_SetTimestampSocketOptions(int sock_fd, int client_only, int *events)
 
 /* ================================================== */
 
-static int
-get_phc_sample(int phc_fd, struct timespec *phc_ts, struct timespec *local_ts, double *p_delay)
-{
-  struct ptp_sys_offset sys_off;
-  struct timespec ts1, ts2, ts3, phc_tss[PHC_READINGS], sys_tss[PHC_READINGS];
-  double min_delay = 0.0, delays[PHC_READINGS], phc_sum, local_sum, local_prec;
-  int i, n;
-
-  /* Silence valgrind */
-  memset(&sys_off, 0, sizeof (sys_off));
-
-  sys_off.n_samples = PHC_READINGS;
-
-  if (ioctl(phc_fd, PTP_SYS_OFFSET, &sys_off)) {
-    DEBUG_LOG(LOGF_NtpIOLinux, "ioctl(%s) failed : %s", "PTP_SYS_OFFSET", strerror(errno));
-    return 0;
-  }
-
-  for (i = 0; i < PHC_READINGS; i++) {
-    ts1.tv_sec = sys_off.ts[i * 2].sec;
-    ts1.tv_nsec = sys_off.ts[i * 2].nsec;
-    ts2.tv_sec = sys_off.ts[i * 2 + 1].sec;
-    ts2.tv_nsec = sys_off.ts[i * 2 + 1].nsec;
-    ts3.tv_sec = sys_off.ts[i * 2 + 2].sec;
-    ts3.tv_nsec = sys_off.ts[i * 2 + 2].nsec;
-
-    sys_tss[i] = ts1;
-    phc_tss[i] = ts2;
-    delays[i] = UTI_DiffTimespecsToDouble(&ts3, &ts1);
-
-    if (delays[i] <= 0.0)
-      /* Step in the middle of a PHC reading? */
-      return 0;
-
-    if (!i || delays[i] < min_delay)
-      min_delay = delays[i];
-  }
-
-  local_prec = LCL_GetSysPrecisionAsQuantum();
-
-  /* Combine best readings */
-  for (i = n = 0, phc_sum = local_sum = 0.0; i < PHC_READINGS; i++) {
-    if (delays[i] > min_delay + local_prec)
-      continue;
-
-    phc_sum += UTI_DiffTimespecsToDouble(&phc_tss[i], &phc_tss[0]);
-    local_sum += UTI_DiffTimespecsToDouble(&sys_tss[i], &sys_tss[0]) + delays[i] / 2.0;
-    n++;
-  }
-
-  assert(n);
-
-  UTI_AddDoubleToTimespec(&phc_tss[0], phc_sum / n, phc_ts);
-  UTI_AddDoubleToTimespec(&sys_tss[0], local_sum / n, &ts1);
-  LCL_CookTime(&ts1, local_ts, NULL);
-  *p_delay = min_delay;
-
-  return 1;
-}
-
-/* ================================================== */
-
 static struct Interface *
 get_interface(int if_index)
 {
@@ -422,16 +373,17 @@ static void
 process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
                      NTP_Local_Timestamp *local_ts, int rx_ntp_length, int family)
 {
-  struct timespec sample_phc_ts, sample_local_ts, ts;
-  double sample_delay, rx_correction, ts_delay, err;
+  struct timespec sample_phc_ts, sample_sys_ts, sample_local_ts, ts;
+  double rx_correction, ts_delay, err;
   int l2_length;
 
   if (HCL_NeedsNewSample(iface->clock, &local_ts->ts)) {
-    if (!get_phc_sample(iface->phc_fd, &sample_phc_ts, &sample_local_ts, &sample_delay))
+    if (!SYS_Linux_GetPHCSample(iface->phc_fd, iface->phc_nocrossts, iface->precision,
+                                &iface->phc_mode, &sample_phc_ts, &sample_sys_ts, &err))
       return;
 
-    HCL_AccumulateSample(iface->clock, &sample_phc_ts, &sample_local_ts,
-                         sample_delay / 2.0);
+    LCL_CookTime(&sample_sys_ts, &sample_local_ts, NULL);
+    HCL_AccumulateSample(iface->clock, &sample_phc_ts, &sample_local_ts, err);
 
     update_interface_speed(iface);
   }
@@ -536,8 +488,7 @@ extract_udp_data(unsigned char *msg, NTP_Remote_Address *remote_addr, int len)
 
 int
 NIO_Linux_ProcessMessage(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr,
-                         NTP_Local_Timestamp *local_ts, struct msghdr *hdr,
-                         int length, int sock_fd, int if_index)
+                         NTP_Local_Timestamp *local_ts, struct msghdr *hdr, int length)
 {
   struct Interface *iface;
   struct cmsghdr *cmsg;
@@ -556,12 +507,13 @@ NIO_Linux_ProcessMessage(NTP_Remote_Address *remote_addr, NTP_Local_Address *loc
         LCL_CookTime(&ts3.ts[0], &local_ts->ts, &local_ts->err);
         local_ts->source = NTP_TS_KERNEL;
       } else if (!UTI_IsZeroTimespec(&ts3.ts[2])) {
-        iface = get_interface(if_index);
+        iface = get_interface(local_addr->if_index);
         if (iface) {
           process_hw_timestamp(iface, &ts3.ts[2], local_ts, !is_tx ? length : 0,
                                remote_addr->ip_addr.family);
         } else {
-          DEBUG_LOG(LOGF_NtpIOLinux, "HW clock not found for interface %d", if_index);
+          DEBUG_LOG(LOGF_NtpIOLinux, "HW clock not found for interface %d",
+                    local_addr->if_index);
         }
       }
     }
@@ -593,7 +545,7 @@ NIO_Linux_ProcessMessage(NTP_Remote_Address *remote_addr, NTP_Local_Address *loc
 
   DEBUG_LOG(LOGF_NtpIOLinux, "Received %d (%d) bytes from error queue for %s:%d fd=%d if=%d tss=%d",
             l2_length, length, UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
-            sock_fd, if_index, local_ts->source);
+            local_addr->sock_fd, local_addr->if_index, local_ts->source);
 
   /* Update assumed position of UDP data at layer 2 for next received packet */
   if (iface && length) {
