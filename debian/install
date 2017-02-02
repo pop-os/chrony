@@ -1,2 +1,1 @@
 debian/chrony.conf    usr/share/chrony
-debian/init-helper usr/lib/chrony

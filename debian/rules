@@ -24,6 +24,7 @@ override_dh_install:
 	dh_install
 	install -m 0640 -t $(BASE)/usr/share/chrony/ debian/chrony.keys
 	install -m 0755 -T examples/chrony.nm-dispatcher $(BASE)/etc/NetworkManager/dispatcher.d/20-chrony
+	install -m 0644 -T examples/chrony.logrotate $(BASE)/etc/logrotate.d/chrony
 
 override_dh_fixperms:
 	dh_fixperms -X usr/share/chrony/chrony.keys

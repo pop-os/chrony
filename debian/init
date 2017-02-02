@@ -22,7 +22,6 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin
 DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
-HELPER="/usr/lib/chrony/init-helper"
 
 [ -x "$DAEMON" ] || exit 0
 
@@ -39,7 +38,6 @@ case "$1" in
 	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
-			$HELPER go_online
 			;;
 	        1) # daemon already running
 		        ;;
@@ -60,7 +58,6 @@ case "$1" in
 	start-stop-daemon --start --verbose --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
-			$HELPER go_online
 			;;
 	        1) # still running
 		        ;;

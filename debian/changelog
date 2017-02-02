@@ -1,3 +1,58 @@
+chrony (3.0-2) unstable; urgency=medium
+
+  * debian/chrony.conf:
+    - Disable logging by default, it waste some disk space and users are
+    probably better served by “chronyc sources” and “chronyc sourcestats”
+    commands anyway.
+
+  * debian/chrony.service:
+    - Remove the “Restart=on-failure” option. There are possible security
+    implications for NTP clients.
+
+  * debian/dirs:
+    - Add etc/logrotate.d to avoid build failure.
+
+  * Remove our logrotate configuration file in favour of the upstream’s one.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 18 Jan 2017 15:26:31 +0100
+
+chrony (3.0-1) unstable; urgency=medium
+
+  * Import upstream version 3.0:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * Merge branch “experimental”:
+    - Enable support for MS-SNTP authentication in Samba.
+    - Rename --chronysockdir to --chronyrundir.
+    - Enable seccomp facility on powerpcspe.
+
+  * debian/chrony.conf:
+    - Make use of the “makestep” directive to step the system clock instead of
+    slewing it when necessary.
+    - Drop the “offline” option as per upstream’s advice to render chrony’s
+    start-up sequence safer.
+
+  * debian/chrony.service:
+    - Reflect init-helper script deletion.
+
+  * debian/copyright:
+    - Add myself as a copyright holder for 2017.
+    - Adjust copyright holders and update some copyright years. Kudos to Paul
+    Gevers <elbrus@debian.org> for spotting the necessary updates.
+
+  * debian/init:
+    - Reflect init-helper script deletion.
+
+  * debian/install:
+    - Don’t install the init-helper script, it has been deleted.
+
+  * debian/README.Debian:
+    - Remove obsolete information.
+
+  * Remove the init-helper script as it no longer needed.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 17 Jan 2017 22:05:31 +0100
+
 chrony (3.0~pre3-1) experimental; urgency=low
 
   * Import upstream version 3.0-pre3:
