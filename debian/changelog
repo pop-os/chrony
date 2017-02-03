@@ -1,3 +1,21 @@
+chrony (3.1-1) experimental; urgency=medium
+
+  * Import upstream version 3.1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/chrony.conf:
+    - Remove the “hwclockfile” directive. Unneeded now that the configure
+    script allows us to set the default path to the adjtime file via the
+    “--with-hwclockfile” option.
+
+  * debian/copyright:
+    - Update copyright years.
+
+  * debian/rules:
+    - Specify default path to hwclock adjtime file.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 02 Feb 2017 19:24:30 +0100
+
 chrony (3.0-2) unstable; urgency=medium
 
   * debian/chrony.conf:
