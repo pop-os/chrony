@@ -1,0 +1,26 @@
+Description: Fix time smoothing in interleaved mode
+ When the server's transmit timestamp was updated with a kernel/HW timestamp,
+ it didn't include the time smoothing offset. If the offset was larger than
+ one second, the update failed and clients using the interleaved mode received
+ less accurate timestamps. If the update succeeded, the clients received
+ timestamps that were not adjusted for the time smoothing offset, which added
+ an error of up to 0.5s/1s to their measured offset/delay.
+
+ Fix the update to include the smoothing offset in the new timestamp.
+Author: Miroslav Lichvar <mlichvar@redhat.com>
+Origin: https://git.tuxfamily.org/chrony/chrony.git/commit/?id=da2d33e9a84baa7325503440099dd8f1e567cdd4
+Applied-Upstream: 3.1
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/ntp_core.c
++++ b/ntp_core.c
+@@ -2016,6 +2016,9 @@ NCR_ProcessTxUnknown(NTP_Remote_Address
+   if (log_index < 0)
+     return;
+
++  if (SMT_IsEnabled() && NTP_LVM_TO_MODE(message->lvm) == MODE_SERVER)
++    UTI_AddDoubleToTimespec(&tx_ts->ts, SMT_GetOffset(&tx_ts->ts), &tx_ts->ts);
++
+   CLG_GetNtpTimestamps(log_index, &local_ntp_rx, &local_ntp_tx);
+
+   if (UTI_IsZeroNtp64(local_ntp_tx))
