@@ -1,3 +1,10 @@
+chrony (3.0-3) unstable; urgency=medium
+
+  * debian/patches/*:
+    - Backport an upstream patch to fix time smoothing in interleaved mode.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 05 Feb 2017 22:40:57 +0100
+
 chrony (3.0-2) unstable; urgency=medium
 
   * debian/chrony.conf:
