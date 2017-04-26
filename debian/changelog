@@ -1,3 +1,13 @@
+chrony (3.1-2) experimental; urgency=medium
+
+  * Merge branch 'master' into experimental. (Closes: #861258)
+
+  * debian/patches/*:
+    - Remove the “fix_time_smoothing_in_interleaved_mode.patch” patch. Not
+    needed anymore.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 26 Apr 2017 21:17:43 +0200
+
 chrony (3.1-1) experimental; urgency=medium
 
   * Import upstream version 3.1:
