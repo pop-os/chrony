@@ -1,3 +1,11 @@
+chrony (3.0-4) unstable; urgency=medium
+
+  * debian/patches/*:
+    - Backport commit 768bce799bfe to make chrony operable with the syscall
+    filtering feature enabled in level 1. (Closes: #861258)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 26 Apr 2017 17:39:44 +0200
+
 chrony (3.0-3) unstable; urgency=medium
 
   * debian/patches/*:
