@@ -16,6 +16,22 @@ chrony (3.1-1) experimental; urgency=medium
 
  -- Vincent Blut <vincent.debian@free.fr>  Thu, 02 Feb 2017 19:24:30 +0100
 
+chrony (3.0-4) unstable; urgency=medium
+
+  * debian/patches/*:
+    - Backport commit 768bce799bfe to make chrony operable with the syscall
+    filtering feature enabled in level 1. (Closes: #861258)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 26 Apr 2017 17:39:44 +0200
+
+chrony (3.0-3) unstable; urgency=medium
+
+  * debian/patches/*:
+    - Backport an upstream patch to fix time smoothing in interleaved mode.
+    (Closes: #854424)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 07 Feb 2017 00:37:24 +0100
+
 chrony (3.0-2) unstable; urgency=medium
 
   * debian/chrony.conf:
