@@ -53,22 +53,9 @@ case "$1" in
 	rm -f /var/run/chrony-ppp-up
 	;;
     restart|force-reload)
-	echo -n "Restarting $DESC: "
-	start-stop-daemon --stop --quiet --pidfile $PIDFILE --remove-pidfile --exec $DAEMON
-	sleep 1
-	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
-	case "$?" in
-		0) # daemon successfully started
-			;;
-	        1) # still running
-		        ;;
-		*) # daemon could not be started
-			echo "$DAEMON failed to restart."
-			rm -f /var/run/chrony-ppp-up
-			exit 1
-			;;
-	esac
-	;;
+        $0 stop
+        $0 start
+        ;;
     status)
 	status_of_proc -p $PIDFILE "$DAEMON" "$NAME" && exit 0 || exit $?
 	;;
