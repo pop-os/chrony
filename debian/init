@@ -36,7 +36,7 @@ fi
 
 case "$1" in
     start)
-	start-stop-daemon --start --verbose --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
+	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
 			;;
@@ -49,14 +49,14 @@ case "$1" in
 	esac
 	;;
     stop)
-	start-stop-daemon --stop --verbose --oknodo --pidfile $PIDFILE --exec $DAEMON
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE --exec $DAEMON
 	rm -f /var/run/chrony-ppp-up
 	;;
     restart|force-reload)
 	echo -n "Restarting $DESC: "
 	start-stop-daemon --stop --quiet --pidfile $PIDFILE --exec $DAEMON
 	sleep 1
-	start-stop-daemon --start --verbose --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
+	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
 	case "$?" in
 		0) # daemon successfully started
 			;;
