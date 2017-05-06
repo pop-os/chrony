@@ -6,8 +6,6 @@ set -e
 
 if [ -e /run/chrony/chronyd.pid ] && ! ip r 2> /dev/null | grep -q '^default'; then
     chronyc offline > /dev/null 2>&1
-else
-    exit 0
 fi
 
 exit 0
