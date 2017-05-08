@@ -22,6 +22,7 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin
 DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
+PIDDIR=/run/chrony
 PIDFILE=/run/chrony/chronyd.pid
 
 [ -x "$DAEMON" ] || exit 0
@@ -39,6 +40,10 @@ case "$1" in
         if $0 status > /dev/null ; then
             log_success_msg "$NAME is already running"
         else
+            if [ ! -d "$PIDDIR" ]; then
+                mkdir -m 0750 $PIDDIR
+                chown _chrony:_chrony $PIDDIR
+            fi
             log_daemon_msg "Starting $DESC" "$NAME"
             start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
             log_end_msg $?
