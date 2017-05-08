@@ -5,6 +5,8 @@
 # were in the public domain.  I waive all rights.
 # Modified by Vincent Blut <vincent.debian@free.fr>
 
-/bin/pidof chronyd > /dev/null || exit 0
-/usr/bin/chronyc -m online 'burst 4/4' > /dev/null 2>&1
+if [ -e /run/chrony/chronyd.pid ]; then
+    /usr/bin/chronyc -m online 'burst 4/4' > /dev/null 2>&1
+fi
+
 exit 0
