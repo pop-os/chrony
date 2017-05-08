@@ -6,7 +6,7 @@
 # Modified by Vincent Blut <vincent.debian@free.fr>
 
 if [ -e /run/chrony/chronyd.pid ]; then
-    /usr/bin/chronyc -m online 'burst 4/4' > /dev/null 2>&1
+    chronyc -m online 'burst 4/4' > /dev/null 2>&1
 fi
 
 exit 0
