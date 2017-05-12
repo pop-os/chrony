@@ -1,0 +1,24 @@
+#!/bin/sh
+#Upstream makes use of “clknetsim” to test how well “chronyd” controls the
+#system clocks in various conditions. Due to “clknetsim” not being available
+#in Debian, let’s use autopkgtest facility to build it in a vm instance and
+#test “chronyd” from there.
+
+set -e
+
+if ! dpkg-architecture -ilinux-any; then
+    echo "Simulation tests supported only on Linux…"
+    exit 0
+fi
+
+cd test/simulation
+
+if [ ! -d clknetsim ]; then
+    git clone https://github.com/mlichvar/clknetsim
+fi
+
+if [ ! -x "clknetsim/clknetsim" ] && [ ! -e "clknetsim/clknetsim.so" ]; then
+    make -C clknetsim
+fi
+
+./run
