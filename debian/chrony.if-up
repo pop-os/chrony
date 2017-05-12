@@ -4,7 +4,7 @@ set -e
 
 [ -x /usr/sbin/chronyd ] || exit 0
 
-if [ -e /run/chrony/chronyd.pid ] &&
+if [ -e /run/chronyd.pid ] &&
     ip r list dev $IFACE 2> /dev/null | grep -q '^default'; then
     chronyc -m online 'burst 4/10' > /dev/null 2>&1
 fi
