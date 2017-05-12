@@ -1,3 +1,49 @@
+chrony (3.1-3) experimental; urgency=medium
+
+  * debian/chrony.if-{post-down,up}:
+    - Update the pid file location.
+    - Remove unnecessary “else” statements.
+
+  * debian/chrony.ppp.ip-down:
+    - Don’t check and delete “/var/run/chrony-ppp-up”, that file doesn’t exist
+    anymore.
+    - Check for pid file existence instead of calling “pidof”.
+
+  * debian/chrony.ppp.ip-up:
+    - Don’t create “/var/run/chrony-ppp-up” file after the ppp link came up.
+    - Check for pid file existence instead of calling “pidof”.
+    - Don’t call “chronyc” using its absolute path.
+    - Check for the presence of a default route before advising “chronyd” that
+    the network connectivity to the sources is ready.
+
+  * debian/chrony.service:
+    - Change the pid file path.
+
+  * debian/chrony.tmpfile:
+    - New file used to create the “/run/chrony” runtime directory when using
+    systemd as PID 1.
+
+  * debian/init:
+    - Check if “$PIDFILE” exists before taking action.
+    - Do not print informational messages.
+    - Remove the “chronyd” pid file when stopping as it doesn’t do it on
+    its own.
+    - Rework the “restart|force-reload” pattern.
+    - Make use of some init-functions.
+    - Print a message if “chronyd” is already running while attempting to start
+    it.
+    - Do not delete “/var/run/chrony-ppp-up”, that file doesn’t exist anymore.
+    - Create “/run/chrony” runtime directory if inexistent before starting
+    “chronyd”.
+
+  * d/rules:
+    - Move the default pid file from “/var/run” to “/run/chrony”.
+
+  * d/tests/*:
+    - Use autopkgtest facility to run the upstream simulation test suite.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 12 May 2017 14:57:15 +0200
+
 chrony (3.1-2) experimental; urgency=medium
 
   * Merge branch 'master' into experimental. (Closes: #861258)
