@@ -6,7 +6,7 @@
 # were in the public domain.  I waive all rights.
 # Modified by Vincent Blut <vincent.debian@free.fr>
 
-if [ -e /run/chrony/chronyd.pid ] && ! ip r 2> /dev/null | grep -q '^default'; then
+if [ -e /run/chronyd.pid ] && ! ip r 2> /dev/null | grep -q '^default'; then
     chronyc offline > /dev/null 2>&1
 fi
 
