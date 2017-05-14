@@ -1,7 +1,6 @@
 chrony (3.1-3) experimental; urgency=medium
 
   * debian/chrony.if-{post-down,up}:
-    - Update the pid file location.
     - Remove unnecessary “else” statements.
 
   * debian/chrony.ppp.ip-down:
@@ -16,13 +15,6 @@ chrony (3.1-3) experimental; urgency=medium
     - Check for the presence of a default route before advising “chronyd” that
     the network connectivity to the sources is ready.
 
-  * debian/chrony.service:
-    - Change the pid file path.
-
-  * debian/chrony.tmpfile:
-    - New file used to create the “/run/chrony” runtime directory when using
-    systemd as PID 1.
-
   * debian/init:
     - Check if “$PIDFILE” exists before taking action.
     - Do not print informational messages.
@@ -33,16 +25,14 @@ chrony (3.1-3) experimental; urgency=medium
     - Print a message if “chronyd” is already running while attempting to start
     it.
     - Do not delete “/var/run/chrony-ppp-up”, that file doesn’t exist anymore.
-    - Create “/run/chrony” runtime directory if inexistent before starting
-    “chronyd”.
 
   * d/rules:
-    - Move the default pid file from “/var/run” to “/run/chrony”.
+    - Move the default pid file from “/var/run” to “/run”.
 
   * d/tests/*:
     - Use autopkgtest facility to run the upstream simulation test suite.
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 12 May 2017 14:57:15 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 14 May 2017 17:26:15 +0200
 
 chrony (3.1-2) experimental; urgency=medium
 
