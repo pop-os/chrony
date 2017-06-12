@@ -24,8 +24,7 @@ Depends: ${misc:Depends},
  ucf,
  iproute2 [linux-any],
  lsb-base,
- adduser,
- util-linux (>= 2.20.1-5)
+ adduser
 Conflicts: time-daemon, ntp
 Provides: time-daemon
 Replaces: time-daemon
