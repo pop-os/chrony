@@ -1,3 +1,23 @@
+chrony (3.1-4) unstable; urgency=medium
+
+  * Now that Stretch has been released (\o/), let’s upload chrony 3.1 to
+    unstable.
+
+  * debian/:
+    - Remove the menu file used to launch “chronyc”. It is a CLI only tool,
+    thus it probably does not make a lot of sense to keep it in the Debian
+    menu.
+
+  * debian/control:
+    - Drop dependency on pre-jessie util-linux version.
+    - Bump standard-version to 4.0.0 (no changes required).
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Fix the leading comment which mentioned “vm” despite the fact that the
+    test runs in a container.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 19 Jun 2017 02:30:10 +0200
+
 chrony (3.1-3) experimental; urgency=medium
 
   * debian/chrony.if-{post-down,up}:
