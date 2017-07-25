@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2013
+ * Copyright (C) Miroslav Lichvar  2013, 2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -33,144 +33,134 @@
 
 #include "sysincl.h"
 
-#include <linux/ptp_clock.h>
-
 #include "refclock.h"
+#include "hwclock.h"
+#include "local.h"
 #include "logging.h"
+#include "memory.h"
 #include "util.h"
+#include "sched.h"
+#include "sys_linux.h"
 
-/* From linux/include/linux/posix-timers.h */
-#define CPUCLOCK_MAX            3
-#define CLOCKFD                 CPUCLOCK_MAX
-#define CLOCKFD_MASK            (CPUCLOCK_PERTHREAD_MASK|CPUCLOCK_CLOCK_MASK)
-
-#define FD_TO_CLOCKID(fd)       ((~(clockid_t) (fd) << 3) | CLOCKFD)
-
-#define NUM_READINGS 10
-
-static int no_sys_offset_ioctl = 0;
-
-struct phc_reading {
-  struct timespec sys_ts1;
-  struct timespec phc_ts;;
-  struct timespec sys_ts2;
+struct phc_instance {
+  int fd;
+  int mode;
+  int nocrossts;
+  int extpps;
+  int pin;
+  int channel;
+  HCL_Instance clock;
 };
 
-static int read_phc_ioctl(struct phc_reading *readings, int phc_fd, int n)
-{
-#if defined(PTP_SYS_OFFSET) && NUM_READINGS <= PTP_MAX_SAMPLES
-  struct ptp_sys_offset sys_off;
-  int i;
-
-  /* Silence valgrind */
-  memset(&sys_off, 0, sizeof (sys_off));
-
-  sys_off.n_samples = n;
-  if (ioctl(phc_fd, PTP_SYS_OFFSET, &sys_off)) {
-    LOG(LOGS_ERR, LOGF_Refclock, "ioctl(PTP_SYS_OFFSET) failed : %s", strerror(errno));
-    return 0;
-  }
-
-  for (i = 0; i < n; i++) {
-    readings[i].sys_ts1.tv_sec = sys_off.ts[i * 2].sec;
-    readings[i].sys_ts1.tv_nsec = sys_off.ts[i * 2].nsec;
-    readings[i].phc_ts.tv_sec = sys_off.ts[i * 2 + 1].sec;
-    readings[i].phc_ts.tv_nsec = sys_off.ts[i * 2 + 1].nsec;
-    readings[i].sys_ts2.tv_sec = sys_off.ts[i * 2 + 2].sec;
-    readings[i].sys_ts2.tv_nsec = sys_off.ts[i * 2 + 2].nsec;
-  }
-
-  return 1;
-#else
-  /* Not available */
-  return 0;
-#endif
-}
-
-static int read_phc_user(struct phc_reading *readings, int phc_fd, int n)
-{
-  clockid_t phc_id;
-  int i;
-
-  phc_id = FD_TO_CLOCKID(phc_fd);
-
-  for (i = 0; i < n; i++) {
-    if (clock_gettime(CLOCK_REALTIME, &readings[i].sys_ts1) ||
-        clock_gettime(phc_id, &readings[i].phc_ts) ||
-        clock_gettime(CLOCK_REALTIME, &readings[i].sys_ts2)) {
-      LOG(LOGS_ERR, LOGF_Refclock, "clock_gettime() failed : %s", strerror(errno));
-      return 0;
-    }
-  }
-
-  return 1;
-}
+static void read_ext_pulse(int sockfd, int event, void *anything);
 
 static int phc_initialise(RCL_Instance instance)
 {
-  struct ptp_clock_caps caps;
-  int phc_fd;
-  char *path;
+  struct phc_instance *phc;
+  int phc_fd, rising_edge;
+  char *path, *s;
 
   path = RCL_GetDriverParameter(instance);
  
-  phc_fd = open(path, O_RDONLY);
+  phc_fd = SYS_Linux_OpenPHC(path, 0);
   if (phc_fd < 0) {
-    LOG_FATAL(LOGF_Refclock, "open() failed on %s", path);
+    LOG_FATAL("Could not open PHC");
     return 0;
   }
 
-  /* Make sure it is a PHC */
-  if (ioctl(phc_fd, PTP_CLOCK_GETCAPS, &caps)) {
-    LOG_FATAL(LOGF_Refclock, "ioctl(PTP_CLOCK_GETCAPS) failed : %s", strerror(errno));
-    return 0;
+  phc = MallocNew(struct phc_instance);
+  phc->fd = phc_fd;
+  phc->mode = 0;
+  phc->nocrossts = RCL_GetDriverOption(instance, "nocrossts") ? 1 : 0;
+  phc->extpps = RCL_GetDriverOption(instance, "extpps") ? 1 : 0;
+
+  if (phc->extpps) {
+    s = RCL_GetDriverOption(instance, "pin");
+    phc->pin = s ? atoi(s) : 0;
+    s = RCL_GetDriverOption(instance, "channel");
+    phc->channel = s ? atoi(s) : 0;
+    rising_edge = RCL_GetDriverOption(instance, "clear") ? 0 : 1;
+    phc->clock = HCL_CreateInstance(UTI_Log2ToDouble(RCL_GetDriverPoll(instance)));
+
+    if (!SYS_Linux_SetPHCExtTimestamping(phc->fd, phc->pin, phc->channel,
+                                         rising_edge, !rising_edge, 1))
+      LOG_FATAL("Could not enable external PHC timestamping");
+
+    SCH_AddFileHandler(phc->fd, SCH_FILE_INPUT, read_ext_pulse, instance);
+  } else {
+    phc->pin = phc->channel = 0;
+    phc->clock = NULL;
   }
 
-  UTI_FdSetCloexec(phc_fd);
-
-  RCL_SetDriverData(instance, (void *)(long)phc_fd);
+  RCL_SetDriverData(instance, phc);
   return 1;
 }
 
 static void phc_finalise(RCL_Instance instance)
 {
-  close((long)RCL_GetDriverData(instance));
+  struct phc_instance *phc;
+
+  phc = (struct phc_instance *)RCL_GetDriverData(instance);
+
+  if (phc->extpps) {
+    SCH_RemoveFileHandler(phc->fd);
+    SYS_Linux_SetPHCExtTimestamping(phc->fd, phc->pin, phc->channel, 0, 0, 0);
+    HCL_DestroyInstance(phc->clock);
+  }
+
+  close(phc->fd);
+  Free(phc);
+}
+
+static void read_ext_pulse(int fd, int event, void *anything)
+{
+  RCL_Instance instance;
+  struct phc_instance *phc;
+  struct timespec phc_ts, local_ts;
+  double local_err;
+  int channel;
+
+  instance = anything;
+  phc = RCL_GetDriverData(instance);
+
+  if (!SYS_Linux_ReadPHCExtTimestamp(phc->fd, &phc_ts, &channel))
+    return;
+
+  if (channel != phc->channel) {
+    DEBUG_LOG("Unexpected extts channel %d\n", channel);
+    return;
+  }
+
+  if (!HCL_CookTime(phc->clock, &phc_ts, &local_ts, &local_err))
+    return;
+
+  RCL_AddCookedPulse(instance, &local_ts, 1.0e-9 * local_ts.tv_nsec, local_err,
+                     UTI_DiffTimespecsToDouble(&phc_ts, &local_ts));
 }
 
 static int phc_poll(RCL_Instance instance)
 {
-  struct phc_reading readings[NUM_READINGS];
-  double offset = 0.0, delay, best_delay = 0.0;
-  int i, phc_fd, best;
- 
-  phc_fd = (long)RCL_GetDriverData(instance);
+  struct phc_instance *phc;
+  struct timespec phc_ts, sys_ts, local_ts;
+  double offset, phc_err, local_err;
 
-  if (!no_sys_offset_ioctl) {
-    if (!read_phc_ioctl(readings, phc_fd, NUM_READINGS)) {
-      no_sys_offset_ioctl = 1;
-      return 0;
-    }
-  } else {
-    if (!read_phc_user(readings, phc_fd, NUM_READINGS))
-      return 0;
+  phc = (struct phc_instance *)RCL_GetDriverData(instance);
+
+  if (!SYS_Linux_GetPHCSample(phc->fd, phc->nocrossts, RCL_GetPrecision(instance),
+                              &phc->mode, &phc_ts, &sys_ts, &phc_err))
+    return 0;
+
+  if (phc->extpps) {
+    LCL_CookTime(&sys_ts, &local_ts, &local_err);
+    HCL_AccumulateSample(phc->clock, &phc_ts, &local_ts, phc_err + local_err);
+    return 0;
   }
 
-  /* Find the fastest reading */
-  for (i = 0; i < NUM_READINGS; i++) {
-    delay = UTI_DiffTimespecsToDouble(&readings[i].sys_ts2, &readings[i].sys_ts1);
+  offset = UTI_DiffTimespecsToDouble(&phc_ts, &sys_ts);
 
-    if (!i || best_delay > delay) {
-      best = i;
-      best_delay = delay;
-    }
-  }
+  DEBUG_LOG("PHC offset: %+.9f err: %.9f", offset, phc_err);
 
-  offset = UTI_DiffTimespecsToDouble(&readings[best].phc_ts, &readings[best].sys_ts2) +
-           best_delay / 2.0;
-
-  DEBUG_LOG(LOGF_Refclock, "PHC offset: %+.9f delay: %.9f", offset, best_delay);
-
-  return RCL_AddSample(instance, &readings[best].sys_ts2, offset, LEAP_Normal);
+  return RCL_AddSample(instance, &sys_ts, offset, LEAP_Normal);
 }
 
 RefclockDriver RCL_PHC_driver = {

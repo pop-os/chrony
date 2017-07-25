@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-06
+.\"      Date: 2017-07-25
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2017-01-06" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2017-07-25" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -64,9 +64,15 @@ When run in this mode, the program will not detach itself from the terminal.
 \fB\-d\fP
 .RS 4
 When run in this mode, the program will not detach itself from the terminal,
-and all messages will be sent to the terminal instead of to syslog. When
+and all messages will be written to the terminal instead of syslog. When
 \fBchronyd\fP was compiled with debugging support, this option can be used twice to
 print also debugging messages.
+.RE
+.sp
+\fB\-l\fP \fIfile\fP
+.RS 4
+This option specifies a file which should be used for logging instead of syslog
+or terminal.
 .RE
 .sp
 \fB\-q\fP
@@ -77,8 +83,9 @@ will not detach from the terminal.
 .sp
 \fB\-Q\fP
 .RS 4
-This option is similar to \fB\-q\fP, but it will only print the offset without any
-corrections of the clock.
+This option is similar to the \fB\-q\fP option, except it only prints the offset
+without making any corrections of the clock and it allows \fBchronyd\fP to be
+started without root privileges.
 .RE
 .sp
 \fB\-r\fP
@@ -90,8 +97,8 @@ histories are created by using the \fBdump\fP command in
 directive in the configuration file. This option is useful if you want to stop
 and restart \fBchronyd\fP briefly for any reason, e.g. to install a new version.
 However, it should be used only on systems where the kernel can maintain clock
-compensation whilst not under \fBchronyd\fP\(cqs control (i.e. Linux, FreeBSD, NetBSD
-and Solaris).
+compensation whilst not under \fBchronyd\fP\(cqs control (i.e. Linux, FreeBSD, NetBSD,
+Solaris, and macOS 10.13 or later).
 .RE
 .sp
 \fB\-R\fP
@@ -172,6 +179,15 @@ support this option.
 .RS 4
 This option will lock \fBchronyd\fP into RAM so that it will never be paged out.
 This mode is only supported on Linux.
+.RE
+.sp
+\fB\-x\fP
+.RS 4
+This option disables the control of the system clock. \fBchronyd\fP will not make
+any adjustments of the clock, but it will still track its offset and frequency
+relative to the estimated true time, and be able to operate as an NTP server.
+This allows \fBchronyd\fP to run without the capability to adjust or set the system
+clock (e.g. in some containers).
 .RE
 .sp
 \fB\-v\fP

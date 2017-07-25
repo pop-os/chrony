@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2014-2015
+ * Copyright (C) Miroslav Lichvar  2014-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -91,7 +91,7 @@ DNS_Name2IPAddressAsync(const char *name, DNS_NameResolveHandler handler, void *
   inst->arg = anything;
 
   if (pipe(inst->pipe))
-    LOG_FATAL(LOGF_Nameserv, "pipe() failed");
+    LOG_FATAL("pipe() failed");
 
   UTI_FdSetCloexec(inst->pipe[0]);
   UTI_FdSetCloexec(inst->pipe[1]);

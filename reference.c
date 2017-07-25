@@ -49,6 +49,7 @@ static int local_orphan;
 static double local_distance;
 static NTP_Leap our_leap_status;
 static int our_leap_sec;
+static int our_tai_offset;
 static int our_stratum;
 static uint32_t our_ref_id;
 static IPAddr our_ref_ip;
@@ -111,8 +112,6 @@ static SCH_TimeoutID leap_timeout_id;
 
 /* Name of a system timezone containing leap seconds occuring at midnight */
 static char *leap_tzname;
-static time_t last_tz_leap_check;
-static NTP_Leap tz_leap;
 
 /* ================================================== */
 
@@ -141,7 +140,7 @@ static double last_ref_update_interval;
 
 /* ================================================== */
 
-static NTP_Leap get_tz_leap(time_t when);
+static NTP_Leap get_tz_leap(time_t when, int *tai_offset);
 static void update_leap_status(NTP_Leap leap, time_t now, int reset);
 
 /* ================================================== */
@@ -181,11 +180,13 @@ REF_Initialise(void)
   FILE *in;
   double file_freq_ppm, file_skew_ppm;
   double our_frequency_ppm;
+  int tai_offset;
 
   mode = REF_ModeNormal;
   are_we_synchronised = 0;
   our_leap_status = LEAP_Unsynchronised;
   our_leap_sec = 0;
+  our_tai_offset = 0;
   initialised = 1;
   our_root_dispersion = 1.0;
   our_root_delay = 1.0;
@@ -205,11 +206,11 @@ REF_Initialise(void)
         our_skew = 1.0e-6 * file_skew_ppm;
         if (our_skew < MIN_SKEW)
           our_skew = MIN_SKEW;
-        LOG(LOGS_INFO, LOGF_Reference, "Frequency %.3f +/- %.3f ppm read from %s",
+        LOG(LOGS_INFO, "Frequency %.3f +/- %.3f ppm read from %s",
             file_freq_ppm, file_skew_ppm, drift_file);
         LCL_SetAbsoluteFrequency(our_frequency_ppm);
       } else {
-        LOG(LOGS_WARN, LOGF_Reference, "Could not read valid frequency and skew from driftfile %s",
+        LOG(LOGS_WARN, "Could not read valid frequency and skew from driftfile %s",
             drift_file);
       }
       fclose(in);
@@ -219,7 +220,7 @@ REF_Initialise(void)
   if (our_frequency_ppm == 0.0) {
     our_frequency_ppm = LCL_ReadAbsoluteFrequency();
     if (our_frequency_ppm != 0.0) {
-      LOG(LOGS_INFO, LOGF_Reference, "Initial frequency %.3f ppm", our_frequency_ppm);
+      LOG(LOGS_INFO, "Initial frequency %.3f ppm", our_frequency_ppm);
     }
   }
 
@@ -243,11 +244,11 @@ REF_Initialise(void)
   leap_tzname = CNF_GetLeapSecTimezone();
   if (leap_tzname) {
     /* Check that the timezone has good data for Jun 30 2012 and Dec 31 2012 */
-    if (get_tz_leap(1341014400) == LEAP_InsertSecond &&
-        get_tz_leap(1356912000) == LEAP_Normal) {
-      LOG(LOGS_INFO, LOGF_Reference, "Using %s timezone to obtain leap second data", leap_tzname);
+    if (get_tz_leap(1341014400, &tai_offset) == LEAP_InsertSecond && tai_offset == 34 &&
+        get_tz_leap(1356912000, &tai_offset) == LEAP_Normal && tai_offset == 35) {
+      LOG(LOGS_INFO, "Using %s timezone to obtain leap second data", leap_tzname);
     } else {
-      LOG(LOGS_WARN, LOGF_Reference, "Timezone %s failed leap second check, ignoring", leap_tzname);
+      LOG(LOGS_WARN, "Timezone %s failed leap second check, ignoring", leap_tzname);
       leap_tzname = NULL;
     }
   }
@@ -364,7 +365,7 @@ update_drift_file(double freq_ppm, double skew)
   out = fopen(temp_drift_file, "w");
   if (!out) {
     Free(temp_drift_file);
-    LOG(LOGS_WARN, LOGF_Reference, "Could not open temporary driftfile %s.tmp for writing",
+    LOG(LOGS_WARN, "Could not open temporary driftfile %s.tmp for writing",
         drift_file);
     return;
   }
@@ -374,7 +375,7 @@ update_drift_file(double freq_ppm, double skew)
   r2 = fclose(out);
   if (r1 < 0 || r2) {
     Free(temp_drift_file);
-    LOG(LOGS_WARN, LOGF_Reference, "Could not write to temporary driftfile %s.tmp",
+    LOG(LOGS_WARN, "Could not write to temporary driftfile %s.tmp",
         drift_file);
     return;
   }
@@ -384,8 +385,7 @@ update_drift_file(double freq_ppm, double skew)
   if (!stat(drift_file,&buf)) {
     if (chown(temp_drift_file,buf.st_uid,buf.st_gid) ||
         chmod(temp_drift_file,buf.st_mode & 0777)) {
-      LOG(LOGS_WARN, LOGF_Reference,
-          "Could not change ownership or permissions of temporary driftfile %s.tmp",
+      LOG(LOGS_WARN, "Could not change ownership or permissions of temporary driftfile %s.tmp",
           drift_file);
     }
   }
@@ -395,7 +395,7 @@ update_drift_file(double freq_ppm, double skew)
   if (rename(temp_drift_file,drift_file)) {
     unlink(temp_drift_file);
     Free(temp_drift_file);
-    LOG(LOGS_WARN, LOGF_Reference, "Could not replace old driftfile %s with new one %s.tmp",
+    LOG(LOGS_WARN, "Could not replace old driftfile %s with new one %s.tmp",
         drift_file,drift_file);
     return;
   }
@@ -443,8 +443,8 @@ update_fb_drifts(double freq_ppm, double update_interval)
         (freq_ppm - fb_drifts[i].freq);
     }
 
-    DEBUG_LOG(LOGF_Reference, "Fallback drift %d updated: %f ppm %f seconds",
-        i + fb_drift_min, fb_drifts[i].freq, fb_drifts[i].secs);
+    DEBUG_LOG("Fallback drift %d updated: %f ppm %f seconds",
+              i + fb_drift_min, fb_drifts[i].freq, fb_drifts[i].secs);
   }
 }
 
@@ -457,7 +457,7 @@ fb_drift_timeout(void *arg)
 
   fb_drift_timeout_id = 0;
 
-  DEBUG_LOG(LOGF_Reference, "Fallback drift %d active: %f ppm",
+  DEBUG_LOG("Fallback drift %d active: %f ppm",
             next_fb_drift, fb_drifts[next_fb_drift - fb_drift_min].freq);
   LCL_SetAbsoluteFrequency(fb_drifts[next_fb_drift - fb_drift_min].freq);
   REF_SetUnsynchronised();
@@ -492,14 +492,14 @@ schedule_fb_drift(struct timespec *now)
   if (c > next_fb_drift) {
     LCL_SetAbsoluteFrequency(fb_drifts[c - fb_drift_min].freq);
     next_fb_drift = c;
-    DEBUG_LOG(LOGF_Reference, "Fallback drift %d set", c);
+    DEBUG_LOG("Fallback drift %d set", c);
   }
 
   if (i <= fb_drift_max) {
     next_fb_drift = i;
     UTI_AddDoubleToTimespec(now, secs - unsynchronised, &when);
     fb_drift_timeout_id = SCH_AddTimeout(&when, fb_drift_timeout, NULL);
-    DEBUG_LOG(LOGF_Reference, "Fallback drift %d scheduled", i);
+    DEBUG_LOG("Fallback drift %d scheduled", i);
   }
 }
 
@@ -531,8 +531,7 @@ maybe_log_offset(double offset, time_t now)
   abs_offset = fabs(offset);
 
   if (abs_offset > log_change_threshold) {
-    LOG(LOGS_WARN, LOGF_Reference,
-        "System clock wrong by %.6f seconds, adjustment started",
+    LOG(LOGS_WARN, "System clock wrong by %.6f seconds, adjustment started",
         -offset);
   }
 
@@ -558,8 +557,7 @@ maybe_log_offset(double offset, time_t now)
               -offset, mail_change_threshold);
       pclose(p);
     } else {
-      LOG(LOGS_ERR, LOGF_Reference,
-          "Could not send mail notification to user %s\n",
+      LOG(LOGS_ERR, "Could not send mail notification to user %s\n",
           mail_change_user);
     }
   }
@@ -594,7 +592,7 @@ is_offset_ok(double offset)
 
   offset = fabs(offset);
   if (offset > max_offset) {
-    LOG(LOGS_WARN, LOGF_Reference,
+    LOG(LOGS_WARN, 
         "Adjustment of %.3f seconds exceeds the allowed maximum of %.3f seconds (%s) ",
         -offset, max_offset, !max_offset_ignore ? "exiting" : "ignored");
     if (!max_offset_ignore)
@@ -618,11 +616,17 @@ is_leap_second_day(struct tm *stm) {
 /* ================================================== */
 
 static NTP_Leap
-get_tz_leap(time_t when)
+get_tz_leap(time_t when, int *tai_offset)
 {
+  static time_t last_tz_leap_check;
+  static NTP_Leap tz_leap;
+  static int tz_tai_offset;
+
   struct tm stm;
   time_t t;
   char *tz_env, tz_orig[128];
+
+  *tai_offset = tz_tai_offset;
 
   /* Do this check at most twice a day */
   when = when / (12 * 3600) * (12 * 3600);
@@ -631,11 +635,9 @@ get_tz_leap(time_t when)
 
   last_tz_leap_check = when;
   tz_leap = LEAP_Normal;
+  tz_tai_offset = 0;
 
   stm = *gmtime(&when);
-
-  if (!is_leap_second_day(&stm))
-    return tz_leap;
 
   /* Temporarily switch to the timezone containing leap seconds */
   tz_env = getenv("TZ");
@@ -646,6 +648,11 @@ get_tz_leap(time_t when)
   }
   setenv("TZ", leap_tzname, 1);
   tzset();
+
+  /* Get the TAI-UTC offset, which started at the epoch at 10 seconds */
+  t = mktime(&stm);
+  if (t != -1)
+    tz_tai_offset = t - when + 10;
 
   /* Set the time to 23:59:60 and see how it overflows in mktime() */
   stm.tm_sec = 60;
@@ -668,6 +675,8 @@ get_tz_leap(time_t when)
   else if (stm.tm_sec == 1)
     tz_leap = LEAP_DeleteSecond;
 
+  *tai_offset = tz_tai_offset;
+
   return tz_leap;
 }
 
@@ -678,10 +687,13 @@ leap_end_timeout(void *arg)
 {
   leap_timeout_id = 0;
   leap_in_progress = 0;
+
+  if (our_tai_offset)
+    our_tai_offset += our_leap_sec;
   our_leap_sec = 0;
 
   if (leap_mode == REF_LeapModeSystem)
-    LCL_SetSystemLeap(0);
+    LCL_SetSystemLeap(our_leap_sec, our_tai_offset);
 
   if (our_leap_status == LEAP_InsertSecond ||
       our_leap_status == LEAP_DeleteSecond)
@@ -697,20 +709,20 @@ leap_start_timeout(void *arg)
 
   switch (leap_mode) {
     case REF_LeapModeSystem:
-      DEBUG_LOG(LOGF_Reference, "Waiting for system clock leap second correction");
+      DEBUG_LOG("Waiting for system clock leap second correction");
       break;
     case REF_LeapModeSlew:
       LCL_NotifyLeap(our_leap_sec);
       LCL_AccumulateOffset(our_leap_sec, 0.0);
-      LOG(LOGS_WARN, LOGF_Reference, "Adjusting system clock for leap second");
+      LOG(LOGS_WARN, "Adjusting system clock for leap second");
       break;
     case REF_LeapModeStep:
       LCL_NotifyLeap(our_leap_sec);
       LCL_ApplyStepOffset(our_leap_sec);
-      LOG(LOGS_WARN, LOGF_Reference, "System clock was stepped for leap second");
+      LOG(LOGS_WARN, "System clock was stepped for leap second");
       break;
     case REF_LeapModeIgnore:
-      LOG(LOGS_WARN, LOGF_Reference, "Ignoring leap second");
+      LOG(LOGS_WARN, "Ignoring leap second");
       break;
     default:
       break;
@@ -755,12 +767,17 @@ set_leap_timeout(time_t now)
 static void
 update_leap_status(NTP_Leap leap, time_t now, int reset)
 {
-  int leap_sec;
+  NTP_Leap tz_leap;
+  int leap_sec, tai_offset;
 
   leap_sec = 0;
+  tai_offset = 0;
 
-  if (leap_tzname && now && leap == LEAP_Normal)
-    leap = get_tz_leap(now);
+  if (leap_tzname && now) {
+    tz_leap = get_tz_leap(now, &tai_offset);
+    if (leap == LEAP_Normal)
+      leap = tz_leap;
+  }
 
   if (leap == LEAP_InsertSecond || leap == LEAP_DeleteSecond) {
     /* Check that leap second is allowed today */
@@ -776,12 +793,14 @@ update_leap_status(NTP_Leap leap, time_t now, int reset)
     }
   }
   
-  if (leap_sec != our_leap_sec && !REF_IsLeapSecondClose()) {
+  if ((leap_sec != our_leap_sec || tai_offset != our_tai_offset)
+      && !REF_IsLeapSecondClose()) {
     our_leap_sec = leap_sec;
+    our_tai_offset = tai_offset;
 
     switch (leap_mode) {
       case REF_LeapModeSystem:
-        LCL_SetSystemLeap(our_leap_sec);
+        LCL_SetSystemLeap(our_leap_sec, our_tai_offset);
         /* Fall through */
       case REF_LeapModeSlew:
       case REF_LeapModeStep:
@@ -825,15 +844,14 @@ special_mode_sync(int valid, double offset)
   switch (mode) {
     case REF_ModeInitStepSlew:
       if (!valid) {
-        LOG(LOGS_WARN, LOGF_Reference, "No suitable source for initstepslew");
+        LOG(LOGS_WARN, "No suitable source for initstepslew");
         end_ref_mode(0);
         break;
       }
 
       step = fabs(offset) >= CNF_GetInitStepThreshold();
 
-      LOG(LOGS_INFO, LOGF_Reference,
-          "System's initial offset : %.6f seconds %s of true (%s)",
+      LOG(LOGS_INFO, "System's initial offset : %.6f seconds %s of true (%s)",
           fabs(offset), offset >= 0 ? "fast" : "slow", step ? "step" : "slew");
 
       if (step)
@@ -847,14 +865,14 @@ special_mode_sync(int valid, double offset)
     case REF_ModeUpdateOnce:
     case REF_ModePrintOnce:
       if (!valid) {
-        LOG(LOGS_WARN, LOGF_Reference, "No suitable source for synchronisation");
+        LOG(LOGS_WARN, "No suitable source for synchronisation");
         end_ref_mode(0);
         break;
       }
 
       step = mode == REF_ModeUpdateOnce;
 
-      LOG(LOGS_INFO, LOGF_Reference, "System clock wrong by %.6f seconds (%s)",
+      LOG(LOGS_INFO, "System clock wrong by %.6f seconds (%s)",
           -offset, step ? "step" : "ignored");
 
       if (step)
@@ -928,7 +946,7 @@ REF_SetReference(int stratum,
     double t;
     t = (skew + skew) / skew; /* Skew shouldn't be zero either */
     if ((t < 1.9) || (t > 2.1)) {
-      LOG(LOGS_WARN, LOGF_Reference, "Bogus skew value encountered");
+      LOG(LOGS_WARN, "Bogus skew value encountered");
       return;
     }
   }
@@ -1025,7 +1043,7 @@ REF_SetReference(int stratum,
     LCL_AccumulateFrequencyAndOffset(our_frequency, accumulate_offset, correction_rate);
     
   } else {
-    DEBUG_LOG(LOGF_Reference, "Skew %f too large to track, offset=%f", skew, accumulate_offset);
+    DEBUG_LOG("Skew %f too large to track, offset=%f", skew, accumulate_offset);
 
     LCL_AccumulateOffset(accumulate_offset, correction_rate);
 
@@ -1037,7 +1055,7 @@ REF_SetReference(int stratum,
 
   if (step_offset != 0.0) {
     if (LCL_ApplyStepOffset(step_offset))
-      LOG(LOGS_WARN, LOGF_Reference, "System clock was stepped by %.6f seconds", -step_offset);
+      LOG(LOGS_WARN, "System clock was stepped by %.6f seconds", -step_offset);
   }
 
   LCL_SetSyncStatus(are_we_synchronised, offset_sd, offset_sd + root_delay / 2.0 + root_dispersion);
@@ -1214,7 +1232,7 @@ REF_GetReferenceParams
     *leap_status = LEAP_Normal;
     
     *root_delay = 0.0;
-    *root_dispersion = LCL_GetSysPrecisionAsQuantum();
+    *root_dispersion = 0.0;
     
   } else {
 
@@ -1348,7 +1366,7 @@ REF_GetTrackingReport(RPT_TrackingReport *rep)
                          &rep->ref_id, &rep->ref_time,
                          &rep->root_delay, &rep->root_dispersion);
 
-  if (rep->stratum == NTP_MAX_STRATUM)
+  if (rep->stratum == NTP_MAX_STRATUM && !synchronised)
     rep->stratum = 0;
 
   rep->ip_addr.family = IPADDR_UNSPEC;

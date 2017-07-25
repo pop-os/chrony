@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014
+ * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -75,6 +75,7 @@ struct RCL_Instance_Record {
   int driver_polled;
   int poll;
   int leap_status;
+  int pps_forced;
   int pps_rate;
   int pps_active;
   int max_lock_age;
@@ -84,6 +85,7 @@ struct RCL_Instance_Record {
   double offset;
   double delay;
   double precision;
+  double pulse_width;
   SCH_TimeoutID timeout_id;
   SRC_Instance source;
 };
@@ -93,7 +95,7 @@ static ARR_Instance refclocks;
 
 static LOG_FileID logfileid;
 
-static int valid_sample_time(RCL_Instance instance, struct timespec *raw, struct timespec *cooked);
+static int valid_sample_time(RCL_Instance instance, struct timespec *sample_time);
 static int pps_stratum(RCL_Instance instance, struct timespec *ts);
 static void poll_timeout(void *arg);
 static void slew_samples(struct timespec *raw, struct timespec *cooked, double dfreq,
@@ -164,7 +166,6 @@ RCL_Finalise(void)
 int
 RCL_AddRefclock(RefclockParameters *params)
 {
-  int pps_source = 0;
   RCL_Instance inst;
 
   inst = MallocNew(struct RCL_Instance_Record);
@@ -172,25 +173,19 @@ RCL_AddRefclock(RefclockParameters *params)
 
   if (strcmp(params->driver_name, "SHM") == 0) {
     inst->driver = &RCL_SHM_driver;
-    inst->precision = 1e-6;
   } else if (strcmp(params->driver_name, "SOCK") == 0) {
     inst->driver = &RCL_SOCK_driver;
-    inst->precision = 1e-9;
-    pps_source = 1;
   } else if (strcmp(params->driver_name, "PPS") == 0) {
     inst->driver = &RCL_PPS_driver;
-    inst->precision = 1e-9;
-    pps_source = 1;
   } else if (strcmp(params->driver_name, "PHC") == 0) {
     inst->driver = &RCL_PHC_driver;
-    inst->precision = 1e-9;
   } else {
-    LOG_FATAL(LOGF_Refclock, "unknown refclock driver %s", params->driver_name);
+    LOG_FATAL("unknown refclock driver %s", params->driver_name);
     return 0;
   }
 
   if (!inst->driver->init && !inst->driver->poll) {
-    LOG_FATAL(LOGF_Refclock, "refclock driver %s is not compiled in", params->driver_name);
+    LOG_FATAL("refclock driver %s is not compiled in", params->driver_name);
     return 0;
   }
 
@@ -201,14 +196,16 @@ RCL_AddRefclock(RefclockParameters *params)
   inst->poll = params->poll;
   inst->driver_polled = 0;
   inst->leap_status = LEAP_Normal;
+  inst->pps_forced = params->pps_forced;
   inst->pps_rate = params->pps_rate;
   inst->pps_active = 0;
   inst->max_lock_age = params->max_lock_age;
   inst->lock_ref = params->lock_ref_id;
   inst->offset = params->offset;
   inst->delay = params->delay;
-  if (params->precision > 0.0)
-    inst->precision = params->precision;
+  inst->precision = LCL_GetSysPrecisionAsQuantum();
+  inst->precision = MAX(inst->precision, params->precision);
+  inst->pulse_width = params->pulse_width;
   inst->timeout_id = -1;
   inst->source = NULL;
 
@@ -221,12 +218,8 @@ RCL_AddRefclock(RefclockParameters *params)
         inst->driver_parameter[i] = '\0';
   }
 
-  if (pps_source) {
-    if (inst->pps_rate < 1)
-      inst->pps_rate = 1;
-  } else {
-    inst->pps_rate = 0;
-  }
+  if (inst->pps_rate < 1)
+    inst->pps_rate = 1;
 
   if (params->ref_id)
     inst->ref_id = params->ref_id;
@@ -251,7 +244,7 @@ RCL_AddRefclock(RefclockParameters *params)
     max_samples = 1 << (inst->poll - inst->driver_poll);
     if (max_samples < params->filter_length) {
       if (max_samples < 4) {
-        LOG(LOGS_WARN, LOGF_Refclock, "Setting filter length for %s to %d",
+        LOG(LOGS_WARN, "Setting filter length for %s to %d",
             UTI_RefidToString(inst->ref_id), max_samples);
       }
       params->filter_length = max_samples;
@@ -260,7 +253,7 @@ RCL_AddRefclock(RefclockParameters *params)
 
   if (inst->driver->init)
     if (!inst->driver->init(inst)) {
-      LOG_FATAL(LOGF_Refclock, "refclock %s initialisation failed", params->driver_name);
+      LOG_FATAL("refclock %s initialisation failed", params->driver_name);
       return 0;
     }
 
@@ -269,7 +262,7 @@ RCL_AddRefclock(RefclockParameters *params)
   inst->source = SRC_CreateNewInstance(inst->ref_id, SRC_REFCLOCK, params->sel_options, NULL,
                                        params->min_samples, params->max_samples);
 
-  DEBUG_LOG(LOGF_Refclock, "refclock %s refid=%s poll=%d dpoll=%d filter=%d",
+  DEBUG_LOG("refclock %s refid=%s poll=%d dpoll=%d filter=%d",
       params->driver_name, UTI_RefidToString(inst->ref_id),
       inst->poll, inst->driver_poll, params->filter_length);
 
@@ -369,13 +362,16 @@ RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset
   double correction, dispersion;
   struct timespec cooked_time;
 
+  if (instance->pps_forced)
+    return RCL_AddPulse(instance, sample_time, -offset);
+
   LCL_GetOffsetCorrection(sample_time, &correction, &dispersion);
   UTI_AddDoubleToTimespec(sample_time, correction, &cooked_time);
   dispersion += instance->precision;
 
   /* Make sure the timestamp and offset provided by the driver are sane */
   if (!UTI_IsTimeOffsetSane(sample_time, offset) ||
-      !valid_sample_time(instance, sample_time, &cooked_time))
+      !valid_sample_time(instance, &cooked_time))
     return 0;
 
   switch (leap) {
@@ -385,7 +381,7 @@ RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset
       instance->leap_status = leap;
       break;
     default:
-      DEBUG_LOG(LOGF_Refclock, "refclock sample ignored bad leap %d", leap);
+      DEBUG_LOG("refclock sample ignored bad leap %d", leap);
       return 0;
   }
 
@@ -404,24 +400,57 @@ RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset
 int
 RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
 {
-  double correction, dispersion, offset;
+  double correction, dispersion;
   struct timespec cooked_time;
+
+  LCL_GetOffsetCorrection(pulse_time, &correction, &dispersion);
+  UTI_AddDoubleToTimespec(pulse_time, correction, &cooked_time);
+  second += correction;
+
+  if (!UTI_IsTimeOffsetSane(pulse_time, 0.0))
+    return 0;
+
+  return RCL_AddCookedPulse(instance, &cooked_time, second, dispersion, correction);
+}
+
+static int
+check_pulse_edge(RCL_Instance instance, double offset, double distance)
+{
+  double max_error;
+
+  if (instance->pulse_width <= 0.0)
+    return 1;
+
+  max_error = 1.0 / instance->pps_rate - instance->pulse_width;
+  max_error = MIN(instance->pulse_width, max_error);
+  max_error *= 0.5;
+
+  if (fabs(offset) > max_error || distance > max_error) {
+      DEBUG_LOG("refclock pulse ignored offset=%.9f distance=%.9f max_error=%.9f",
+                offset, distance, max_error);
+      return 0;
+  }
+
+  return 1;
+}
+
+int
+RCL_AddCookedPulse(RCL_Instance instance, struct timespec *cooked_time,
+                   double second, double dispersion, double raw_correction)
+{
+  double offset;
   int rate;
   NTP_Leap leap;
 
-  leap = LEAP_Normal;
-  LCL_GetOffsetCorrection(pulse_time, &correction, &dispersion);
-  UTI_AddDoubleToTimespec(pulse_time, correction, &cooked_time);
-  dispersion += instance->precision;
-
-  if (!UTI_IsTimeOffsetSane(pulse_time, 0.0) ||
-      !valid_sample_time(instance, pulse_time, &cooked_time))
+  if (!UTI_IsTimeOffsetSane(cooked_time, second) ||
+      !valid_sample_time(instance, cooked_time))
     return 0;
 
+  leap = LEAP_Normal;
+  dispersion += instance->precision;
   rate = instance->pps_rate;
-  assert(rate > 0);
 
-  offset = -second - correction + instance->offset;
+  offset = -second + instance->offset;
 
   /* Adjust the offset to [-0.5/rate, 0.5/rate) interval */
   offset -= (long)(offset * rate) / (double)rate;
@@ -439,15 +468,15 @@ RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
 
     if (!filter_get_last_sample(&lock_refclock->filter,
           &ref_sample_time, &ref_offset, &ref_dispersion)) {
-      DEBUG_LOG(LOGF_Refclock, "refclock pulse ignored no ref sample");
+      DEBUG_LOG("refclock pulse ignored no ref sample");
       return 0;
     }
 
     ref_dispersion += filter_get_avg_sample_dispersion(&lock_refclock->filter);
 
-    sample_diff = UTI_DiffTimespecsToDouble(&cooked_time, &ref_sample_time);
+    sample_diff = UTI_DiffTimespecsToDouble(cooked_time, &ref_sample_time);
     if (fabs(sample_diff) >= (double)instance->max_lock_age / rate) {
-      DEBUG_LOG(LOGF_Refclock, "refclock pulse ignored samplediff=%.9f",
+      DEBUG_LOG("refclock pulse ignored samplediff=%.9f",
           sample_diff);
       return 0;
     }
@@ -461,15 +490,18 @@ RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
     offset += shift;
 
     if (fabs(ref_offset - offset) + ref_dispersion + dispersion >= 0.2 / rate) {
-      DEBUG_LOG(LOGF_Refclock, "refclock pulse ignored offdiff=%.9f refdisp=%.9f disp=%.9f",
+      DEBUG_LOG("refclock pulse ignored offdiff=%.9f refdisp=%.9f disp=%.9f",
           ref_offset - offset, ref_dispersion, dispersion);
       return 0;
     }
 
+    if (!check_pulse_edge(instance, ref_offset - offset, 0.0))
+      return 0;
+
     leap = lock_refclock->leap_status;
 
-    DEBUG_LOG(LOGF_Refclock, "refclock pulse second=%.9f offset=%.9f offdiff=%.9f samplediff=%.9f",
-        second, offset, ref_offset - offset, sample_diff);
+    DEBUG_LOG("refclock pulse offset=%.9f offdiff=%.9f samplediff=%.9f",
+              offset, ref_offset - offset, sample_diff);
   } else {
     struct timespec ref_time;
     int is_synchronised, stratum;
@@ -479,24 +511,28 @@ RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
     /* Ignore the pulse if we are not well synchronized and the local
        reference is not active */
 
-    REF_GetReferenceParams(&cooked_time, &is_synchronised, &leap, &stratum,
+    REF_GetReferenceParams(cooked_time, &is_synchronised, &leap, &stratum,
         &ref_id, &ref_time, &root_delay, &root_dispersion);
     distance = fabs(root_delay) / 2 + root_dispersion;
 
     if (leap == LEAP_Unsynchronised || distance >= 0.5 / rate) {
-      DEBUG_LOG(LOGF_Refclock, "refclock pulse ignored second=%.9f sync=%d dist=%.9f",
-          second, leap != LEAP_Unsynchronised, distance);
+      DEBUG_LOG("refclock pulse ignored offset=%.9f sync=%d dist=%.9f",
+                offset, leap != LEAP_Unsynchronised, distance);
       /* Drop also all stored samples */
       filter_reset(&instance->filter);
       return 0;
     }
+
+    if (!check_pulse_edge(instance, offset, distance))
+      return 0;
   }
 
-  filter_add_sample(&instance->filter, &cooked_time, offset, dispersion);
+  filter_add_sample(&instance->filter, cooked_time, offset, dispersion);
   instance->leap_status = leap;
   instance->pps_active = 1;
 
-  log_sample(instance, &cooked_time, 0, 1, offset + correction - instance->offset, offset, dispersion);
+  log_sample(instance, cooked_time, 0, 1, offset + raw_correction - instance->offset,
+             offset, dispersion);
 
   /* for logging purposes */
   if (!instance->driver->poll)
@@ -505,23 +541,35 @@ RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second)
   return 1;
 }
 
-static int
-valid_sample_time(RCL_Instance instance, struct timespec *raw, struct timespec *cooked)
+double
+RCL_GetPrecision(RCL_Instance instance)
 {
-  struct timespec now_raw, last_sample_time;
+  return instance->precision;
+}
+
+int
+RCL_GetDriverPoll(RCL_Instance instance)
+{
+  return instance->driver_poll;
+}
+
+static int
+valid_sample_time(RCL_Instance instance, struct timespec *sample_time)
+{
+  struct timespec now, last_sample_time;
   double diff, last_offset, last_dispersion;
 
-  LCL_ReadRawTime(&now_raw);
-  diff = UTI_DiffTimespecsToDouble(&now_raw, raw);
+  LCL_ReadCookedTime(&now, NULL);
+  diff = UTI_DiffTimespecsToDouble(&now, sample_time);
 
   if (diff < 0.0 || diff > UTI_Log2ToDouble(instance->poll + 1) ||
       (filter_get_samples(&instance->filter) > 0 &&
        filter_get_last_sample(&instance->filter, &last_sample_time,
                               &last_offset, &last_dispersion) &&
-       UTI_CompareTimespecs(&last_sample_time, cooked) >= 0)) {
-    DEBUG_LOG(LOGF_Refclock, "%s refclock sample not valid age=%.6f raw=%s cooked=%s",
-              UTI_RefidToString(instance->ref_id), diff,
-              UTI_TimespecToString(raw), UTI_TimespecToString(cooked));
+       UTI_CompareTimespecs(&last_sample_time, sample_time) >= 0)) {
+    DEBUG_LOG("%s refclock sample time %s not valid age=%.6f",
+              UTI_RefidToString(instance->ref_id),
+              UTI_TimespecToString(sample_time), diff);
     return 0;
   }
 
@@ -713,7 +761,7 @@ filter_add_sample(struct MedianFilter *filter, struct timespec *sample_time, dou
   filter->samples[filter->index].offset = offset;
   filter->samples[filter->index].dispersion = dispersion;
 
-  DEBUG_LOG(LOGF_Refclock, "filter sample %d t=%s offset=%.9f dispersion=%.9f",
+  DEBUG_LOG("filter sample %d t=%s offset=%.9f dispersion=%.9f",
       filter->index, UTI_TimespecToString(sample_time), offset, dispersion);
 }
 
@@ -903,7 +951,7 @@ filter_get_sample(struct MedianFilter *filter, struct timespec *sample_time, dou
 
   /* drop the sample if variance is larger than allowed maximum */
   if (filter->max_var > 0.0 && var > filter->max_var) {
-    DEBUG_LOG(LOGF_Refclock, "filter dispersion too large disp=%.9f max=%.9f",
+    DEBUG_LOG("filter dispersion too large disp=%.9f max=%.9f",
         sqrt(var), sqrt(filter->max_var));
     return 0;
   }

@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-06
+.\"      Date: 2017-07-25
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2017-01-06" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2017-07-25" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -63,14 +63,18 @@ options:
 Although \fBchronyd\fP will trim the rate at which it samples the server during
 normal operation, the user might want to constrain the minimum polling interval.
 This is always defined as a power of 2, so \fBminpoll 5\fP would mean that the
-polling interval cannot drop below 32 seconds. The default is 6 (64 seconds).
+polling interval cannot drop below 32 seconds. The default is 6 (64 seconds),
+the minimum is \-4 (1/16th of a second), and the maximum is 24 (6 months). Note
+that intervals shorter than 6 (64 seconds) should generally not be used with
+public servers on the Internet, because it might be considered abuse.
 .RE
 .sp
 \fBmaxpoll\fP \fIpoll\fP
 .RS 4
 In a similar way, the user might want to constrain the maximum polling interval.
 Again this is specified as a power of 2, \fBmaxpoll 9\fP indicates that the polling
-interval must stay at or below 512 seconds. The default is 10 (1024 seconds).
+interval must stay at or below 512 seconds. The default is 10 (1024 seconds),
+the minimum is 0 (1 second), and the maximum is 24 (6 months).
 .RE
 .sp
 \fBiburst\fP
@@ -113,7 +117,7 @@ If the user knows that round trip delays above a certain level should cause the
 measurement to be ignored, this level can be defined with the \fBmaxdelay\fP
 option. For example, \fBmaxdelay 0.3\fP would indicate that measurements with a
 round\-trip delay of 0.3 seconds or more should be ignored. The default value is
-3 seconds.
+3 seconds and the maximum value is 1000 seconds.
 .RE
 .sp
 \fBmaxdelayratio\fP \fIratio\fP
@@ -215,9 +219,12 @@ the interleaved mode requires the servers to keep some state for each client
 and the state might be dropped when there are too many clients (e.g.
 \fBclientloglimit\fP is too small), or it might be overwritten
 by other clients that have the same IP address (e.g. computers behind NAT or
-someone sending requests with a spoofed source address). The \fBpresend\fP option
-can be used to shorten the interval in which the server has to keep the state
-for this computer and be able to respond in the interleaved mode.
+someone sending requests with a spoofed source address).
+.sp
+With longer polling intervals, it is recommended to combine the \fBxleave\fP option
+with the \fBpresend\fP option in order to shorten the interval in which the server
+has to keep the state to be able to respond in the interleaved mode. The
+shorter interval also improves accuracy of the measured offset and delay.
 .RE
 .sp
 \fBpolltarget\fP \fItarget\fP
@@ -421,33 +428,44 @@ started in the boot sequence after \fBchronyd\fP from reading the clock before i
 has been stepped.
 .RE
 .sp
-\fBrefclock\fP \fIdriver\fP \fIparameter\fP [\fIoption\fP]...
+\fBrefclock\fP \fIdriver\fP \fIparameter\fP[:\fIoption\fP,...] [\fIoption\fP]...
 .RS 4
 The \fBrefclock\fP directive specifies a hardware reference clock to be used as a
 time source. It has two mandatory parameters, a driver name and a
-driver\-specific parameter.
+driver\-specific parameter. The two parameters are followed by zero or more
+refclock options. Some drivers have special options, which can be appended to
+the driver\-specific parameter (separated by the \fB:\fP and \fB,\fP characters).
 .sp
-There are currently four drivers included:
+There are four drivers included in \fBchronyd\fP:
 .sp
 \fBPPS\fP
 .RS 4
 Driver for the kernel PPS (pulse per second) API. The parameter is the path to
-the PPS device (typically \fI/dev/pps?\fP). The assert events are used for
-synchronisation by default. String \fB:clear\fP can be appended to the path to use
-the clear events instead.
+the PPS device (typically \fI/dev/pps?\fP). As PPS refclocks do not supply full
+time, another time source (e.g. NTP server or non\-PPS refclock) is needed to
+complete samples from the PPS refclock. An alternative is to enable the
+\fBlocal\fP directive to allow synchronisation with some unknown but
+constant offset. The driver supports the following option:
 .sp
-As PPS refclocks don\(cqt supply full time, \fBchronyd\fP needs to be configured with
-another time source (NTP or non\-PPS refclock) in order to complete samples from
-the PPS refclock. An alternative is to enable the \fBlocal\fP directive
-to allow synchronisation with some unknown but constant offset.
-For example:
+\fBclear\fP
+.RS 4
+By default, the PPS refclock uses assert events (rising edge) for
+synchronisation. With this option, it will use clear events (falling edge)
+instead.
+.RE
+.RE
+.sp
+
+.RS 4
+Examples:
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-refclock PPS /dev/pps0 lock NMEA
+refclock PPS /dev/pps0 lock NMEA refid GPS
 refclock SHM 0 offset 0.5 delay 0.2 refid NMEA noselect
+refclock PPS /dev/pps1:clear refid GPS2
 .fi
 .if n \{\
 .RE
@@ -457,27 +475,33 @@ refclock SHM 0 offset 0.5 delay 0.2 refid NMEA noselect
 \fBSHM\fP
 .RS 4
 NTP shared memory driver. This driver uses a shared memory segment to receive
-samples from another process. The parameter is the number of the shared memory
-segment, typically 0, 1, 2 or 3. For example:
+samples from another process (e.g. \fBgpsd\fP). The parameter is the number of the
+shared memory segment, typically a small number like 0, 1, 2, or 3. The driver
+supports the following option:
+.sp
+\fBperm\fP=\fImode\fP
+.RS 4
+This option specifies the permissions of the shared memory segment created by
+\fBchronyd\fP. They are specified as a numeric mode. The default value is 0600
+(read\-write access for owner only).
+.RE
+.RE
+.sp
+
+.RS 4
+.sp
+Examples:
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-refclock SHM 1 poll 3 refid GPS1
+refclock SHM 0 poll 3 refid GPS1
+refclock SHM 1:perm=0644 refid GPS2
 .fi
 .if n \{\
 .RE
 .\}
-.sp
-A driver option in form of \fB:perm=NNN\fP can be appended to the segment number to
-create the segment with permissions other than the default 0600.
-.sp
-Examples of applications that can be used as SHM refclocks are
-.URL "http://www.catb.org/gpsd/" "\fBgpsd\fP" ","
-.URL "http://www.buzzard.me.uk/jonathan/radioclock.html" "\fBradioclk\fP" ","
-and
-.URL "https://www.vanheusden.com/time/omnisync/" "\fBomnisync\fP" "."
 .RE
 .sp
 \fBSOCK\fP
@@ -508,17 +532,60 @@ refclock SOCK /var/run/chrony.ttyS0.sock
 \fBPHC\fP
 .RS 4
 PTP hardware clock (PHC) driver. The parameter is the path to the device of
-the PTP clock, which for example can be synchronised by \fBptp4l\fP from
-.URL "http://linuxptp.sourceforge.net" "\fBlinuxptp\fP" "."
-PTP clocks are typically kept in
-TAI instead of UTC, so the \fBoffset\fP option should be used to compensate for the
-current UTC\-TAI offset. For example:
+the PTP clock which should be used as a time source. If the clock is kept in
+TAI instead of UTC (e.g. it is synchronised by a PTP daemon), the current
+UTC\-TAI offset needs to be specified by the \fBoffset\fP option. Alternatively, the
+\fBpps\fP refclock option can be enabled to treat the PHC as a PPS refclock, using
+only the sub\-second offset for synchronisation. The driver supports the
+following options:
+.sp
+\fBnocrossts\fP
+.RS 4
+This option disables use of precise cross timestamping.
+.RE
+.sp
+\fBextpps\fP
+.RS 4
+This option enables a PPS mode in which the PTP clock is timestamping pulses
+of an external PPS signal connected to the clock. The clock does not need to be
+synchronised, but another time source is needed to complete the PPS samples.
+Note that some PTP clocks cannot be configured to timestamp only assert or
+clear events, and it is necessary to use the \fBwidth\fP option to filter wrong
+PPS samples.
+.RE
+.sp
+\fBpin\fP=\fIindex\fP
+.RS 4
+This option specifies the index of the pin to which is connected the PPS
+signal. The default value is 0.
+.RE
+.sp
+\fBchannel\fP=\fIindex\fP
+.RS 4
+This option specifies the index of the channel for the PPS mode. The default
+value is 0.
+.RE
+.sp
+\fBclear\fP
+.RS 4
+This option enables timestamping of clear events (falling edge) instead of
+assert events (rising edge) in the PPS mode. This may not work with some
+clocks.
+.RE
+.RE
+.sp
+
+.RS 4
+.sp
+Examples:
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-refclock PHC /dev/ptp0 poll 3 dpoll \-2 offset \-36
+refclock PHC /dev/ptp0 poll 0 dpoll \-2 offset \-37
+refclock PHC /dev/ptp1:nocrossts poll 3 pps
+refclock PHC /dev/ptp2:extpps,pin=1 width 0.2 poll 2
 .fi
 .if n \{\
 .RE
@@ -528,7 +595,7 @@ refclock PHC /dev/ptp0 poll 3 dpoll \-2 offset \-36
 .sp
 
 .RS 4
-The \fBrefclock\fP directive also supports a number of options:
+The \fBrefclock\fP directive supports the following options:
 .sp
 \fBpoll\fP \fIpoll\fP
 .RS 4
@@ -579,6 +646,23 @@ Increasing this value is useful when the samples are produced at a lower rate
 than the pulses. The default is 2.
 .RE
 .sp
+\fBwidth\fP \fIwidth\fP
+.RS 4
+This option specifies the width of the pulses (in seconds). It is used to
+filter PPS samples when the driver provides samples for both rising and falling
+edges. Note that it reduces the maximum allowed error of the time source which
+completes the PPS samples. If the duty cycle is configurable, 50% should be
+prefered in order to maximise the allowed error.
+.RE
+.sp
+\fBpps\fP
+.RS 4
+This options forces \fBchronyd\fP to treat any refclock (e.g. SHM or PHC) as a PPS
+refclock. This can be useful when the refclock provides time with a variable
+offset of a whole number of seconds (e.g. it uses TAI instead of UTC). Another
+time source is needed to complete samples from the refclock.
+.RE
+.sp
 \fBoffset\fP \fIoffset\fP
 .RS 4
 This option can be used to compensate for a constant error. The specified
@@ -597,9 +681,8 @@ nanosecond).
 .sp
 \fBprecision\fP \fIprecision\fP
 .RS 4
-This option sets the refclock precision (in seconds). The default is 1e\-6 (1
-microsecond) for SHM refclock, and 1e\-9 (1 nanosecond) for SOCK, PPS and PHC
-refclocks.
+This option sets the precision of the reference clock (in seconds). The default
+value is the estimated precision of the system clock.
 .RE
 .sp
 \fBmaxdispersion\fP \fIdispersion\fP
@@ -719,19 +802,18 @@ can be specified.
 To compute the rate of gain or loss of time, \fBchronyd\fP has to store a
 measurement history for each of the time sources it uses.
 .sp
-Certain systems (Linux, FreeBSD, NetBSD, Solaris) have operating system support
-for setting the rate of gain or loss to compensate for known errors. (On Mac OS
-X, \fBchronyd\fP must simulate such a capability by periodically slewing the system
-clock forwards or backwards by a suitable amount to compensate for the error
-built up since the previous slew.)
+All supported systems, with the exception of macOS 10.12 and earlier, have
+operating system support for setting the rate of gain or loss to compensate for
+known errors.
+(On macOS 10.12 and earlier, \fBchronyd\fP must simulate such a capability by
+periodically slewing the system clock forwards or backwards by a suitable amount
+to compensate for the error built up since the previous slew.)
 .sp
 For such systems, it is possible to save the measurement history across
 restarts of \fBchronyd\fP (assuming no changes are made to the system clock
-behaviour whilst it is not running). If this capability is to be used (via the
-\fBdumponexit\fP directive in the configuration file, or the
-\fBdump\fP command in \fBchronyc\fP), the \fBdumpdir\fP directive
-should be used to define the directory where the measurement histories are
-saved.
+behaviour whilst it is not running). The \fBdumpdir\fP directive defines the
+directory where the measurement histories are saved when \fBchronyd\fP exits,
+or the \fBdump\fP command in \fBchronyc\fP is issued.
 .sp
 An example of the directive is:
 .sp
@@ -748,13 +830,6 @@ dumpdir @CHRONYRUNDIR@
 A source whose IP address is \fI1.2.3.4\fP would have its measurement history saved
 in the file \fI@CHRONYRUNDIR@/1.2.3.4.dat\fP. History of reference clocks is saved
 to files named by their reference ID in form of \fIrefid:XXXXXXXX.dat\fP.
-.RE
-.sp
-\fBdumponexit\fP
-.RS 4
-If this directive is present, it indicates that \fBchronyd\fP should save the
-measurement history for each of its time sources recorded whenever the program
-exits. (See the \fBdumpdir\fP directive above.)
 .RE
 .sp
 \fBmaxsamples\fP \fIsamples\fP
@@ -853,8 +928,9 @@ distances are in milliseconds.
 \fBcorrtimeratio\fP \fIratio\fP
 .RS 4
 When \fBchronyd\fP is slewing the system clock to correct an offset, the rate at
-which it is slewing adds to the frequency error of the clock. On Linux,
-FreeBSD, NetBSD and Solaris this rate can be controlled.
+which it is slewing adds to the frequency error of the clock. On all supported
+systems, with the exception of macOS 12 and earlier, this rate can be
+controlled.
 .sp
 The \fBcorrtimeratio\fP directive sets the ratio between the duration in which the
 clock is slewed for an average correction according to the source history and
@@ -956,8 +1032,8 @@ that error is corrected. There are four options:
 When inserting a leap second, the kernel steps the system clock backwards by
 one second when the clock gets to 00:00:00 UTC. When deleting a leap second, it
 steps forward by one second when the clock gets to 23:59:59 UTC. This is the
-default mode when the system driver supports leap seconds (i.e. on Linux,
-FreeBSD, NetBSD and Solaris).
+default mode when the system driver supports leap seconds (i.e. all supported
+systems with the exception of macOS 12 and earlier).
 .RE
 .sp
 \fBstep\fP
@@ -1033,15 +1109,23 @@ smearing servers.
 .sp
 \fBleapsectz\fP \fItimezone\fP
 .RS 4
-This directive is used to set the name of the timezone in the system tz
-database which \fBchronyd\fP can use to find out when will the next leap second
-occur. It will periodically check if the times 23:59:59 and 23:59:60 are valid
-on Jun 30 and Dec 31 in the timezone. This typically works with the \fBright/UTC\fP
-timezone.
+This directive specifies a timezone in the system tz database which \fBchronyd\fP
+can use to determine when will the next leap second occur and what is the
+current offset between TAI and UTC. It will periodically check if 23:59:59 and
+23:59:60 are valid times in the timezone. This typically works with the
+\fIright/UTC\fP timezone.
 .sp
-This directive is mainly useful with reference clocks which do not provide
-leap second information. It is not necessary to restart \fBchronyd\fP if the tz
-database is updated with a new leap second at least 12 hours before the event.
+When a leap second is announced, the timezone needs to be updated at least 12
+hours before the leap second. It is not necessary to restart \fBchronyd\fP.
+.sp
+This directive is useful with reference clocks and other time sources which do
+not announce leap seconds, or announce them too late for an NTP server to
+forward them to its own clients. Clients of leap smearing servers must not
+use this directive.
+.sp
+It is also useful when the system clock is required to have correct TAI\-UTC
+offset. Note that the offset is set only when leap seconds are handled by the
+kernel, i.e. \fBleapsecmode\fP is set to \fBsystem\fP.
 .sp
 An example of the directive is:
 .sp
@@ -1145,7 +1229,7 @@ This directive specifies the maximum assumed drift (frequency error) of the
 system clock. It limits the frequency adjustment that \fBchronyd\fP is allowed to
 use to correct the measured drift. It is an additional limit to the maximum
 adjustment that can be set by the system driver (100000 ppm on Linux, 500 ppm
-on FreeBSD and NetBSD, 32500 ppm on Solaris).
+on FreeBSD, NetBSD, and macOS 10.13+, 32500 ppm on Solaris).
 .sp
 By default, the maximum assumed drift is 500000 ppm, i.e. the adjustment is
 limited by the system driver rather than this directive.
@@ -1184,13 +1268,17 @@ The \fBmaxslewrate\fP directive sets the maximum rate at which \fBchronyd\fP is 
 to slew the time. It limits the slew rate controlled by the correction time
 ratio (which can be set by the \fBcorrtimeratio\fP directive) and
 is effective only on systems where \fBchronyd\fP is able to control the rate (i.e.
-Linux, FreeBSD, NetBSD, Solaris).
+all supported systems with the exception of macOS 12 or earlier).
 .sp
-For each system there is a maximum frequency offset of the clock that
-can be set by the driver. On Linux it is 100000 ppm, on FreeBSD and NetBSD
-it is 5000 ppm, and on Solaris it is 32500 ppm. Also, due to a kernel
-limitation, setting \fBmaxslewrate\fP on FreeBSD and NetBSD to a value between 500
+For each system there is a maximum frequency offset of the clock that can be set
+by the driver. On Linux it is 100000 ppm, on FreeBSD, NetBSD and macOS 10.13+ it
+is 5000 ppm, and on Solaris it is 32500 ppm. Also, due to a kernel limitation,
+setting \fBmaxslewrate\fP on FreeBSD, NetBSD, macOS 10.13+ to a value between 500
 ppm and 5000 ppm will effectively set it to 500 ppm.
+.sp
+In early beta releases of macOS 13 this capability is disabled because of a
+system kernel bug. When the kernel bug is fixed, chronyd will detect this and
+re\-enable the capability (see above limitations) with no recompilation required.
 .sp
 By default, the maximum slew rate is set to 83333.333 ppm (one twelfth).
 .RE
@@ -2026,11 +2114,13 @@ The log files are written to the directory specified by the \fBlogdir\fP
 directive. A banner is periodically written to the files to indicate the
 meanings of the columns.
 .sp
-\fBmeasurements\fP
+\fBrawmeasurements\fP
 .RS 4
 This option logs the raw NTP measurements and related information to a file
-called \fImeasurements.log\fP. An example line (which actually appears as a single
-line in the file) from the log file is shown below.
+called \fImeasurements.log\fP. An entry is made for each packet received from the
+source. This can be useful when debugging a problem. An example line (which
+actually appears as a single line in the file) from the log file is shown
+below.
 .sp
 .if n \{\
 .RS 4
@@ -2276,6 +2366,14 @@ Source of the local transmit timestamp
 Source of the local receive timestamp
 (\fID\fP=daemon, \fIK\fP=kernel, \fIH\fP=hardware). [K]
 .RE
+.RE
+.sp
+\fBmeasurements\fP
+.RS 4
+This option is identical to the \fBrawmeasurements\fP option, except it logs only
+valid measurements from synchronised sources, i.e. measurements which passed
+the RFC 5905 tests 1 through 7. This can be useful for producing graphs of the
+source\(cqs performance.
 .RE
 .sp
 \fBstatistics\fP
@@ -3051,14 +3149,17 @@ This directive is supported on Linux 3.19 and newer. The NIC must support HW
 timestamping, which can be verified with the \fBethtool \-T\fP command. The list of
 capabilities should include \fISOF_TIMESTAMPING_RAW_HARDWARE\fP,
 \fISOF_TIMESTAMPING_TX_HARDWARE\fP, \fISOF_TIMESTAMPING_RX_HARDWARE\fP, and the filter
-modes should have \fIHWTSTAMP_FILTER_ALL\fP. When \fBchronyd\fP is running, no other
-process should be working with the clock on the NIC. If no \fBhwtimestamp\fP
-directive is specified, \fBchronyd\fP will try to use software (kernel)
-timestamping. With both hardware and software timestamping there are
-some limitations on which packets can be actually timestamped, e.g. transmit
+modes should include \fIHWTSTAMP_FILTER_ALL\fP or \fIHWTSTAMP_FILTER_NTP_ALL\fP. When
+\fBchronyd\fP is running, no other process (e.g. a PTP daemon) should be working
+with the NIC clock.
+.sp
+If the kernel supports software timestamping, it will be enabled for all
+interfaces. With both hardware and software timestamping there are some
+limitations on which timestamps can be actually used, e.g. transmit
 timestamping does not currently work with IPv6 packets using IP options and
-hardware receive timestamping does not work with packets from bridged
-interfaces. The timestamping used in measurements is indicated in the
+hardware timestamping of packets received from bridges, bonds, and other
+virtual interfaces, works only on Linux 4.13 and newer. The source of
+timestamps (i.e. hardware, kernel, or daemon) is indicated in the
 \fImeasurements.log\fP file if enabled by the \fBlog measurements\fP directive,
 and the \fBntpdata\fP report in \fBchronyc\fP.
 .sp
@@ -3066,6 +3167,21 @@ If the specified interface is \fI*\fP, \fBchronyd\fP will try to enable HW times
 on all available interfaces.
 .sp
 The \fBhwtimestamp\fP directive has the following options:
+.sp
+\fBminpoll\fP \fIpoll\fP
+.RS 4
+This option specifies the minimum interval between readings of the NIC clock.
+It\(cqs defined as a power of two. It should correspond to the minimum polling
+interval of all NTP sources and the minimum expected polling interval of NTP
+clients. The default value is 0 (1 second) and the minimum value is \-6 (1/64th
+of a second).
+.RE
+.sp
+\fBprecision\fP \fIprecision\fP
+.RS 4
+This option specifies the assumed precision of reading of the NIC clock. The
+default value is 100e\-9 (100 nanoseconds).
+.RE
 .sp
 \fBtxcomp\fP \fIcompensation\fP
 .RS 4
@@ -3080,6 +3196,25 @@ This option specifies the difference in seconds between the reported receive
 timestamp and the actual reception time at the physical layer. This value will
 be subtracted from receive timestamps obtained from the NIC. The default value
 is 0.
+.RE
+.sp
+\fBnocrossts\fP
+.RS 4
+Some hardware can precisely cross timestamp the NIC clock with the system
+clock. This option disables the use of the cross timestamping.
+.RE
+.sp
+\fBrxfilter\fP \fIfilter\fP
+.RS 4
+This option selects the receive timestamping filter. Possible values are:
+\fIall\fP, \fIntp\fP, and \fInone\fP. The default value is \fIntp\fP, which enables
+timestamping of NTP packets (\fIHWTSTAMP_FILTER_NTP_ALL\fP) if it is supported, or
+timestamping of all packets (\fIHWTSTAMP_FILTER_ALL\fP). Setting \fBrxfilter\fP to
+\fIall\fP forces timestamping of all packets, which can be useful when the NIC
+supports both filters and NTP packets are received from or on a non\-standard
+UDP port (e.g. specified by the \fBport\fP directive). Setting \fBrxfilter\fP to \fInone\fP
+disables receive HW timestamping and allows transmit HW timestamping to be
+enabled when the NIC supports only PTP\-specific receive filters.
 .RE
 .RE
 .sp
@@ -3543,8 +3678,7 @@ is made of the RTC error at a particular RTC second, and the rate at which the
 RTC gains or loses time relative to true time.
 .sp
 When the computer is powered down, the measurement histories for all the NTP
-servers are saved to files (if the \fBdumponexit\fP directive is
-specified in the configuration file), and the RTC tracking information is also
+servers are saved to files, and the RTC tracking information is also
 saved to a file (if the \fBrtcfile\fP directive has been specified).
 These pieces of information are also saved if the \fBdump\fP
 and \fBwritertc\fP commands respectively are issued
@@ -3600,7 +3734,6 @@ log statistics measurements tracking
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 maxupdateskew 100.0
-dumponexit
 dumpdir @CHRONYVARDIR@
 rtcfile @CHRONYVARDIR@/rtc
 .fi
@@ -3659,7 +3792,7 @@ The amount of memory used for logging client accesses can be increased in order
 to enable clients to use the interleaved mode even when the server has a large
 number of clients, and better support rate limiting if it is enabled by the
 \fBratelimit\fP directive. The system timezone database, if it is
-kept up to date and includes the \fBright/UTC\fP timezone, can be used as a
+kept up to date and includes the \fIright/UTC\fP timezone, can be used as a
 reliable source to determine when a leap second will be applied to UTC. The
 \fB\-r\fP option with the \fBdumpdir\fP directive shortens the time in which
 \fBchronyd\fP will not be able to serve time to its clients when it needs to be
@@ -3683,7 +3816,6 @@ clientloglimit 100000000
 leapsectz right/UTC
 driftfile @CHRONYVARDIR@/drift
 dumpdir @CHRONYRUNDIR@
-dumponexit
 .fi
 .if n \{\
 .RE

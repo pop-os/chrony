@@ -180,7 +180,7 @@ UTI_DiffTimespecs(struct timespec *result, struct timespec *a, struct timespec *
 double
 UTI_DiffTimespecsToDouble(struct timespec *a, struct timespec *b)
 {
-  return (a->tv_sec - b->tv_sec) + 1.0e-9 * (a->tv_nsec - b->tv_nsec);
+  return ((double)a->tv_sec - (double)b->tv_sec) + 1.0e-9 * (a->tv_nsec - b->tv_nsec);
 }
 
 /* ================================================== */
@@ -329,12 +329,14 @@ UTI_StringToIP(const char *addr, IPAddr *ip)
 
   if (inet_pton(AF_INET, addr, &in4) > 0) {
     ip->family = IPADDR_INET4;
+    ip->_pad = 0;
     ip->addr.in4 = ntohl(in4.s_addr);
     return 1;
   }
 
   if (inet_pton(AF_INET6, addr, &in6) > 0) {
     ip->family = IPADDR_INET6;
+    ip->_pad = 0;
     memcpy(ip->addr.in6, in6.s6_addr, sizeof (ip->addr.in6));
     return 1;
   }
@@ -344,6 +346,7 @@ UTI_StringToIP(const char *addr, IPAddr *ip)
   n = sscanf(addr, "%lu.%lu.%lu.%lu", &a, &b, &c, &d);
   if (n == 4) {
     ip->family = IPADDR_INET4;
+    ip->_pad = 0;
     ip->addr.in4 = ((a & 0xff) << 24) | ((b & 0xff) << 16) | 
                    ((c & 0xff) << 8) | (d & 0xff);
     return 1;
@@ -442,6 +445,7 @@ void
 UTI_IPNetworkToHost(IPAddr *src, IPAddr *dest)
 {
   dest->family = ntohs(src->family);
+  dest->_pad = 0;
 
   switch (dest->family) {
     case IPADDR_INET4:
@@ -554,7 +558,7 @@ char *UTI_SockaddrToString(struct sockaddr *sa)
 {
   unsigned short port;
   IPAddr ip;
-  char *result;
+  char *result, *sun_path;
 
   result = NEXT_BUFFER;
 
@@ -567,7 +571,11 @@ char *UTI_SockaddrToString(struct sockaddr *sa)
       snprintf(result, BUFFER_LENGTH, "%s:%hu", UTI_IPToString(&ip), port);
       break;
     case AF_UNIX:
-      snprintf(result, BUFFER_LENGTH, "%s", ((struct sockaddr_un *)sa)->sun_path);
+      sun_path = ((struct sockaddr_un *)sa)->sun_path;
+      snprintf(result, BUFFER_LENGTH, "%.*s", BUFFER_LENGTH - 1, sun_path);
+      /* Indicate truncated path */
+      if (strlen(sun_path) >= BUFFER_LENGTH)
+        result[BUFFER_LENGTH - 2] = '>';
       break;
     default:
       snprintf(result, BUFFER_LENGTH, "[UNKNOWN]");
@@ -754,8 +762,11 @@ UTI_Ntp64ToTimespec(NTP_int64 *src, struct timespec *dest)
 {
   uint32_t ntp_sec, ntp_frac;
 
-  /* As yet, there is no need to check for zero - all processing that
-     has to detect that case is in the NTP layer */
+  /* Zero is a special value */
+  if (UTI_IsZeroNtp64(src)) {
+    UTI_ZeroTimespec(dest);
+    return;
+  }
 
   ntp_sec = ntohl(src->hi);
   ntp_frac = ntohl(src->lo);
@@ -767,9 +778,7 @@ UTI_Ntp64ToTimespec(NTP_int64 *src, struct timespec *dest)
   dest->tv_sec = ntp_sec - JAN_1970;
 #endif
 
-  dest->tv_nsec = ntp_frac / NSEC_PER_NTP64 + 0.5;
-
-  UTI_NormaliseTimespec(dest);
+  dest->tv_nsec = ntp_frac / NSEC_PER_NTP64;
 }
 
 /* ================================================== */
@@ -829,12 +838,11 @@ UTI_Log2ToDouble(int l)
 void
 UTI_TimespecNetworkToHost(Timespec *src, struct timespec *dest)
 {
-  uint32_t sec_low;
+  uint32_t sec_low, nsec;
 #ifdef HAVE_LONG_TIME_T
   uint32_t sec_high;
 #endif
 
-  dest->tv_nsec = ntohl(src->tv_nsec);
   sec_low = ntohl(src->tv_sec_low);
 #ifdef HAVE_LONG_TIME_T
   sec_high = ntohl(src->tv_sec_high);
@@ -846,7 +854,8 @@ UTI_TimespecNetworkToHost(Timespec *src, struct timespec *dest)
   dest->tv_sec = sec_low;
 #endif
 
-  UTI_NormaliseTimespec(dest);
+  nsec = ntohl(src->tv_nsec);
+  dest->tv_nsec = CLAMP(0U, nsec, 999999999U);
 }
 
 /* ================================================== */
@@ -1031,25 +1040,25 @@ create_dir(char *p, mode_t mode, uid_t uid, gid_t gid)
 
   if (status < 0) {
     if (errno != ENOENT) {
-      LOG(LOGS_ERR, LOGF_Util, "Could not access %s : %s", p, strerror(errno));
+      LOG(LOGS_ERR, "Could not access %s : %s", p, strerror(errno));
       return 0;
     }
   } else {
     if (S_ISDIR(buf.st_mode))
       return 1;
-    LOG(LOGS_ERR, LOGF_Util, "%s is not directory", p);
+    LOG(LOGS_ERR, "%s is not directory", p);
     return 0;
   }
 
   /* Create the directory */
   if (mkdir(p, mode) < 0) {
-    LOG(LOGS_ERR, LOGF_Util, "Could not create directory %s : %s", p, strerror(errno));
+    LOG(LOGS_ERR, "Could not create directory %s : %s", p, strerror(errno));
     return 0;
   }
 
   /* Set its owner */
   if (chown(p, uid, gid) < 0) {
-    LOG(LOGS_ERR, LOGF_Util, "Could not change ownership of %s : %s", p, strerror(errno));
+    LOG(LOGS_ERR, "Could not change ownership of %s : %s", p, strerror(errno));
     /* Don't leave it there with incorrect ownership */
     rmdir(p);
     return 0;
@@ -1118,27 +1127,27 @@ UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid)
   struct stat buf;
 
   if (stat(path, &buf)) {
-    LOG(LOGS_ERR, LOGF_Util, "Could not access %s : %s", path, strerror(errno));
+    LOG(LOGS_ERR, "Could not access %s : %s", path, strerror(errno));
     return 0;
   }
 
   if (!S_ISDIR(buf.st_mode)) {
-    LOG(LOGS_ERR, LOGF_Util, "%s is not directory", path);
+    LOG(LOGS_ERR, "%s is not directory", path);
     return 0;
   }
 
   if ((buf.st_mode & 0777) & ~perm) {
-    LOG(LOGS_ERR, LOGF_Util, "Wrong permissions on %s", path);
+    LOG(LOGS_ERR, "Wrong permissions on %s", path);
     return 0;
   }
 
   if (buf.st_uid != uid) {
-    LOG(LOGS_ERR, LOGF_Util, "Wrong owner of %s (%s != %d)", path, "UID", uid);
+    LOG(LOGS_ERR, "Wrong owner of %s (%s != %d)", path, "UID", uid);
     return 0;
   }
 
   if (buf.st_gid != gid) {
-    LOG(LOGS_ERR, LOGF_Util, "Wrong owner of %s (%s != %d)", path, "GID", gid);
+    LOG(LOGS_ERR, "Wrong owner of %s (%s != %d)", path, "GID", gid);
     return 0;
   }
 
@@ -1152,17 +1161,17 @@ UTI_DropRoot(uid_t uid, gid_t gid)
 {
   /* Drop supplementary groups */
   if (setgroups(0, NULL))
-    LOG_FATAL(LOGF_Util, "setgroups() failed : %s", strerror(errno));
+    LOG_FATAL("setgroups() failed : %s", strerror(errno));
 
   /* Set effective, saved and real group ID */
   if (setgid(gid))
-    LOG_FATAL(LOGF_Util, "setgid(%d) failed : %s", gid, strerror(errno));
+    LOG_FATAL("setgid(%d) failed : %s", gid, strerror(errno));
 
   /* Set effective, saved and real user ID */
   if (setuid(uid))
-    LOG_FATAL(LOGF_Util, "setuid(%d) failed : %s", uid, strerror(errno));
+    LOG_FATAL("setuid(%d) failed : %s", uid, strerror(errno));
 
-  DEBUG_LOG(LOGF_Util, "Dropped root privileges: UID %d GID %d", uid, gid);
+  DEBUG_LOG("Dropped root privileges: UID %d GID %d", uid, gid);
 }
 
 /* ================================================== */
@@ -1177,10 +1186,41 @@ UTI_GetRandomBytesUrandom(void *buf, unsigned int len)
   if (!f)
     f = fopen(DEV_URANDOM, "r");
   if (!f)
-    LOG_FATAL(LOGF_Util, "Can't open %s : %s", DEV_URANDOM, strerror(errno));
+    LOG_FATAL("Can't open %s : %s", DEV_URANDOM, strerror(errno));
   if (fread(buf, 1, len, f) != len)
-    LOG_FATAL(LOGF_Util, "Can't read from %s", DEV_URANDOM);
+    LOG_FATAL("Can't read from %s", DEV_URANDOM);
 }
+
+/* ================================================== */
+
+#ifdef HAVE_GETRANDOM
+static void
+get_random_bytes_getrandom(char *buf, unsigned int len)
+{
+  static char rand_buf[256];
+  static unsigned int available = 0, disabled = 0;
+  unsigned int i;
+
+  for (i = 0; i < len; i++) {
+    if (!available) {
+      if (disabled)
+        break;
+
+      if (getrandom(rand_buf, sizeof (rand_buf), 0) != sizeof (rand_buf)) {
+        disabled = 1;
+        break;
+      }
+
+      available = sizeof (rand_buf);
+    }
+
+    buf[i] = rand_buf[--available];
+  }
+
+  if (i < len)
+    UTI_GetRandomBytesUrandom(buf, len);
+}
+#endif
 
 /* ================================================== */
 
@@ -1189,6 +1229,8 @@ UTI_GetRandomBytes(void *buf, unsigned int len)
 {
 #ifdef HAVE_ARC4RANDOM
   arc4random_buf(buf, len);
+#elif defined(HAVE_GETRANDOM)
+  get_random_bytes_getrandom(buf, len);
 #else
   UTI_GetRandomBytesUrandom(buf, len);
 #endif

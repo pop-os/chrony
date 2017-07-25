@@ -97,7 +97,8 @@ MNL_Finalise(void)
 /* ================================================== */
 
 static void
-estimate_and_set_system(struct timespec *now, int offset_provided, double offset, long *offset_cs, double *dfreq_ppm, double *new_afreq_ppm)
+estimate_and_set_system(struct timespec *now, int offset_provided, double offset,
+                        double *reg_offset, double *dfreq_ppm, double *new_afreq_ppm)
 {
   double agos[MAX_SAMPLES], offsets[MAX_SAMPLES];
   double b0, b1;
@@ -108,32 +109,26 @@ estimate_and_set_system(struct timespec *now, int offset_provided, double offset
   int found_freq;
   double slew_by;
 
+  b0 = offset_provided ? offset : 0.0;
+  b1 = freq = 0.0;
+  found_freq = 0;
+
   if (n_samples > 1) {
     for (i=0; i<n_samples; i++) {
       agos[i] = UTI_DiffTimespecsToDouble(&samples[n_samples - 1].when, &samples[i].when);
       offsets[i] = samples[i].offset;
     }
     
-    RGR_FindBestRobustRegression(agos, offsets, n_samples,
-                                 1.0e-8, /* 0.01ppm easily good enough for this! */
-                                 &b0, &b1, &n_runs, &best_start);
-    
-    
-    /* Ignore b0 from regression; treat offset as being the most
-       recently entered value.  (If the administrator knows he's put
-       an outlier in, he will rerun the settime operation.)   However,
-       the frequency estimate comes from the regression. */
-    
-    freq = -b1;
-    found_freq = 1;
-  } else {
-    if (offset_provided) {
-      b0 = offset;
-    } else {
-      b0 = 0.0;
+    if (RGR_FindBestRobustRegression(agos, offsets, n_samples, 1.0e-8,
+                                     &b0, &b1, &n_runs, &best_start)) {
+      /* Ignore b0 from regression; treat offset as being the most
+         recently entered value.  (If the administrator knows he's put
+         an outlier in, he will rerun the settime operation.)   However,
+         the frequency estimate comes from the regression. */
+      freq = -b1;
+      found_freq = 1;
     }
-    b1 = freq = 0.0;
-    found_freq = 0;
+  } else {
     agos[0] = 0.0;
     offsets[0] = b0;
   }
@@ -145,21 +140,20 @@ estimate_and_set_system(struct timespec *now, int offset_provided, double offset
   }
   
   if (found_freq) {
-    LOG(LOGS_INFO, LOGF_Manual,
-        "Making a frequency change of %.3f ppm and a slew of %.6f",
+    LOG(LOGS_INFO, "Making a frequency change of %.3f ppm and a slew of %.6f",
         1.0e6 * freq, slew_by);
     
     REF_SetManualReference(now,
                            slew_by,
                            freq, skew);
   } else {
-    LOG(LOGS_INFO, LOGF_Manual, "Making a slew of %.6f", slew_by);
+    LOG(LOGS_INFO, "Making a slew of %.6f", slew_by);
     REF_SetManualReference(now,
                            slew_by,
                            0.0, skew);
   }
   
-  if (offset_cs) *offset_cs = (long)(0.5 + 100.0 * b0);
+  if (reg_offset) *reg_offset = b0;
   if (dfreq_ppm) *dfreq_ppm = 1.0e6 * freq;
   if (new_afreq_ppm) *new_afreq_ppm = LCL_ReadAbsoluteFrequency();
   
@@ -173,7 +167,7 @@ estimate_and_set_system(struct timespec *now, int offset_provided, double offset
 /* ================================================== */
 
 int
-MNL_AcceptTimestamp(struct timespec *ts, long *offset_cs, double *dfreq_ppm, double *new_afreq_ppm)
+MNL_AcceptTimestamp(struct timespec *ts, double *reg_offset, double *dfreq_ppm, double *new_afreq_ppm)
 {
   struct timespec now;
   double offset, diff;
@@ -210,7 +204,7 @@ MNL_AcceptTimestamp(struct timespec *ts, long *offset_cs, double *dfreq_ppm, dou
     samples[n_samples].orig_offset = offset;
     ++n_samples;
 
-    estimate_and_set_system(&now, 1, offset, offset_cs, dfreq_ppm, new_afreq_ppm);
+    estimate_and_set_system(&now, 1, offset, reg_offset, dfreq_ppm, new_afreq_ppm);
 
     return 1;
 

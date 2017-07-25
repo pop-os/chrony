@@ -39,9 +39,6 @@
 /* Maximum number of samples per clock */
 #define MAX_SAMPLES 16
 
-/* Minimum interval between samples (in seconds) */
-#define MIN_SAMPLE_SEPARATION 1.0
-
 struct HCL_Instance_Record {
   /* HW and local reference timestamp */
   struct timespec hw_ref;
@@ -57,6 +54,9 @@ struct HCL_Instance_Record {
 
   /* Maximum error of the last sample */
   double last_err;
+
+  /* Minimum interval between samples */
+  double min_separation;
 
   /* Flag indicating the offset and frequency values are valid */
   int valid_coefs;
@@ -86,7 +86,7 @@ handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
 /* ================================================== */
 
 HCL_Instance
-HCL_CreateInstance(void)
+HCL_CreateInstance(double min_separation)
 {
   HCL_Instance clock;
 
@@ -95,6 +95,7 @@ HCL_CreateInstance(void)
   clock->y_data[MAX_SAMPLES - 1] = 0.0;
   clock->n_samples = 0;
   clock->valid_coefs = 0;
+  clock->min_separation = min_separation;
 
   LCL_AddParameterChangeHandler(handle_slew, clock);
 
@@ -115,7 +116,7 @@ int
 HCL_NeedsNewSample(HCL_Instance clock, struct timespec *now)
 {
   if (!clock->n_samples ||
-      fabs(UTI_DiffTimespecsToDouble(now, &clock->local_ref)) >= MIN_SAMPLE_SEPARATION)
+      fabs(UTI_DiffTimespecsToDouble(now, &clock->local_ref)) >= clock->min_separation)
     return 1;
 
   return 0;
@@ -140,9 +141,9 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
     hw_delta = UTI_DiffTimespecsToDouble(hw_ts, &clock->hw_ref);
     local_delta = UTI_DiffTimespecsToDouble(local_ts, &clock->local_ref) / local_freq;
 
-    if (hw_delta <= 0.0 || local_delta < MIN_SAMPLE_SEPARATION / 2.0) {
+    if (hw_delta <= 0.0 || local_delta < clock->min_separation / 2.0) {
       clock->n_samples = 0;
-      DEBUG_LOG(LOGF_HwClocks, "HW clock reset interval=%f", local_delta);
+      DEBUG_LOG("HW clock reset interval=%f", local_delta);
     }
 
     for (i = MAX_SAMPLES - clock->n_samples; i < MAX_SAMPLES; i++) {
@@ -160,11 +161,11 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
   clock->valid_coefs =
     RGR_FindBestRobustRegression(clock->x_data + MAX_SAMPLES - clock->n_samples,
                                  clock->y_data + MAX_SAMPLES - clock->n_samples,
-                                 clock->n_samples, 1.0e-9, &clock->offset, &raw_freq,
+                                 clock->n_samples, 1.0e-10, &clock->offset, &raw_freq,
                                  &n_runs, &best_start);
 
   if (!clock->valid_coefs) {
-    DEBUG_LOG(LOGF_HwClocks, "HW clock needs more samples");
+    DEBUG_LOG("HW clock needs more samples");
     return;
   }
 
@@ -176,12 +177,12 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
   /* If the fit doesn't cross the error interval of the last sample, throw away
      all previous samples and keep only the frequency estimate */
   if (fabs(clock->offset) > err) {
-    DEBUG_LOG(LOGF_HwClocks, "HW clock reset offset=%e", clock->offset);
+    DEBUG_LOG("HW clock reset offset=%e", clock->offset);
     clock->offset = 0.0;
     clock->n_samples = 1;
   }
 
-  DEBUG_LOG(LOGF_HwClocks, "HW clock samples=%d offset=%e freq=%.9e raw_freq=%.9e err=%e ref_diff=%e",
+  DEBUG_LOG("HW clock samples=%d offset=%e freq=%.9e raw_freq=%.9e err=%e ref_diff=%e",
             clock->n_samples, clock->offset, clock->frequency, raw_freq, err,
             UTI_DiffTimespecsToDouble(&clock->hw_ref, &clock->local_ref));
 }

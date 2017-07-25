@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2009-2012, 2014-2015
+ * Copyright (C) Miroslav Lichvar  2009-2012, 2014-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -47,13 +47,14 @@
 #include <sys/capability.h>
 #endif
 
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
+#include <linux/ptp_clock.h>
+#endif
+
 #ifdef FEAT_SCFILTER
 #include <sys/prctl.h>
 #include <seccomp.h>
 #include <termios.h>
-#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
-#include <linux/ptp_clock.h>
-#endif
 #ifdef FEAT_PPS
 #include <linux/pps.h>
 #endif
@@ -68,6 +69,7 @@
 #include "sys_linux.h"
 #include "sys_timex.h"
 #include "conf.h"
+#include "local.h"
 #include "logging.h"
 #include "privops.h"
 #include "util.h"
@@ -238,7 +240,7 @@ guess_hz(void)
   }
 
   /* oh dear.  doomed. */
-  LOG_FATAL(LOGF_SysLinux, "Can't determine hz from tick %d", tick);
+  LOG_FATAL("Can't determine hz from tick %d", tick);
 
   return 0;
 }
@@ -281,11 +283,11 @@ get_kernel_version(int *major, int *minor, int *patch)
   struct utsname uts;
 
   if (uname(&uts) < 0)
-    LOG_FATAL(LOGF_SysLinux, "uname() failed");
+    LOG_FATAL("uname() failed");
 
   *patch = 0;
   if (sscanf(uts.release, "%d.%d.%d", major, minor, patch) < 2)
-    LOG_FATAL(LOGF_SysLinux, "Could not parse kernel version");
+    LOG_FATAL("Could not parse kernel version");
 }
 
 /* ================================================== */
@@ -312,10 +314,10 @@ get_version_specific_details(void)
   tick_update_hz = 100;
 
   get_kernel_version(&major, &minor, &patch);
-  DEBUG_LOG(LOGF_SysLinux, "Linux kernel major=%d minor=%d patch=%d", major, minor, patch);
+  DEBUG_LOG("Linux kernel major=%d minor=%d patch=%d", major, minor, patch);
 
   if (kernelvercmp(major, minor, patch, 2, 2, 0) < 0) {
-    LOG_FATAL(LOGF_SysLinux, "Kernel version not supported, sorry.");
+    LOG_FATAL("Kernel version not supported, sorry.");
   }
 
   if (kernelvercmp(major, minor, patch, 2, 6, 27) >= 0 &&
@@ -332,7 +334,7 @@ get_version_specific_details(void)
     have_setoffset = 1;
   }
 
-  DEBUG_LOG(LOGF_SysLinux, "hz=%d nominal_tick=%d max_tick_bias=%d",
+  DEBUG_LOG("hz=%d nominal_tick=%d max_tick_bias=%d",
       hz, nominal_tick, max_tick_bias);
 }
 
@@ -389,7 +391,7 @@ SYS_Linux_Initialise(void)
   reset_adjtime_offset();
 
   if (have_setoffset && !test_step_offset()) {
-    LOG(LOGS_INFO, LOGF_SysLinux, "adjtimex() doesn't support ADJ_SETOFFSET");
+    LOG(LOGS_INFO, "adjtimex() doesn't support ADJ_SETOFFSET");
     have_setoffset = 0;
   }
 
@@ -419,7 +421,7 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid)
   cap_t cap;
 
   if (prctl(PR_SET_KEEPCAPS, 1)) {
-    LOG_FATAL(LOGF_SysLinux, "prctl() failed");
+    LOG_FATAL("prctl() failed");
   }
   
   UTI_DropRoot(uid, gid);
@@ -429,11 +431,11 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid)
              "cap_net_bind_service,cap_sys_time=ep" : "cap_sys_time=ep";
 
   if ((cap = cap_from_text(cap_text)) == NULL) {
-    LOG_FATAL(LOGF_SysLinux, "cap_from_text() failed");
+    LOG_FATAL("cap_from_text() failed");
   }
 
   if (cap_set_proc(cap)) {
-    LOG_FATAL(LOGF_SysLinux, "cap_set_proc() failed");
+    LOG_FATAL("cap_set_proc() failed");
   }
 
   cap_free(cap);
@@ -452,7 +454,7 @@ void check_seccomp_applicability(void)
 
   CNF_GetMailOnChange(&mail_enabled, &mail_threshold, &mail_user);
   if (mail_enabled)
-    LOG_FATAL(LOGF_SysLinux, "mailonchange directive cannot be used with -F enabled");
+    LOG_FATAL("mailonchange directive cannot be used with -F enabled");
 }
 
 /* ================================================== */
@@ -465,9 +467,10 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(adjtimex), SCMP_SYS(clock_gettime), SCMP_SYS(gettimeofday),
     SCMP_SYS(settimeofday), SCMP_SYS(time),
     /* Process */
-    SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getrlimit),
-    SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn), SCMP_SYS(rt_sigprocmask),
-    SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn), SCMP_SYS(wait4),
+    SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getpid),
+    SCMP_SYS(getrlimit), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn),
+    SCMP_SYS(rt_sigprocmask), SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn),
+    SCMP_SYS(wait4),
     /* Memory */
     SCMP_SYS(brk), SCMP_SYS(madvise), SCMP_SYS(mmap), SCMP_SYS(mmap2),
     SCMP_SYS(mprotect), SCMP_SYS(mremap), SCMP_SYS(munmap), SCMP_SYS(shmdt),
@@ -487,7 +490,7 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(poll), SCMP_SYS(read), SCMP_SYS(futex), SCMP_SYS(select),
     SCMP_SYS(set_robust_list), SCMP_SYS(write),
     /* Miscellaneous */
-    SCMP_SYS(uname),
+    SCMP_SYS(getrandom), SCMP_SYS(sysinfo), SCMP_SYS(uname),
   };
 
   const int socket_domains[] = {
@@ -514,7 +517,10 @@ SYS_Linux_EnableSystemCallFilter(int level)
   const static unsigned long ioctls[] = {
     FIONREAD, TCGETS,
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
-    PTP_SYS_OFFSET,
+    PTP_EXTTS_REQUEST, PTP_PIN_SETFUNC, PTP_SYS_OFFSET,
+#ifdef PTP_SYS_OFFSET_PRECISE
+    PTP_SYS_OFFSET_PRECISE,
+#endif
 #endif
 #ifdef FEAT_PPS
     PPS_FETCH,
@@ -541,7 +547,7 @@ SYS_Linux_EnableSystemCallFilter(int level)
 
   ctx = seccomp_init(level > 0 ? SCMP_ACT_KILL : SCMP_ACT_TRAP);
   if (ctx == NULL)
-      LOG_FATAL(LOGF_SysLinux, "Failed to initialize seccomp");
+      LOG_FATAL("Failed to initialize seccomp");
 
   /* Add system calls that are always allowed */
   for (i = 0; i < (sizeof (syscalls) / sizeof (*syscalls)); i++) {
@@ -582,14 +588,14 @@ SYS_Linux_EnableSystemCallFilter(int level)
   }
 
   if (seccomp_load(ctx) < 0)
-    LOG_FATAL(LOGF_SysLinux, "Failed to load seccomp rules");
+    LOG_FATAL("Failed to load seccomp rules");
 
-  LOG(LOGS_INFO, LOGF_SysLinux, "Loaded seccomp filter");
+  LOG(LOGS_INFO, "Loaded seccomp filter");
   seccomp_release(ctx);
   return;
 
 add_failed:
-  LOG_FATAL(LOGF_SysLinux, "Failed to add seccomp rules");
+  LOG_FATAL("Failed to add seccomp rules");
 }
 #endif
 
@@ -603,7 +609,7 @@ void SYS_Linux_SetScheduler(int SchedPriority)
   struct sched_param sched;
 
   if (SchedPriority < 1 || SchedPriority > 99) {
-    LOG_FATAL(LOGF_SysLinux, "Bad scheduler priority: %d", SchedPriority);
+    LOG_FATAL("Bad scheduler priority: %d", SchedPriority);
   } else {
     sched.sched_priority = SchedPriority;
     pmax = sched_get_priority_max(SCHED_FIFO);
@@ -615,10 +621,10 @@ void SYS_Linux_SetScheduler(int SchedPriority)
       sched.sched_priority = pmin;
     }
     if ( sched_setscheduler(0, SCHED_FIFO, &sched) == -1 ) {
-      LOG(LOGS_ERR, LOGF_SysLinux, "sched_setscheduler() failed");
+      LOG(LOGS_ERR, "sched_setscheduler() failed");
     }
     else {
-      DEBUG_LOG(LOGF_SysLinux, "Enabled SCHED_FIFO with priority %d",
+      DEBUG_LOG("Enabled SCHED_FIFO with priority %d",
           sched.sched_priority);
     }
   }
@@ -636,14 +642,14 @@ void SYS_Linux_MemLockAll(int LockAll)
     rlim.rlim_max = RLIM_INFINITY;
     rlim.rlim_cur = RLIM_INFINITY;
     if (setrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
-      LOG(LOGS_ERR, LOGF_SysLinux, "setrlimit() failed: not locking into RAM");
+      LOG(LOGS_ERR, "setrlimit() failed: not locking into RAM");
     }
     else {
       if (mlockall(MCL_CURRENT|MCL_FUTURE) < 0) {
-	LOG(LOGS_ERR, LOGF_SysLinux, "mlockall() failed");
+	LOG(LOGS_ERR, "mlockall() failed");
       }
       else {
-	DEBUG_LOG(LOGF_SysLinux, "Successfully locked into RAM");
+	DEBUG_LOG("Successfully locked into RAM");
       }
     }
   }
@@ -661,3 +667,205 @@ SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
 
   return kernelvercmp(req_major, req_minor, 0, major, minor, patch) <= 0;
 }
+
+/* ================================================== */
+
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
+
+#define PHC_READINGS 10
+
+static int
+get_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
+               struct timespec *sys_ts, double *err)
+{
+  struct ptp_sys_offset sys_off;
+  struct timespec ts1, ts2, ts3, phc_tss[PHC_READINGS], sys_tss[PHC_READINGS];
+  double min_delay = 0.0, delays[PHC_READINGS], phc_sum, sys_sum, sys_prec;
+  int i, n;
+
+  /* Silence valgrind */
+  memset(&sys_off, 0, sizeof (sys_off));
+
+  sys_off.n_samples = PHC_READINGS;
+
+  if (ioctl(phc_fd, PTP_SYS_OFFSET, &sys_off)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET", strerror(errno));
+    return 0;
+  }
+
+  for (i = 0; i < PHC_READINGS; i++) {
+    ts1.tv_sec = sys_off.ts[i * 2].sec;
+    ts1.tv_nsec = sys_off.ts[i * 2].nsec;
+    ts2.tv_sec = sys_off.ts[i * 2 + 1].sec;
+    ts2.tv_nsec = sys_off.ts[i * 2 + 1].nsec;
+    ts3.tv_sec = sys_off.ts[i * 2 + 2].sec;
+    ts3.tv_nsec = sys_off.ts[i * 2 + 2].nsec;
+
+    sys_tss[i] = ts1;
+    phc_tss[i] = ts2;
+    delays[i] = UTI_DiffTimespecsToDouble(&ts3, &ts1);
+
+    if (delays[i] < 0.0) {
+      /* Step in the middle of a PHC reading? */
+      DEBUG_LOG("Bad PTP_SYS_OFFSET sample delay=%e", delays[i]);
+      return 0;
+    }
+
+    if (!i || delays[i] < min_delay)
+      min_delay = delays[i];
+  }
+
+  sys_prec = LCL_GetSysPrecisionAsQuantum();
+
+  /* Combine best readings */
+  for (i = n = 0, phc_sum = sys_sum = 0.0; i < PHC_READINGS; i++) {
+    if (delays[i] > min_delay + MAX(sys_prec, precision))
+      continue;
+
+    phc_sum += UTI_DiffTimespecsToDouble(&phc_tss[i], &phc_tss[0]);
+    sys_sum += UTI_DiffTimespecsToDouble(&sys_tss[i], &sys_tss[0]) + delays[i] / 2.0;
+    n++;
+  }
+
+  assert(n);
+
+  UTI_AddDoubleToTimespec(&phc_tss[0], phc_sum / n, phc_ts);
+  UTI_AddDoubleToTimespec(&sys_tss[0], sys_sum / n, sys_ts);
+  *err = MAX(min_delay / 2.0, precision);
+
+  return 1;
+}
+/* ================================================== */
+
+static int
+get_precise_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
+		       struct timespec *sys_ts, double *err)
+{
+#ifdef PTP_SYS_OFFSET_PRECISE
+  struct ptp_sys_offset_precise sys_off;
+
+  /* Silence valgrind */
+  memset(&sys_off, 0, sizeof (sys_off));
+
+  if (ioctl(phc_fd, PTP_SYS_OFFSET_PRECISE, &sys_off)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET_PRECISE",
+              strerror(errno));
+    return 0;
+  }
+
+  phc_ts->tv_sec = sys_off.device.sec;
+  phc_ts->tv_nsec = sys_off.device.nsec;
+  sys_ts->tv_sec = sys_off.sys_realtime.sec;
+  sys_ts->tv_nsec = sys_off.sys_realtime.nsec;
+  *err = MAX(LCL_GetSysPrecisionAsQuantum(), precision);
+
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+/* ================================================== */
+
+int
+SYS_Linux_OpenPHC(const char *path, int phc_index)
+{
+  struct ptp_clock_caps caps;
+  char phc_path[64];
+  int phc_fd;
+
+  if (!path) {
+    if (snprintf(phc_path, sizeof (phc_path), "/dev/ptp%d", phc_index) >= sizeof (phc_path))
+      return -1;
+    path = phc_path;
+  }
+
+  phc_fd = open(path, O_RDONLY);
+  if (phc_fd < 0) {
+    LOG(LOGS_ERR, "Could not open %s : %s", path, strerror(errno));
+    return -1;
+  }
+
+  /* Make sure it is a PHC */
+  if (ioctl(phc_fd, PTP_CLOCK_GETCAPS, &caps)) {
+    LOG(LOGS_ERR, "ioctl(%s) failed : %s", "PTP_CLOCK_GETCAPS", strerror(errno));
+    close(phc_fd);
+    return -1;
+  }
+
+  UTI_FdSetCloexec(phc_fd);
+
+  return phc_fd;
+}
+
+/* ================================================== */
+
+int
+SYS_Linux_GetPHCSample(int fd, int nocrossts, double precision, int *reading_mode,
+                       struct timespec *phc_ts, struct timespec *sys_ts, double *err)
+{
+  if ((*reading_mode == 2 || !*reading_mode) && !nocrossts &&
+      get_precise_phc_sample(fd, precision, phc_ts, sys_ts, err)) {
+    *reading_mode = 2;
+    return 1;
+  } else if ((*reading_mode == 1 || !*reading_mode) &&
+      get_phc_sample(fd, precision, phc_ts, sys_ts, err)) {
+    *reading_mode = 1;
+    return 1;
+  }
+  return 0;
+}
+
+/* ================================================== */
+
+int
+SYS_Linux_SetPHCExtTimestamping(int fd, int pin, int channel,
+                                int rising, int falling, int enable)
+{
+  struct ptp_pin_desc pin_desc;
+  struct ptp_extts_request extts_req;
+
+  memset(&pin_desc, 0, sizeof (pin_desc));
+  pin_desc.index = pin;
+  pin_desc.func = enable ? PTP_PF_EXTTS : PTP_PF_NONE;
+  pin_desc.chan = channel;
+
+  if (ioctl(fd, PTP_PIN_SETFUNC, &pin_desc)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_PIN_SETFUNC", strerror(errno));
+    return 0;
+  }
+
+  memset(&extts_req, 0, sizeof (extts_req));
+  extts_req.index = channel;
+  extts_req.flags = (enable ? PTP_ENABLE_FEATURE : 0) |
+                    (rising ? PTP_RISING_EDGE : 0) |
+                    (falling ? PTP_FALLING_EDGE : 0);
+
+  if (ioctl(fd, PTP_EXTTS_REQUEST, &extts_req)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_EXTTS_REQUEST", strerror(errno));
+    return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+int
+SYS_Linux_ReadPHCExtTimestamp(int fd, struct timespec *phc_ts, int *channel)
+{
+  struct ptp_extts_event extts_event;
+
+  if (read(fd, &extts_event, sizeof (extts_event)) != sizeof (extts_event)) {
+    DEBUG_LOG("Could not read PHC extts event");
+    return 0;
+  }
+
+  phc_ts->tv_sec = extts_event.t.sec;
+  phc_ts->tv_nsec = extts_event.t.nsec;
+  *channel = extts_event.index;
+
+  return 1;
+}
+
+#endif

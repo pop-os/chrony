@@ -61,7 +61,10 @@
 #define MIN_TICK_RATE 100
 
 /* Saved timex status */
-static int status;
+static int sys_status;
+
+/* Saved TAI-UTC offset */
+static int sys_tai_offset;
 
 /* ================================================== */
 
@@ -95,33 +98,47 @@ set_frequency(double freq_ppm)
 /* ================================================== */
 
 static void
-set_leap(int leap)
+set_leap(int leap, int tai_offset)
 {
   struct timex txc;
-  int applied;
+  int applied, prev_status;
 
-  applied = 0;
-  if (!leap) {
-    txc.modes = 0;
-    if (SYS_Timex_Adjust(&txc, 1) == TIME_WAIT)
-      applied = 1;
-  }
+  txc.modes = 0;
+  applied = SYS_Timex_Adjust(&txc, 0) == TIME_WAIT;
 
-  status &= ~(STA_INS | STA_DEL);
+  prev_status = sys_status;
+  sys_status &= ~(STA_INS | STA_DEL);
 
   if (leap > 0)
-    status |= STA_INS;
+    sys_status |= STA_INS;
   else if (leap < 0)
-    status |= STA_DEL;
+    sys_status |= STA_DEL;
 
   txc.modes = MOD_STATUS;
-  txc.status = status;
+  txc.status = sys_status;
+
+#ifdef MOD_TAI
+  if (tai_offset) {
+    txc.modes |= MOD_TAI;
+    txc.constant = tai_offset;
+
+    if (applied && !(sys_status & (STA_INS | STA_DEL)))
+      sys_tai_offset += prev_status & STA_INS ? 1 : -1;
+
+    if (sys_tai_offset != tai_offset) {
+      sys_tai_offset = tai_offset;
+      LOG(LOGS_INFO, "System clock TAI offset set to %d seconds", tai_offset);
+    }
+  }
+#endif
 
   SYS_Timex_Adjust(&txc, 0);
 
-  LOG(LOGS_INFO, LOGF_SysTimex, "System clock status %s leap second",
-      leap ? (leap > 0 ? "set to insert" : "set to delete") :
-      (applied ? "reset after" : "set to not insert/delete"));
+  if (prev_status != sys_status) {
+    LOG(LOGS_INFO, "System clock status %s leap second",
+        leap ? (leap > 0 ? "set to insert" : "set to delete") :
+        (applied ? "reset after" : "set to not insert/delete"));
+  }
 }
 
 /* ================================================== */
@@ -149,16 +166,17 @@ set_sync_status(int synchronised, double est_error, double max_error)
 #endif
 
   if (synchronised)
-    status &= ~STA_UNSYNC;
+    sys_status &= ~STA_UNSYNC;
   else
-    status |= STA_UNSYNC;
+    sys_status |= STA_UNSYNC;
 
   txc.modes = MOD_STATUS | MOD_ESTERROR | MOD_MAXERROR;
-  txc.status = status;
+  txc.status = sys_status;
   txc.esterror = est_error * 1.0e6;
   txc.maxerror = max_error * 1.0e6;
 
-  SYS_Timex_Adjust(&txc, 1);
+  if (SYS_Timex_Adjust(&txc, 1) < 0)
+    ;
 }
 
 /* ================================================== */
@@ -168,17 +186,18 @@ initialise_timex(void)
 {
   struct timex txc;
 
-  status = STA_UNSYNC;
+  sys_status = STA_UNSYNC;
+  sys_tai_offset = 0;
 
   /* Reset PLL offset */
   txc.modes = MOD_OFFSET | MOD_STATUS;
-  txc.status = STA_PLL | status;
+  txc.status = STA_PLL | sys_status;
   txc.offset = 0;
   SYS_Timex_Adjust(&txc, 0);
 
   /* Turn PLL off */
   txc.modes = MOD_STATUS;
-  txc.status = status;
+  txc.status = sys_status;
   SYS_Timex_Adjust(&txc, 0);
 }
 
@@ -238,11 +257,9 @@ SYS_Timex_Adjust(struct timex *txc, int ignore_error)
 
   if (state < 0) {
     if (!ignore_error)
-      LOG_FATAL(LOGF_SysTimex, NTP_ADJTIME_NAME"(0x%x) failed : %s",
-                txc->modes, strerror(errno));
+      LOG_FATAL(NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
     else
-      DEBUG_LOG(LOGF_SysTimex, NTP_ADJTIME_NAME"(0x%x) failed : %s",
-                txc->modes, strerror(errno));
+      DEBUG_LOG(NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
   }
 
   return state;

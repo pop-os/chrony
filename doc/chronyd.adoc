@@ -62,17 +62,22 @@ When run in this mode, the program will not detach itself from the terminal.
 
 *-d*::
 When run in this mode, the program will not detach itself from the terminal,
-and all messages will be sent to the terminal instead of to syslog. When
+and all messages will be written to the terminal instead of syslog. When
 *chronyd* was compiled with debugging support, this option can be used twice to
 print also debugging messages.
+
+*-l* _file_::
+This option specifies a file which should be used for logging instead of syslog
+or terminal.
 
 *-q*::
 When run in this mode, *chronyd* will set the system clock once and exit. It
 will not detach from the terminal.
 
 *-Q*::
-This option is similar to *-q*, but it will only print the offset without any
-corrections of the clock.
+This option is similar to the *-q* option, except it only prints the offset
+without making any corrections of the clock and it allows *chronyd* to be
+started without root privileges.
 
 *-r*::
 This option will try to reload and then delete files containing sample
@@ -82,8 +87,8 @@ histories are created by using the <<chronyc.adoc#dump,*dump*>> command in
 directive in the configuration file. This option is useful if you want to stop
 and restart *chronyd* briefly for any reason, e.g. to install a new version.
 However, it should be used only on systems where the kernel can maintain clock
-compensation whilst not under *chronyd*'s control (i.e. Linux, FreeBSD, NetBSD
-and Solaris).
+compensation whilst not under *chronyd*'s control (i.e. Linux, FreeBSD, NetBSD,
+Solaris, and macOS 10.13 or later).
 
 *-R*::
 When this option is used, the <<chrony.conf.adoc#initstepslew,*initstepslew*>>
@@ -150,6 +155,13 @@ support this option.
 *-m*::
 This option will lock *chronyd* into RAM so that it will never be paged out.
 This mode is only supported on Linux.
+
+*-x*::
+This option disables the control of the system clock. *chronyd* will not make
+any adjustments of the clock, but it will still track its offset and frequency
+relative to the estimated true time, and be able to operate as an NTP server.
+This allows *chronyd* to run without the capability to adjust or set the system
+clock (e.g. in some containers).
 
 *-v*::
 With this option *chronyd* will print version number to the terminal and exit.

@@ -128,6 +128,9 @@ static int cmd_leak_rate;
 /* Flag indicating whether the last response was dropped */
 #define FLAG_NTP_DROPPED 0x1
 
+/* NTP limit interval in log2 */
+static int ntp_limit_interval;
+
 /* Flag indicating whether facility is turned on or not */
 static int active;
 
@@ -294,7 +297,7 @@ set_bucket_params(int interval, int burst, uint16_t *max_tokens,
   *tokens_per_packet = 1U << (TS_FRAC + interval - *token_shift);
   *max_tokens = *tokens_per_packet * burst;
 
-  DEBUG_LOG(LOGF_ClientLog, "Tokens max %d packet %d shift %d",
+  DEBUG_LOG("Tokens max %d packet %d shift %d",
             *max_tokens, *tokens_per_packet, *token_shift);
 }
 
@@ -309,11 +312,13 @@ CLG_Initialise(void)
   ntp_tokens_per_packet = cmd_tokens_per_packet = 0;
   ntp_token_shift = cmd_token_shift = 0;
   ntp_leak_rate = cmd_leak_rate = 0;
+  ntp_limit_interval = MIN_LIMIT_INTERVAL;
 
   if (CNF_GetNTPRateLimit(&interval, &burst, &leak_rate)) {
     set_bucket_params(interval, burst, &max_ntp_tokens, &ntp_tokens_per_packet,
                       &ntp_token_shift);
     ntp_leak_rate = CLAMP(MIN_LEAK_RATE, leak_rate, MAX_LEAK_RATE);
+    ntp_limit_interval = CLAMP(MIN_LIMIT_INTERVAL, interval, MAX_LIMIT_INTERVAL);
   }
 
   if (CNF_GetCommandRateLimit(&interval, &burst, &leak_rate)) {
@@ -325,7 +330,7 @@ CLG_Initialise(void)
   active = !CNF_GetNoClientLog();
   if (!active) {
     if (ntp_leak_rate || cmd_leak_rate)
-      LOG_FATAL(LOGF_ClientLog, "ratelimit cannot be used with noclientlog");
+      LOG_FATAL("ratelimit cannot be used with noclientlog");
     return;
   }
 
@@ -470,7 +475,7 @@ CLG_LogNTPAccess(IPAddr *client, struct timespec *now)
                 record->flags & FLAG_NTP_DROPPED ?
                 &record->ntp_timeout_rate : &record->ntp_rate);
 
-  DEBUG_LOG(LOGF_ClientLog, "NTP hits %"PRIu32" rate %d trate %d tokens %d",
+  DEBUG_LOG("NTP hits %"PRIu32" rate %d trate %d tokens %d",
             record->ntp_hits, record->ntp_rate, record->ntp_timeout_rate,
             record->ntp_tokens);
 
@@ -494,7 +499,7 @@ CLG_LogCommandAccess(IPAddr *client, struct timespec *now)
                 &record->cmd_tokens, max_cmd_tokens, cmd_token_shift,
                 &record->cmd_rate);
 
-  DEBUG_LOG(LOGF_ClientLog, "Cmd hits %"PRIu32" rate %d tokens %d",
+  DEBUG_LOG("Cmd hits %"PRIu32" rate %d tokens %d",
             record->cmd_hits, record->cmd_rate, record->cmd_tokens);
 
   return get_index(record);
@@ -602,6 +607,14 @@ void CLG_GetNtpTimestamps(int index, NTP_int64 **rx_ts, NTP_int64 **tx_ts)
 
   *rx_ts = &record->ntp_rx_ts;
   *tx_ts = &record->ntp_tx_ts;
+}
+
+/* ================================================== */
+
+int
+CLG_GetNtpMinPoll(void)
+{
+  return ntp_limit_interval;
 }
 
 /* ================================================== */

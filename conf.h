@@ -31,7 +31,7 @@
 #include "addressing.h"
 #include "reference.h"
 
-extern void CNF_Initialise(int restarted);
+extern void CNF_Initialise(int restarted, int client_only);
 extern void CNF_Finalise(void);
 
 extern char *CNF_GetRtcDevice(void);
@@ -52,7 +52,7 @@ extern char *CNF_GetDriftFile(void);
 extern char *CNF_GetLogDir(void);
 extern char *CNF_GetDumpDir(void);
 extern int CNF_GetLogBanner(void);
-extern int CNF_GetLogMeasurements(void);
+extern int CNF_GetLogMeasurements(int *raw);
 extern int CNF_GetLogStatistics(void);
 extern int CNF_GetLogTracking(void);
 extern int CNF_GetLogRtc(void);
@@ -60,7 +60,6 @@ extern int CNF_GetLogRefclocks(void);
 extern int CNF_GetLogTempComp(void);
 extern char *CNF_GetKeysFile(void);
 extern char *CNF_GetRtcFile(void);
-extern int CNF_GetDumpOnExit(void);
 extern int CNF_GetManualEnabled(void);
 extern int CNF_GetCommandPort(void);
 extern int CNF_GetRtcOnUtc(void);
@@ -119,6 +118,20 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
-extern int CNF_GetHwTsInterface(unsigned int index, char **name, double *tx_comp, double *rx_comp);
+#define CNF_HWTS_RXFILTER_NONE 0
+#define CNF_HWTS_RXFILTER_NTP 1
+#define CNF_HWTS_RXFILTER_ALL 2
+
+typedef struct {
+  char *name;
+  int minpoll;
+  int nocrossts;
+  int rxfilter;
+  double precision;
+  double tx_comp;
+  double rx_comp;
+} CNF_HwTsInterface;
+
+extern int CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface);
 
 #endif /* GOT_CONF_H */

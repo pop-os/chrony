@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Timo Teras  2009
- * Copyright (C) Miroslav Lichvar  2009, 2013-2015
+ * Copyright (C) Miroslav Lichvar  2009, 2013-2016
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -130,10 +130,10 @@ prepare_socket(int family, int port_number, int client_only)
 
   if (sock_fd < 0) {
     if (!client_only) {
-      LOG(LOGS_ERR, LOGF_NtpIO, "Could not open %s NTP socket : %s",
+      LOG(LOGS_ERR, "Could not open %s NTP socket : %s",
           UTI_SockaddrFamilyToString(family), strerror(errno));
     } else {
-      DEBUG_LOG(LOGF_NtpIO, "Could not open %s NTP socket : %s",
+      DEBUG_LOG("Could not open %s NTP socket : %s",
                 UTI_SockaddrFamilyToString(family), strerror(errno));
     }
     return INVALID_SOCK_FD;
@@ -193,38 +193,35 @@ prepare_socket(int family, int port_number, int client_only)
   /* Make the socket capable of re-using an old address if binding to a specific port */
   if (port_number &&
       setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&on_off, sizeof(on_off)) < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "SO_REUSEADDR");
+    LOG(LOGS_ERR, "Could not set %s socket option", "SO_REUSEADDR");
     /* Don't quit - we might survive anyway */
   }
   
   /* Make the socket capable of sending broadcast pkts - needed for NTP broadcast mode */
   if (!client_only &&
       setsockopt(sock_fd, SOL_SOCKET, SO_BROADCAST, (char *)&on_off, sizeof(on_off)) < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "SO_BROADCAST");
+    LOG(LOGS_ERR, "Could not set %s socket option", "SO_BROADCAST");
     /* Don't quit - we might survive anyway */
   }
 
-#ifdef SO_TIMESTAMP
-  /* Enable receiving of timestamp control messages */
-#ifdef SO_TIMESTAMPNS
-  /* Try nanosecond resolution first */
-  if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMPNS, (char *)&on_off, sizeof(on_off)) < 0)
-#endif
-  if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMP, (char *)&on_off, sizeof(on_off)) < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "SO_TIMESTAMP");
-    /* Don't quit - we might survive anyway */
-  }
-#endif
-
+  /* Enable kernel/HW timestamping of packets */
 #ifdef HAVE_LINUX_TIMESTAMPING
-  NIO_Linux_SetTimestampSocketOptions(sock_fd, client_only, &events);
+  if (!NIO_Linux_SetTimestampSocketOptions(sock_fd, client_only, &events))
 #endif
+#ifdef SO_TIMESTAMPNS
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMPNS, (char *)&on_off, sizeof(on_off)) < 0)
+#endif
+#ifdef SO_TIMESTAMP
+      if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMP, (char *)&on_off, sizeof(on_off)) < 0)
+        LOG(LOGS_ERR, "Could not set %s socket option", "SO_TIMESTAMP");
+#endif
+      ;
 
 #ifdef IP_FREEBIND
   /* Allow binding to address that doesn't exist yet */
   if (my_addr_len > 0 &&
       setsockopt(sock_fd, IPPROTO_IP, IP_FREEBIND, (char *)&on_off, sizeof(on_off)) < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "IP_FREEBIND");
+    LOG(LOGS_ERR, "Could not set %s socket option", "IP_FREEBIND");
   }
 #endif
 
@@ -232,7 +229,7 @@ prepare_socket(int family, int port_number, int client_only)
 #ifdef HAVE_IN_PKTINFO
     /* We want the local IP info on server sockets */
     if (setsockopt(sock_fd, IPPROTO_IP, IP_PKTINFO, (char *)&on_off, sizeof(on_off)) < 0) {
-      LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "IP_PKTINFO");
+      LOG(LOGS_ERR, "Could not set %s socket option", "IP_PKTINFO");
       /* Don't quit - we might survive anyway */
     }
 #endif
@@ -242,18 +239,18 @@ prepare_socket(int family, int port_number, int client_only)
 #ifdef IPV6_V6ONLY
     /* Receive IPv6 packets only */
     if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *)&on_off, sizeof(on_off)) < 0) {
-      LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "IPV6_V6ONLY");
+      LOG(LOGS_ERR, "Could not set %s socket option", "IPV6_V6ONLY");
     }
 #endif
 
 #ifdef HAVE_IN6_PKTINFO
 #ifdef IPV6_RECVPKTINFO
     if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, (char *)&on_off, sizeof(on_off)) < 0) {
-      LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "IPV6_RECVPKTINFO");
+      LOG(LOGS_ERR, "Could not set %s socket option", "IPV6_RECVPKTINFO");
     }
 #else
     if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_PKTINFO, (char *)&on_off, sizeof(on_off)) < 0) {
-      LOG(LOGS_ERR, LOGF_NtpIO, "Could not set %s socket option", "IPV6_PKTINFO");
+      LOG(LOGS_ERR, "Could not set %s socket option", "IPV6_PKTINFO");
     }
 #endif
 #endif
@@ -262,7 +259,7 @@ prepare_socket(int family, int port_number, int client_only)
 
   /* Bind the socket if a port or address was specified */
   if (my_addr_len > 0 && PRV_BindSocket(sock_fd, &my_addr.u, my_addr_len) < 0) {
-    LOG(LOGS_ERR, LOGF_NtpIO, "Could not bind %s NTP socket : %s",
+    LOG(LOGS_ERR, "Could not bind %s NTP socket : %s",
         UTI_SockaddrFamilyToString(family), strerror(errno));
     close(sock_fd);
     return INVALID_SOCK_FD;
@@ -304,7 +301,7 @@ connect_socket(int sock_fd, NTP_Remote_Address *remote_addr)
   assert(addr_len);
 
   if (connect(sock_fd, &addr.u, addr_len) < 0) {
-    DEBUG_LOG(LOGF_NtpIO, "Could not connect NTP socket to %s:%d : %s",
+    DEBUG_LOG("Could not connect NTP socket to %s:%d : %s",
         UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
         strerror(errno));
     return 0;
@@ -365,10 +362,9 @@ NIO_Initialise(int family)
   NIO_Linux_Initialise();
 #else
   if (1) {
-    double tx_comp, rx_comp;
-    char *name;
-    if (CNF_GetHwTsInterface(0, &name, &tx_comp, &rx_comp))
-      LOG_FATAL(LOGF_NtpIO, "HW timestamping not supported");
+    CNF_HwTsInterface *conf_iface;
+    if (CNF_GetHwTsInterface(0, &conf_iface))
+      LOG_FATAL("HW timestamping not supported");
   }
 #endif
 
@@ -431,7 +427,7 @@ NIO_Initialise(int family)
        && client_sock_fd6 == INVALID_SOCK_FD
 #endif
       )) {
-    LOG_FATAL(LOGF_NtpIO, "Could not open NTP sockets");
+    LOG_FATAL("Could not open NTP sockets");
   }
 }
 
@@ -579,14 +575,13 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
   NTP_Local_Timestamp local_ts;
   struct timespec sched_ts;
   struct cmsghdr *cmsg;
-  int if_index;
 
   SCH_GetLastEventTime(&local_ts.ts, &local_ts.err, NULL);
   local_ts.source = NTP_TS_DAEMON;
   sched_ts = local_ts.ts;
 
   if (hdr->msg_namelen > sizeof (union sockaddr_in46)) {
-    DEBUG_LOG(LOGF_NtpIO, "Truncated source address");
+    DEBUG_LOG("Truncated source address");
     return;
   }
 
@@ -599,17 +594,17 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
   }
 
   local_addr.ip_addr.family = IPADDR_UNSPEC;
+  local_addr.if_index = INVALID_IF_INDEX;
   local_addr.sock_fd = sock_fd;
-  if_index = -1;
 
   if (hdr->msg_flags & MSG_TRUNC) {
-    DEBUG_LOG(LOGF_NtpIO, "Received truncated message from %s:%d",
+    DEBUG_LOG("Received truncated message from %s:%d",
               UTI_IPToString(&remote_addr.ip_addr), remote_addr.port);
     return;
   }
 
   if (hdr->msg_flags & MSG_CTRUNC) {
-    DEBUG_LOG(LOGF_NtpIO, "Truncated control message");
+    DEBUG_LOG("Truncated control message");
     /* Continue */
   }
 
@@ -621,7 +616,7 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
       memcpy(&ipi, CMSG_DATA(cmsg), sizeof(ipi));
       local_addr.ip_addr.addr.in4 = ntohl(ipi.ipi_addr.s_addr);
       local_addr.ip_addr.family = IPADDR_INET4;
-      if_index = ipi.ipi_ifindex;
+      local_addr.if_index = ipi.ipi_ifindex;
     }
 #endif
 
@@ -633,7 +628,7 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
       memcpy(&local_addr.ip_addr.addr.in6, &ipi.ipi6_addr.s6_addr,
              sizeof (local_addr.ip_addr.addr.in6));
       local_addr.ip_addr.family = IPADDR_INET6;
-      if_index = ipi.ipi6_ifindex;
+      local_addr.if_index = ipi.ipi6_ifindex;
     }
 #endif
 
@@ -661,14 +656,13 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
   }
 
 #ifdef HAVE_LINUX_TIMESTAMPING
-  if (NIO_Linux_ProcessMessage(&remote_addr, &local_addr, &local_ts,
-                               hdr, length, sock_fd, if_index))
+  if (NIO_Linux_ProcessMessage(&remote_addr, &local_addr, &local_ts, hdr, length))
     return;
 #endif
 
-  DEBUG_LOG(LOGF_NtpIO, "Received %d bytes from %s:%d to %s fd=%d if=%d tss=%d delay=%.9f",
+  DEBUG_LOG("Received %d bytes from %s:%d to %s fd=%d if=%d tss=%d delay=%.9f",
             length, UTI_IPToString(&remote_addr.ip_addr), remote_addr.port,
-            UTI_IPToString(&local_addr.ip_addr), local_addr.sock_fd, if_index,
+            UTI_IPToString(&local_addr.ip_addr), local_addr.sock_fd, local_addr.if_index,
             local_ts.source, UTI_DiffTimespecsToDouble(&sched_ts, &local_ts.ts));
 
   /* Just ignore the packet if it's not of a recognized length */
@@ -715,7 +709,7 @@ read_from_socket(int sock_fd, int event, void *anything)
 #endif
 
   if (status < 0) {
-    DEBUG_LOG(LOGF_NtpIO, "Could not receive from fd %d : %s", sock_fd,
+    DEBUG_LOG("Could not receive from fd %d : %s", sock_fd,
               strerror(errno));
     return;
   }
@@ -746,7 +740,7 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
   assert(initialised);
 
   if (local_addr->sock_fd == INVALID_SOCK_FD) {
-    DEBUG_LOG(LOGF_NtpIO, "No socket to send to %s:%d",
+    DEBUG_LOG("No socket to send to %s:%d",
               UTI_IPToString(&remote_addr->ip_addr), remote_addr->port);
     return 0;
   }
@@ -822,14 +816,14 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
     msg.msg_control = NULL;
 
   if (sendmsg(local_addr->sock_fd, &msg, 0) < 0) {
-    DEBUG_LOG(LOGF_NtpIO, "Could not send to %s:%d from %s fd %d : %s",
+    DEBUG_LOG("Could not send to %s:%d from %s fd %d : %s",
         UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
         UTI_IPToString(&local_addr->ip_addr), local_addr->sock_fd,
         strerror(errno));
     return 0;
   }
 
-  DEBUG_LOG(LOGF_NtpIO, "Sent %d bytes to %s:%d from %s fd %d", length,
+  DEBUG_LOG("Sent %d bytes to %s:%d from %s fd %d", length,
       UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
       UTI_IPToString(&local_addr->ip_addr), local_addr->sock_fd);
 

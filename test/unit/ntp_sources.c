@@ -34,7 +34,7 @@ test_unit(void)
 
   memset(&params, 0, sizeof (params));
 
-  CNF_Initialise(0);
+  CNF_Initialise(0, 0);
   CNF_ParseLine(NULL, 1, conf);
 
   LCL_Initialise();
@@ -47,7 +47,7 @@ test_unit(void)
   for (i = 0; i < 6; i++) {
     TEST_CHECK(ARR_GetSize(records) == 1);
 
-    DEBUG_LOG(0, "collision mod %u", 1U << i);
+    DEBUG_LOG("collision mod %u", 1U << i);
 
     for (j = 0; j < sizeof (addrs) / sizeof (addrs[0]); j++) {
       do {
@@ -59,7 +59,7 @@ test_unit(void)
       if (!j)
         hash = UTI_IPToHash(&addrs[j].ip_addr);
 
-      DEBUG_LOG(0, "adding source %s hash %"PRIu32, UTI_IPToString(&addrs[j].ip_addr),
+      DEBUG_LOG("adding source %s hash %"PRIu32, UTI_IPToString(&addrs[j].ip_addr),
                 UTI_IPToHash(&addrs[j].ip_addr) % (1U << i));
 
       NSR_AddSource(&addrs[j], random() % 2 ? NTP_SERVER : NTP_PEER, &params);
@@ -79,7 +79,7 @@ test_unit(void)
     }
 
     for (j = 0; j < sizeof (addrs) / sizeof (addrs[0]); j++) {
-      DEBUG_LOG(0, "removing source %s", UTI_IPToString(&addrs[j].ip_addr));
+      DEBUG_LOG("removing source %s", UTI_IPToString(&addrs[j].ip_addr));
       NSR_RemoveSource(&addrs[j]);
 
       for (k = 0; k < sizeof (addrs) / sizeof (addrs[0]); k++) {
@@ -96,4 +96,5 @@ test_unit(void)
   SCH_Finalise();
   LCL_Finalise();
   CNF_Finalise();
+  HSH_Finalise();
 }

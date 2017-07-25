@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2014
+ * Copyright (C) Miroslav Lichvar  2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -21,47 +21,14 @@
 
   =======================================================================
 
-  Utility functions for memory allocation.
-
+  Header file for null clock driver
   */
 
-#include "config.h"
+#ifndef GOT_SYS_NULL_H
+#define GOT_SYS_NULL_H
 
-#include "logging.h"
-#include "memory.h"
+extern void SYS_Null_Initialise(void);
 
-void *
-Malloc(size_t size)
-{
-  void *r;
+extern void SYS_Null_Finalise(void);
 
-  r = malloc(size);
-  if (!r && size)
-    LOG_FATAL("Could not allocate memory");
-
-  return r;
-}
-
-void *
-Realloc(void *ptr, size_t size)
-{
-  void *r;
-
-  r = realloc(ptr, size);
-  if (!r && size)
-    LOG_FATAL("Could not allocate memory");
-
-  return r;
-}
-
-char *
-Strdup(const char *s)
-{
-  void *r;
-
-  r = strdup(s);
-  if (!r)
-    LOG_FATAL("Could not allocate memory");
-
-  return r;
-}
+#endif
