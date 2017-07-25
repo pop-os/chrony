@@ -218,7 +218,7 @@ test_unit(void)
   CPS_NTP_Source source;
   NTP_Remote_Address remote_addr;
 
-  CNF_Initialise(0);
+  CNF_Initialise(0, 0);
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
@@ -249,7 +249,7 @@ test_unit(void)
     has_updated = 0;
 
     for (j = 0; j < 50; j++) {
-      DEBUG_LOG(0, "iteration %d, %d", i, j);
+      DEBUG_LOG("iteration %d, %d", i, j);
 
       interleaved = random() % 2;
       authenticated = random() % 2;

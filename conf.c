@@ -79,7 +79,7 @@ static void parse_tempcomp(char *);
 static int restarted = 0;
 static char *rtc_device;
 static int acquisition_port = -1;
-static int ntp_port = 123;
+static int ntp_port = NTP_PORT;
 static char *keys_file = NULL;
 static char *drift_file = NULL;
 static char *rtc_file = NULL;
@@ -104,7 +104,6 @@ static int do_log_tracking = 0;
 static int do_log_rtc = 0;
 static int do_log_refclocks = 0;
 static int do_log_tempcomp = 0;
-static int do_dump_on_exit = 0;
 static int log_banner = 32;
 static char *logdir;
 static char *dumpdir;
@@ -271,7 +270,7 @@ static const char *processed_command;
 static void
 command_parse_error(void)
 {
-    LOG_FATAL(LOGF_Configure, "Could not parse %s directive at line %d%s%s",
+    LOG_FATAL("Could not parse %s directive at line %d%s%s",
         processed_command, line_number, processed_file ? " in file " : "",
         processed_file ? processed_file : "");
 }
@@ -281,7 +280,7 @@ command_parse_error(void)
 static void
 other_parse_error(const char *message)
 {
-    LOG_FATAL(LOGF_Configure, "%s at line %d%s%s",
+    LOG_FATAL("%s at line %d%s%s",
         message, line_number, processed_file ? " in file " : "",
         processed_file ? processed_file : "");
 }
@@ -314,7 +313,7 @@ check_number_of_args(char *line, int num)
   num -= get_number_of_args(line);
 
   if (num) {
-    LOG_FATAL(LOGF_Configure, "%s arguments for %s directive at line %d%s%s",
+    LOG_FATAL("%s arguments for %s directive at line %d%s%s",
         num > 0 ? "Missing" : "Too many",
         processed_command, line_number, processed_file ? " in file " : "",
         processed_file ? processed_file : "");
@@ -324,7 +323,7 @@ check_number_of_args(char *line, int num)
 /* ================================================== */
 
 void
-CNF_Initialise(int r)
+CNF_Initialise(int r, int client_only)
 {
   restarted = r;
 
@@ -340,11 +339,18 @@ CNF_Initialise(int r)
 
   dumpdir = Strdup("");
   logdir = Strdup("");
-  bind_cmd_path = Strdup(DEFAULT_COMMAND_SOCKET);
-  pidfile = Strdup(DEFAULT_PID_FILE);
   rtc_device = Strdup(DEFAULT_RTC_DEVICE);
   hwclock_file = Strdup(DEFAULT_HWCLOCK_FILE);
   user = Strdup(DEFAULT_USER);
+
+  if (client_only) {
+    cmd_port = ntp_port = 0;
+    bind_cmd_path = Strdup("");
+    pidfile = Strdup("");
+  } else {
+    bind_cmd_path = Strdup(DEFAULT_COMMAND_SOCKET);
+    pidfile = Strdup(DEFAULT_PID_FILE);
+  }
 }
 
 /* ================================================== */
@@ -398,12 +404,12 @@ CNF_ReadFile(const char *filename)
 
   in = fopen(filename, "r");
   if (!in) {
-    LOG_FATAL(LOGF_Configure, "Could not open configuration file %s : %s",
+    LOG_FATAL("Could not open configuration file %s : %s",
               filename, strerror(errno));
     return;
   }
 
-  DEBUG_LOG(LOGF_Configure, "Reading %s", filename);
+  DEBUG_LOG("Reading %s", filename);
 
   for (i = 1; fgets(line, sizeof(line), in); i++) {
     CNF_ParseLine(filename, i, line);
@@ -469,7 +475,7 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "dumpdir")) {
     parse_string(p, &dumpdir);
   } else if (!strcasecmp(command, "dumponexit")) {
-    do_dump_on_exit = parse_null(p);
+    /* Silently ignored */
   } else if (!strcasecmp(command, "fallbackdrift")) {
     parse_fallbackdrift(p);
   } else if (!strcasecmp(command, "hwclockfile")) {
@@ -569,7 +575,7 @@ CNF_ParseLine(const char *filename, int number, char *line)
              !strcasecmp(command, "generatecommandkey") ||
              !strcasecmp(command, "linux_freq_scale") ||
              !strcasecmp(command, "linux_hz")) {
-    LOG(LOGS_WARN, LOGF_Configure, "%s directive is no longer supported", command);
+    LOG(LOGS_WARN, "%s directive is no longer supported", command);
   } else {
     other_parse_error("Invalid command");
   }
@@ -675,9 +681,9 @@ static void
 parse_refclock(char *line)
 {
   int n, poll, dpoll, filter_length, pps_rate, min_samples, max_samples, sel_options;
-  int max_lock_age;
+  int max_lock_age, pps_forced;
   uint32_t ref_id, lock_ref_id;
-  double offset, delay, precision, max_dispersion;
+  double offset, delay, precision, max_dispersion, pulse_width;
   char *p, *cmd, *name, *param;
   unsigned char ref[5];
   RefclockParameters *refclock;
@@ -685,6 +691,7 @@ parse_refclock(char *line)
   poll = 4;
   dpoll = 0;
   filter_length = 64;
+  pps_forced = 0;
   pps_rate = 0;
   min_samples = SRC_DEFAULT_MINSAMPLES;
   max_samples = SRC_DEFAULT_MAXSAMPLES;
@@ -693,6 +700,7 @@ parse_refclock(char *line)
   delay = 1e-9;
   precision = 0.0;
   max_dispersion = 0.0;
+  pulse_width = 0.0;
   ref_id = 0;
   max_lock_age = 2;
   lock_ref_id = 0;
@@ -757,11 +765,17 @@ parse_refclock(char *line)
     } else if (!strcasecmp(cmd, "delay")) {
       if (sscanf(line, "%lf%n", &delay, &n) != 1)
         break;
+    } else if (!strcasecmp(cmd, "pps")) {
+      n = 0;
+      pps_forced = 1;
     } else if (!strcasecmp(cmd, "precision")) {
       if (sscanf(line, "%lf%n", &precision, &n) != 1)
         break;
     } else if (!strcasecmp(cmd, "maxdispersion")) {
       if (sscanf(line, "%lf%n", &max_dispersion, &n) != 1)
+        break;
+    } else if (!strcasecmp(cmd, "width")) {
+      if (sscanf(line, "%lf%n", &pulse_width, &n) != 1)
         break;
     } else if (!strcasecmp(cmd, "noselect")) {
       n = 0;
@@ -792,6 +806,7 @@ parse_refclock(char *line)
   refclock->driver_poll = dpoll;
   refclock->poll = poll;
   refclock->filter_length = filter_length;
+  refclock->pps_forced = pps_forced;
   refclock->pps_rate = pps_rate;
   refclock->min_samples = min_samples;
   refclock->max_samples = max_samples;
@@ -800,6 +815,7 @@ parse_refclock(char *line)
   refclock->delay = delay;
   refclock->precision = precision;
   refclock->max_dispersion = max_dispersion;
+  refclock->pulse_width = pulse_width;
   refclock->ref_id = ref_id;
   refclock->max_lock_age = max_lock_age;
   refclock->lock_ref_id = lock_ref_id;
@@ -878,7 +894,7 @@ parse_initstepslew(char *line)
       if (DNS_Name2IPAddress(hostname, &ip_addr, 1) == DNS_Success) {
         ARR_AppendElement(init_sources, &ip_addr);
       } else {
-        LOG(LOGS_WARN, LOGF_Configure, "Could not resolve address of initstepslew server %s", hostname);
+        LOG(LOGS_WARN, "Could not resolve address of initstepslew server %s", hostname);
       }
     }
   }
@@ -1055,7 +1071,7 @@ parse_allow_deny(char *line, ARR_Instance restrictions, int allow)
       }
 
     } else {
-      if (DNS_Name2IPAddress(p, &ip_addr, 1) == DNS_Success) {
+      if (!slashpos && DNS_Name2IPAddress(p, &ip_addr, 1) == DNS_Success) {
         new_node = (AllowDeny *)ARR_GetNewElement(restrictions);
         new_node->allow = allow;
         new_node->all = all;
@@ -1170,7 +1186,7 @@ parse_broadcast(char *line)
     }
   } else {
     /* default port */
-    port = 123;
+    port = NTP_PORT;
   }
 
   destination = (NTP_Broadcast_Destination *)ARR_GetNewElement(broadcasts);
@@ -1250,7 +1266,7 @@ static void
 parse_hwtimestamp(char *line)
 {
   CNF_HwTsInterface *iface;
-  char *p;
+  char *p, filter[5];
   int n;
 
   if (!*line) {
@@ -1265,6 +1281,7 @@ parse_hwtimestamp(char *line)
   iface->name = Strdup(p);
   iface->minpoll = 0;
   iface->nocrossts = 0;
+  iface->rxfilter = CNF_HWTS_RXFILTER_NTP;
   iface->precision = 100.0e-9;
   iface->tx_comp = 0.0;
   iface->rx_comp = 0.0;
@@ -1283,6 +1300,17 @@ parse_hwtimestamp(char *line)
         break;
     } else if (!strcasecmp(p, "txcomp")) {
       if (sscanf(line, "%lf%n", &iface->tx_comp, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "rxfilter")) {
+      if (sscanf(line, "%4s%n", filter, &n) != 1)
+        break;
+      if (!strcasecmp(filter, "none"))
+        iface->rxfilter = CNF_HWTS_RXFILTER_NONE;
+      else if (!strcasecmp(filter, "ntp"))
+        iface->rxfilter = CNF_HWTS_RXFILTER_NTP;
+      else if (!strcasecmp(filter, "all"))
+        iface->rxfilter = CNF_HWTS_RXFILTER_ALL;
+      else
         break;
     } else if (!strcasecmp(p, "nocrossts")) {
       n = 0;
@@ -1303,11 +1331,15 @@ parse_include(char *line)
 {
   glob_t gl;
   size_t i;
+  int r;
 
   check_number_of_args(line, 1);
 
-  if (glob(line, 0, NULL, &gl)) {
-    DEBUG_LOG(LOGF_Configure, "glob of %s failed", line);
+  if ((r = glob(line, GLOB_ERR | GLOB_NOMAGIC, NULL, &gl)) != 0) {
+    if (r != GLOB_NOMATCH)
+      LOG_FATAL("Could not search for files matching %s", line);
+
+    DEBUG_LOG("glob of %s failed", line);
     return;
   }
 
@@ -1333,7 +1365,7 @@ CNF_CreateDirs(uid_t uid, gid_t gid)
        existed.  It MUST NOT be accessible by others as permissions on Unix
        domain sockets are ignored on some systems (e.g. Solaris). */
     if (!UTI_CheckDirPermissions(dir, 0770, uid, gid)) {
-      LOG(LOGS_WARN, LOGF_Configure, "Disabled command socket %s", bind_cmd_path);
+      LOG(LOGS_WARN, "Disabled command socket %s", bind_cmd_path);
       bind_cmd_path[0] = '\0';
     }
 
@@ -1552,14 +1584,6 @@ CNF_GetRtcDevice(void)
 
 /* ================================================== */
 
-int
-CNF_GetDumpOnExit(void)
-{
-  return do_dump_on_exit;
-}
-
-/* ================================================== */
-
 double
 CNF_GetMaxUpdateSkew(void)
 {
@@ -1740,7 +1764,7 @@ CNF_SetupAccessRestrictions(void)
     node = ARR_GetElement(ntp_restrictions, i);
     status = NCR_AddAccessRestriction(&node->ip, node->subnet_bits, node->allow, node->all);
     if (!status) {
-      LOG_FATAL(LOGF_Configure, "Bad subnet in %s/%d", UTI_IPToString(&node->ip), node->subnet_bits);
+      LOG_FATAL("Bad subnet in %s/%d", UTI_IPToString(&node->ip), node->subnet_bits);
     }
   }
 
@@ -1748,7 +1772,7 @@ CNF_SetupAccessRestrictions(void)
     node = ARR_GetElement(cmd_restrictions, i);
     status = CAM_AddAccessRestriction(&node->ip, node->subnet_bits, node->allow, node->all);
     if (!status) {
-      LOG_FATAL(LOGF_Configure, "Bad subnet in %s/%d", UTI_IPToString(&node->ip), node->subnet_bits);
+      LOG_FATAL("Bad subnet in %s/%d", UTI_IPToString(&node->ip), node->subnet_bits);
     }
   }
 

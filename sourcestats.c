@@ -51,9 +51,6 @@
 #define MIN_SKEW 1.0e-12
 #define MAX_SKEW 1.0e+02
 
-/* The minimum assumed std dev for weighting */
-#define MIN_WEIGHT_SD 1.0e-9
-
 /* The asymmetry of network jitter when all jitter is in one direction */
 #define MAX_ASYMMETRY 0.5
 
@@ -295,7 +292,7 @@ SST_AccumulateSample(SST_Stats inst, struct timespec *sample_time,
   /* Make sure it's newer than the last sample */
   if (inst->n_samples &&
       UTI_CompareTimespecs(&inst->sample_times[inst->last_sample], sample_time) >= 0) {
-    LOG(LOGS_WARN, LOGF_SourceStats, "Out of order sample detected, discarding history for %s",
+    LOG(LOGS_WARN, "Out of order sample detected, discarding history for %s",
         inst->ip_addr ? UTI_IPToString(inst->ip_addr) : UTI_RefidToString(inst->refid));
     SST_ResetInstance(inst);
   }
@@ -466,7 +463,7 @@ correct_asymmetry(SST_Stats inst, double *times_back, double *offsets)
    time.  E.g. a value of 4 means that we think the standard deviation
    is four times the fluctuation  of the peer distance */
 
-#define SD_TO_DIST_RATIO 1.0
+#define SD_TO_DIST_RATIO 0.7
 
 /* ================================================== */
 /* This function runs the linear regression operation on the data.  It
@@ -486,9 +483,10 @@ SST_DoNewRegression(SST_Stats inst)
   int best_start, times_back_start;
   double est_intercept, est_slope, est_var, est_intercept_sd, est_slope_sd;
   int i, j, nruns;
-  double min_distance, mean_distance;
+  double min_distance, median_distance;
   double sd_weight, sd;
   double old_skew, old_freq, stress;
+  double precision;
 
   convert_to_intervals(inst, times_back + inst->runs_samples);
 
@@ -497,24 +495,28 @@ SST_DoNewRegression(SST_Stats inst)
       offsets[i + inst->runs_samples] = inst->offsets[get_runsbuf_index(inst, i)];
     }
   
-    for (i = 0, mean_distance = 0.0, min_distance = DBL_MAX; i < inst->n_samples; i++) {
+    for (i = 0, min_distance = DBL_MAX; i < inst->n_samples; i++) {
       j = get_buf_index(inst, i);
       peer_distances[i] = 0.5 * inst->peer_delays[get_runsbuf_index(inst, i)] +
                           inst->peer_dispersions[j];
-      mean_distance += peer_distances[i];
       if (peer_distances[i] < min_distance) {
         min_distance = peer_distances[i];
       }
     }
-    mean_distance /= inst->n_samples;
 
     /* And now, work out the weight vector */
 
-    sd = mean_distance - min_distance;
-    sd = CLAMP(MIN_WEIGHT_SD, sd, min_distance);
+    precision = LCL_GetSysPrecisionAsQuantum();
+    median_distance = RGR_FindMedian(peer_distances, inst->n_samples);
+
+    sd = (median_distance - min_distance) / SD_TO_DIST_RATIO;
+    sd = CLAMP(precision, sd, min_distance);
+    min_distance += precision;
 
     for (i=0; i<inst->n_samples; i++) {
-      sd_weight = 1.0 + SD_TO_DIST_RATIO * (peer_distances[i] - min_distance) / sd;
+      sd_weight = 1.0;
+      if (peer_distances[i] > min_distance)
+        sd_weight += (peer_distances[i] - min_distance) / sd;
       weights[i] = sd_weight * sd_weight;
     }
   }
@@ -545,7 +547,7 @@ SST_DoNewRegression(SST_Stats inst)
     inst->skew = CLAMP(MIN_SKEW, inst->skew, MAX_SKEW);
     stress = fabs(old_freq - inst->estimated_frequency) / old_skew;
 
-    DEBUG_LOG(LOGF_SourceStats, "off=%e freq=%e skew=%e n=%d bs=%d runs=%d asym=%f arun=%d",
+    DEBUG_LOG("off=%e freq=%e skew=%e n=%d bs=%d runs=%d asym=%f arun=%d",
               inst->estimated_offset, inst->estimated_frequency, inst->skew,
               inst->n_samples, best_start, inst->nruns,
               inst->asymmetry, inst->asymmetry_run);
@@ -624,7 +626,7 @@ SST_GetSelectionData(SST_Stats inst, struct timespec *now,
   *stratum = inst->strata[get_buf_index(inst, inst->n_samples - 1)];
   *std_dev = inst->std_dev;
 
-  sample_elapsed = UTI_DiffTimespecsToDouble(now, &inst->sample_times[i]);
+  sample_elapsed = fabs(UTI_DiffTimespecsToDouble(now, &inst->sample_times[i]));
   offset = inst->offsets[i] + sample_elapsed * inst->estimated_frequency;
   *root_distance = 0.5 * inst->root_delays[j] +
     inst->root_dispersions[j] + sample_elapsed * inst->skew;
@@ -653,7 +655,7 @@ SST_GetSelectionData(SST_Stats inst, struct timespec *now,
 
   *select_ok = inst->regression_ok;
 
-  DEBUG_LOG(LOGF_SourceStats, "n=%d off=%f dist=%f sd=%f first_ago=%f last_ago=%f selok=%d",
+  DEBUG_LOG("n=%d off=%f dist=%f sd=%f first_ago=%f last_ago=%f selok=%d",
             inst->n_samples, offset, *root_distance, *std_dev,
             *first_sample_ago, *last_sample_ago, *select_ok);
 }
@@ -684,8 +686,9 @@ SST_GetTrackingData(SST_Stats inst, struct timespec *ref_time,
   elapsed_sample = UTI_DiffTimespecsToDouble(&inst->offset_time, &inst->sample_times[i]);
   *root_dispersion = inst->root_dispersions[j] + inst->skew * elapsed_sample;
 
-  DEBUG_LOG(LOGF_SourceStats, "n=%d freq=%f (%.3fppm) skew=%f (%.3fppm) avoff=%f offsd=%f disp=%f",
-      inst->n_samples, *frequency, 1.0e6* *frequency, *skew, 1.0e6* *skew, *average_offset, *offset_sd, *root_dispersion);
+  DEBUG_LOG("n=%d freq=%f (%.3fppm) skew=%f (%.3fppm) avoff=%f offsd=%f disp=%f",
+            inst->n_samples, *frequency, 1.0e6* *frequency, *skew, 1.0e6* *skew,
+            *average_offset, *offset_sd, *root_dispersion);
 
 }
 
@@ -719,7 +722,7 @@ SST_SlewSamples(SST_Stats inst, struct timespec *when, double dfreq, double doff
   inst->estimated_offset += delta_time;
   inst->estimated_frequency = (inst->estimated_frequency - dfreq) / (1.0 - dfreq);
 
-  DEBUG_LOG(LOGF_SourceStats, "n=%d m=%d old_off_time=%s new=%s old_off=%f new_off=%f old_freq=%.3f new_freq=%.3f",
+  DEBUG_LOG("n=%d m=%d old_off_time=%s new=%s old_off=%f new_off=%f old_freq=%.3f new_freq=%.3f",
             inst->n_samples, inst->runs_samples,
             UTI_TimespecToString(&prev), UTI_TimespecToString(&inst->offset_time),
             prev_offset, inst->estimated_offset,
@@ -781,7 +784,7 @@ SST_IsGoodSample(SST_Stats inst, double offset, double delay,
 {
   double elapsed, allowed_increase, delay_increase;
 
-  if (inst->n_samples < 3)
+  if (inst->n_samples < 6)
     return 1;
 
   elapsed = UTI_DiffTimespecsToDouble(when, &inst->offset_time);
@@ -805,8 +808,8 @@ SST_IsGoodSample(SST_Stats inst, double offset, double delay,
   if (fabs(offset) - delay_increase > allowed_increase)
     return 1;
 
-  DEBUG_LOG(LOGF_SourceStats, "Bad sample: offset=%f delay=%f incr_delay=%f allowed=%f",
-      offset, delay, allowed_increase, delay_increase);
+  DEBUG_LOG("Bad sample: offset=%f delay=%f incr_delay=%f allowed=%f",
+            offset, delay, delay_increase, allowed_increase);
 
   return 0;
 }

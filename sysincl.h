@@ -59,7 +59,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#if defined(LINUX) || defined(FREEBSD) || defined(NETBSD) || defined(SOLARIS)
+#if defined(LINUX) || defined(FREEBSD) || defined(NETBSD) || defined(SOLARIS) || defined(HAVE_MACOS_SYS_TIMEX)
 #include <sys/timex.h>
 #endif
 
@@ -74,6 +74,10 @@
 #ifdef FEAT_IPV6
 /* For inet_ntop() */
 #include <arpa/inet.h>
+#endif
+
+#ifdef HAVE_GETRANDOM
+#include <sys/random.h>
 #endif
 
 #endif /* GOT_SYSINCL_H */

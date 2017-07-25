@@ -428,6 +428,15 @@ case $OPERATINGSYSTEM in
           add_def FEAT_PRIVDROP
           priv_ops="ADJUSTTIME SETTIME BINDSOCKET"
         fi
+        major=`echo $VERSION | cut -d. -f1`
+        # ntp_adjtime is not available in macOS 10.12 (Darwin 16.x.x) and earlier
+        if [ $major -gt "16" ]; then
+          add_def HAVE_MACOS_SYS_TIMEX
+          EXTRA_OBJECTS="$EXTRA_OBJECTS sys_generic.o sys_netbsd.o sys_timex.o"
+          if [ $feat_droproot = "1" ]; then
+            priv_ops="$priv_ops ADJUSTTIMEX"
+          fi
+        fi
         echo "Configuring for macOS (" $SYSTEM "macOS version" $VERSION ")"
     ;;
     SunOS)
@@ -490,14 +499,16 @@ MYCPPFLAGS="$CPPFLAGS"
 MYLDFLAGS="$LDFLAGS"
 
 if [ "x$MYCC" = "x" ]; then
-  MYCC=gcc
-  if ! test_code "$MYCC" '' '' '' ''; then
-    MYCC=cc
-    if ! test_code "$MYCC" '' '' '' ''; then
+  for cc in gcc clang cc ""; do
+    if [ "x$cc" = "x" ]; then
       echo "error: no C compiler found"
       exit 1
     fi
-  fi
+    MYCC=$cc
+    if test_code "$MYCC" '' '' '' ''; then
+      break
+    fi
+  done
 else
   if ! test_code "$MYCC" '' '' '' ''; then
     echo "error: C compiler $MYCC cannot create executables"
@@ -507,9 +518,25 @@ fi
 
 if [ "x$MYCFLAGS" = "x" ]; then
   MYCFLAGS="-O2 -g"
+
+  TESTCFLAGS="-D_FORTIFY_SOURCE=2 -fPIE"
+  TESTLDFLAGS="-pie -Wl,-z,relro,-z,now"
+  if test_code 'hardening compiler options' '' "$TESTCFLAGS" "$TESTLDFLAGS" ''; then
+    MYCFLAGS="$MYCFLAGS $TESTCFLAGS"
+    MYLDFLAGS="$MYLDFLAGS $TESTLDFLAGS"
+  fi
+  TESTCFLAGS="-fstack-protector-strong --param=ssp-buffer-size=4"
+  if test_code '-fstack-protector-strong' '' "$TESTCFLAGS" '' ''; then
+    MYCFLAGS="$MYCFLAGS $TESTCFLAGS"
+  else
+    TESTCFLAGS="-fstack-protector --param=ssp-buffer-size=4"
+    if test_code '-fstack-protector' '' "$TESTCFLAGS" '' ''; then
+      MYCFLAGS="$MYCFLAGS $TESTCFLAGS"
+    fi
+  fi
 fi
 
-if [ "x$MYCC" = "xgcc" ]; then
+if [ "x$MYCC" = "xgcc" ] || [ "x$MYCC" = "xclang" ]; then
   MYCFLAGS="$MYCFLAGS -Wmissing-prototypes -Wall"
 fi
 
@@ -631,6 +658,11 @@ if test_code 'arc4random_buf()' 'stdlib.h' '' '' 'arc4random_buf(NULL, 0);'; the
   add_def HAVE_ARC4RANDOM
 fi
 
+if test_code 'getrandom()' 'stdlib.h sys/random.h' '' '' \
+    'return getrandom(NULL, 256, 0);'; then
+  add_def HAVE_GETRANDOM
+fi
+
 RECVMMSG_CODE='
   struct mmsghdr hdr;
   return !recvmmsg(0, &hdr, 1, MSG_DONTWAIT, 0);'
@@ -658,6 +690,17 @@ if [ $feat_timestamping = "1" ] && [ $try_timestamping = "1" ] &&
 then
   add_def HAVE_LINUX_TIMESTAMPING
   EXTRA_OBJECTS="$EXTRA_OBJECTS hwclock.o ntp_io_linux.o"
+
+  if test_code 'other timestamping options' \
+    'sys/types.h sys/socket.h linux/net_tstamp.h' '' '' '
+    struct scm_ts_pktinfo pktinfo;
+    pktinfo.if_index = pktinfo.pkt_length = 0;
+    return pktinfo.if_index + pktinfo.pkt_length + HWTSTAMP_FILTER_NTP_ALL +
+           SOF_TIMESTAMPING_OPT_PKTINFO + SOF_TIMESTAMPING_OPT_TX_SWHW;'; then
+    add_def HAVE_LINUX_TIMESTAMPING_RXFILTER_NTP 1
+    add_def HAVE_LINUX_TIMESTAMPING_OPT_PKTINFO 1
+    add_def HAVE_LINUX_TIMESTAMPING_OPT_TX_SWHW 1
+  fi
 fi
 
 timepps_h=""
@@ -709,7 +752,7 @@ then
   # NAME2IPADDRESS shouldn't be enabled with other operations as the helper
   # process works on one request at the time and the async resolver could
   # block the main thread
-  priv_ops="NAME2IPADDRESS"
+  priv_ops="NAME2IPADDRESS RELOADDNS"
   EXTRA_LIBS="$EXTRA_LIBS -lseccomp"
 fi
 
@@ -734,6 +777,8 @@ if [ $feat_refclock = "1" ] && [ $feat_phc = "1" ] && [ $try_phc = "1" ] && \
   test_code '<linux/ptp_clock.h>' 'sys/ioctl.h linux/ptp_clock.h' '' '' \
     'ioctl(1, PTP_CLOCK_GETCAPS + PTP_SYS_OFFSET, 0);'
 then
+  grep 'HAVE_LINUX_TIMESTAMPING' config.h > /dev/null ||
+    EXTRA_OBJECTS="$EXTRA_OBJECTS hwclock.o"
   add_def FEAT_PHC
 fi
 

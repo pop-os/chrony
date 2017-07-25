@@ -90,7 +90,7 @@ test_unit(void)
     "keyfile "KEYFILE
   };
 
-  CNF_Initialise(0);
+  CNF_Initialise(0, 0);
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
@@ -98,7 +98,7 @@ test_unit(void)
   KEY_Initialise();
 
   for (i = 0; i < 100; i++) {
-    DEBUG_LOG(0, "iteration %d", i);
+    DEBUG_LOG("iteration %d", i);
 
     if (i) {
       generate_key_file(KEYFILE, keys);
