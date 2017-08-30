@@ -1,3 +1,16 @@
+chrony (3.2~pre2-1) experimental; urgency=medium
+
+  * Import upstream version 3.2-pre2:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/control:
+    - Bump standard-version to 4.1.0 (no changes required).
+
+  * debian/copyright:
+    - Update copyright years.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 30 Aug 2017 15:48:37 +0200
+
 chrony (3.2~pre1-1) experimental; urgency=medium
 
   * Import upstream version 3.2-pre1:
