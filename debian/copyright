@@ -4,13 +4,13 @@ Upstream-Contact: Miroslav Lichvar <mlichvar@redhat.com>
 Source: https://download.tuxfamily.org/chrony/
 
 Files: *
-Copyright: 2009-2015, Miroslav Lichvar
+Copyright: 2009-2017, Miroslav Lichvar
            1997-2007, Richard P. Curnow
 License: GPL-2
 
 Files: main.c
        sys_linux.c
-Copyright: 2009-2016, Miroslav Lichvar
+Copyright: 2009-2017, Miroslav Lichvar
            2009, John G. Hasler
            1997-2003, Richard P. Curnow
 License: GPL-2
@@ -22,7 +22,7 @@ Copyright: 2009-2016, Miroslav Lichvar
 License: GPL-2
 
 Files: sys_macosx.?
-Copyright: 2015, Bryan Christianson
+Copyright: 2015, 2017, Bryan Christianson
            2001, J. Hannken-Illjes
            1997-2001, Richard P. Curnow
 License: GPL-2
@@ -44,7 +44,7 @@ License: GPL-2+
 
 Files: privops.c
 Copyright: 2015, Bryan Christianson
-           2016, Miroslav Lichvar
+           2017, Miroslav Lichvar
 License: GPL-2
 
 Files: privops.h
@@ -60,7 +60,7 @@ Copyright: 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: hwclock.?
-Copyright: 2016, Miroslav Lichvar
+Copyright: 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_io_linux.?
@@ -74,7 +74,7 @@ License: GPL-2
 Files: client.c
 Copyright: 1997-2003, Richard P. Curnow
            2016, Lonnie Abelbeck
-           2009-2016, Miroslav Lichvar
+           2009-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: configure
@@ -87,16 +87,17 @@ Files: doc/chrony.conf.adoc
 Copyright: 1997-2003, Richard P. Curnow
            2016, Stephen Wadeley
            2009-2017, Miroslav Lichvar
+           2017, Bryan Christianson
 License: GPL-2
 
 Files: doc/chronyc.adoc
 Copyright: 1997-2003, Richard P. Curnow
            2016, Stephen Wadeley
-           2009-2016, Miroslav Lichvar
+           2009-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: refclock.c
-Copyright: 2009-2011, 2013-2014, 2016, Miroslav Lichvar
+Copyright: 2009-2011, 2013-2014, 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: refclock_phc.c
@@ -105,7 +106,7 @@ License: GPL-2
 
 Files: regress.c
 Copyright: 1997-2003, Richard P. Curnow
-           2011, 2016, Miroslav Lichvar
+           2011, 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: sched.c
@@ -115,7 +116,7 @@ License: GPL-2
 
 Files: sourcestats.c
 Copyright: 1997-2003, Richard P. Curnow
-           2011-2014, 2016, Miroslav Lichvar
+           2011-2014, 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: stubs.c
