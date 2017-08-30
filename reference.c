@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2016
+ * Copyright (C) Miroslav Lichvar  2009-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -156,7 +156,8 @@ handle_slew(struct timespec *raw,
   double delta;
   struct timespec now;
 
-  UTI_AdjustTimespec(&our_ref_time, cooked, &our_ref_time, &delta, dfreq, doffset);
+  if (!UTI_IsZeroTimespec(&our_ref_time))
+    UTI_AdjustTimespec(&our_ref_time, cooked, &our_ref_time, &delta, dfreq, doffset);
 
   if (change_type == LCL_ChangeUnknownStep) {
     UTI_ZeroTimespec(&last_ref_update);
@@ -225,7 +226,7 @@ REF_Initialise(void)
   }
 
   logfileid = CNF_GetLogTracking() ? LOG_FileOpen("tracking",
-      "   Date (UTC) Time     IP Address   St   Freq ppm   Skew ppm     Offset L Co  Offset sd Rem. corr.")
+      "   Date (UTC) Time     IP Address   St   Freq ppm   Skew ppm     Offset L Co  Offset sd Rem. corr. Root delay Root disp. Max. error")
     : -1;
 
   max_update_skew = fabs(CNF_GetMaxUpdateSkew()) * 1.0e-6;
@@ -267,6 +268,7 @@ REF_Initialise(void)
     fb_drift_timeout_id = 0;
   }
 
+  UTI_ZeroTimespec(&our_ref_time);
   UTI_ZeroTimespec(&last_ref_update);
   last_ref_update_interval = 0.0;
 
@@ -820,18 +822,43 @@ update_leap_status(NTP_Leap leap, time_t now, int reset)
 
 /* ================================================== */
 
+static double
+get_root_dispersion(struct timespec *ts)
+{
+  if (UTI_IsZeroTimespec(&our_ref_time))
+    return 1.0;
+
+  return our_root_dispersion +
+         fabs(UTI_DiffTimespecsToDouble(ts, &our_ref_time)) *
+         (our_skew + fabs(our_residual_freq) + LCL_GetMaxClockError());
+}
+
+/* ================================================== */
+
 static void
-write_log(struct timespec *ref_time, char *ref, int stratum, NTP_Leap leap,
-    double freq, double skew, double offset, int combined_sources,
-    double offset_sd, double uncorrected_offset)
+write_log(struct timespec *now, int combined_sources, double freq,
+          double offset, double offset_sd, double uncorrected_offset,
+          double orig_root_distance)
 {
   const char leap_codes[4] = {'N', '+', '-', '?'};
-  if (logfileid != -1) {
-    LOG_FileWrite(logfileid, "%s %-15s %2d %10.3f %10.3f %10.3e %1c %2d %10.3e %10.3e",
-            UTI_TimeToLogForm(ref_time->tv_sec), ref, stratum, freq, skew,
-            offset, leap_codes[leap], combined_sources, offset_sd,
-            uncorrected_offset);
-  }
+  double root_dispersion, max_error;
+  static double last_sys_offset = 0.0;
+
+  if (logfileid == -1)
+    return;
+
+  max_error = orig_root_distance + fabs(last_sys_offset);
+  root_dispersion = get_root_dispersion(now);
+  last_sys_offset = offset - uncorrected_offset;
+
+  LOG_FileWrite(logfileid,
+                "%s %-15s %2d %10.3f %10.3f %10.3e %1c %2d %10.3e %10.3e %10.3e %10.3e %10.3e",
+                UTI_TimeToLogForm(now->tv_sec),
+                our_ref_ip.family != IPADDR_UNSPEC ?
+                  UTI_IPToString(&our_ref_ip) : UTI_RefidToString(our_ref_id),
+                our_stratum, freq, 1.0e6 * our_skew, offset,
+                leap_codes[our_leap_status], combined_sources, offset_sd,
+                uncorrected_offset, our_root_delay, root_dispersion, max_error);
 }
 
 /* ================================================== */
@@ -915,8 +942,7 @@ REF_SetReference(int stratum,
   double our_frequency;
   double abs_freq_ppm;
   double update_interval;
-  double elapsed;
-  double correction_rate;
+  double elapsed, correction_rate, orig_root_distance;
   double uncorrected_offset, accumulate_offset, step_offset;
   struct timespec now, raw_now;
   NTP_int64 ref_fuzz;
@@ -929,28 +955,10 @@ REF_SetReference(int stratum,
     return;
   }
 
-  /* Guard against dividing by zero */
-  if (skew < MIN_SKEW)
+  /* Guard against dividing by zero and NaN */
+  if (!(skew > MIN_SKEW))
     skew = MIN_SKEW;
 
-  /* If we get a serious rounding error in the source stats regression
-     processing, there is a remote chance that the skew argument is a
-     'not a number'.  If such a quantity gets propagated into the
-     machine's kernel clock variables, nasty things will happen ..
-     
-     To guard against this we need to check whether the skew argument
-     is a reasonable real number.  I don't think isnan, isinf etc are
-     platform independent, so the following algorithm is used. */
-
-  {
-    double t;
-    t = (skew + skew) / skew; /* Skew shouldn't be zero either */
-    if ((t < 1.9) || (t > 2.1)) {
-      LOG(LOGS_WARN, "Bogus skew value encountered");
-      return;
-    }
-  }
-    
   LCL_ReadRawTime(&raw_now);
   LCL_GetOffsetCorrection(&raw_now, &uncorrected_offset, NULL);
   UTI_AddDoubleToTimespec(&raw_now, uncorrected_offset, &now);
@@ -960,6 +968,8 @@ REF_SetReference(int stratum,
 
   if (!is_offset_ok(our_offset))
     return;
+
+  orig_root_distance = our_root_delay / 2.0 + get_root_dispersion(&now);
 
   are_we_synchronised = leap != LEAP_Unsynchronised ? 1 : 0;
   our_stratum = stratum + 1;
@@ -1071,16 +1081,8 @@ REF_SetReference(int stratum,
 
   abs_freq_ppm = LCL_ReadAbsoluteFrequency();
 
-  write_log(&now,
-            our_ref_ip.family != IPADDR_UNSPEC ? UTI_IPToString(&our_ref_ip) : UTI_RefidToString(our_ref_id),
-            our_stratum,
-            our_leap_status,
-            abs_freq_ppm,
-            1.0e6*our_skew,
-            our_offset,
-            combined_sources,
-            offset_sd,
-            uncorrected_offset);
+  write_log(&now, combined_sources, abs_freq_ppm, our_offset, offset_sd,
+            uncorrected_offset, orig_root_distance);
 
   if (drift_file) {
     /* Update drift file at most once per hour */
@@ -1092,7 +1094,7 @@ REF_SetReference(int stratum,
   }
 
   /* Update fallback drifts */
-  if (fb_drifts) {
+  if (fb_drifts && are_we_synchronised) {
     update_fb_drifts(abs_freq_ppm, update_interval);
     schedule_fb_drift(&now);
   }
@@ -1154,20 +1156,15 @@ REF_SetUnsynchronised(void)
   }
 
   update_leap_status(LEAP_Unsynchronised, 0, 0);
+  our_ref_ip.family = IPADDR_INET4;
+  our_ref_ip.addr.in4 = 0;
+  our_stratum = 0;
   are_we_synchronised = 0;
 
   LCL_SetSyncStatus(0, 0.0, 0.0);
 
-  write_log(&now,
-            "0.0.0.0",
-            0,
-            our_leap_status,
-            LCL_ReadAbsoluteFrequency(),
-            1.0e6*our_skew,
-            0.0,
-            0,
-            0.0,
-            uncorrected_offset);
+  write_log(&now, 0, LCL_ReadAbsoluteFrequency(), 0.0, 0.0, uncorrected_offset,
+            our_root_delay / 2.0 + get_root_dispersion(&now));
 }
 
 /* ================================================== */
@@ -1185,14 +1182,12 @@ REF_GetReferenceParams
  double *root_dispersion
 )
 {
-  double elapsed, dispersion;
+  double dispersion;
 
   assert(initialised);
 
   if (are_we_synchronised) {
-    elapsed = UTI_DiffTimespecsToDouble(local_time, &our_ref_time);
-    dispersion = our_root_dispersion +
-      (our_skew + fabs(our_residual_freq) + LCL_GetMaxClockError()) * elapsed;
+    dispersion = get_root_dispersion(local_time);
   } else {
     dispersion = 0.0;
   }

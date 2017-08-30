@@ -2,6 +2,7 @@
 //
 // Copyright (C) Richard P. Curnow  1997-2003
 // Copyright (C) Stephen Wadeley  2016
+// Copyright (C) Bryan Christianson  2017
 // Copyright (C) Miroslav Lichvar  2009-2017
 //
 // This program is free software; you can redistribute it and/or modify
@@ -115,13 +116,25 @@ round-trip delay of 0.3 seconds or more should be ignored. The default value is
 This option is similar to the maxdelay option above. *chronyd* keeps a record
 of the minimum round-trip delay amongst the previous measurements that it has
 buffered. If a measurement has a round trip delay that is greater than the
-maxdelayratio times the minimum delay, it will be rejected. This option works
-only in the *server* directive when not in the interleaved mode.
+maxdelayratio times the minimum delay, it will be rejected.
 *maxdelaydevratio* _ratio_:::
 If a measurement has a ratio of the increase in the round-trip delay from the
 minimum delay amongst the previous measurements to the standard deviation of
 the previous measurements that is greater than the specified ratio, it will be
 rejected. The default is 10.0.
+*mindelay* _delay_:::
+This options specifies a fixed minimum round-trip delay to be used instead of
+the minimum amongst the previous measurements. This can be useful in networks
+with static configuration to improve the stability of corrections for
+asymmetric jitter, weighting of the measurements, and the *maxdelayratio* and
+*maxdelaydevratio* tests. The value should be set accurately in order to have a
+positive effect on the synchronisation.
+*asymmetry* _ratio_:::
+This options specifies the asymmetry of the network jitter on the path to the
+source, which is used to correct the measured offset according to the delay.
+The asymmetry can be between -0.5 and +0.5. A negative value means the delay of
+packets sent to the source is more variable than the delay of packets sent from
+the source back. By default, *chronyd* estimates the asymmetry automatically.
 *offset* _offset_:::
 This option specifies a correction (in seconds) which will be applied to
 offsets measured with this source. It's particularly useful to compensate for a
@@ -178,10 +191,9 @@ and the state might be dropped when there are too many clients (e.g.
 by other clients that have the same IP address (e.g. computers behind NAT or
 someone sending requests with a spoofed source address).
 +
-With longer polling intervals, it is recommended to combine the *xleave* option
-with the *presend* option in order to shorten the interval in which the server
-has to keep the state to be able to respond in the interleaved mode. The
-shorter interval also improves accuracy of the measured offset and delay.
+The *xleave* option can be combined with the *presend* option in order to
+shorten the interval in which the server has to keep the state to be able to
+respond in the interleaved mode.
 *polltarget* _target_:::
 Target number of measurements to use for the regression algorithm which
 *chronyd* will try to maintain by adjusting the polling interval between
@@ -1611,7 +1623,7 @@ from the example line above):
 . The root dispersion (_EPSILON_ in RFC 5905). [7.446e-03]
 . Reference ID of the server's source as a hexadecimal number. [CB00717B]
 . NTP mode of the received packet (_1_=active peer, _2_=passive peer,
-  _3_=server, _B_=basic, _I_=interleaved). [4B]
+  _4_=server, _B_=basic, _I_=interleaved). [4B]
 . Source of the local transmit timestamp
   (_D_=daemon, _K_=kernel, _H_=hardware). [D]
 . Source of the local receive timestamp
@@ -1665,11 +1677,11 @@ from the example line above):
   to be discarded. The number of runs for the data that is being retained is
   tabulated. Values of approximately half the number of samples are expected.
   [8]
-. The estimated asymmetry of network jitter on the path to the source which was
-  used to correct the measured offsets. The asymmetry can be between -0.5 and
-  0.5. A negative value means the delay of packets sent to the source is
-  more variable than the delay of packets sent from the source back. [0.00,
-  i.e. no correction for asymmetry]
+. The estimated or configured asymmetry of network jitter on the path to the
+  source which was used to correct the measured offsets. The asymmetry can be
+  between -0.5 and +0.5. A negative value means the delay of packets sent to
+  the source is more variable than the delay of packets sent from the source
+  back. [0.00, i.e. no correction for asymmetry]
 +
 *tracking*:::
 This option logs changes to the estimate of the system's gain or loss rate, and
@@ -1678,33 +1690,42 @@ actually appears as a single line in the file) from the log file is shown
 below.
 +
 ----
-2015-02-23 05:40:50 203.0.113.15     3    340.529      1.606  1.046e-03 N \
-            4  6.849e-03 -4.670e-04
+2017-08-22 13:22:36 203.0.113.15     2     -3.541      0.075 -8.621e-06 N \
+            2  2.940e-03 -2.084e-04  1.534e-02  3.472e-04  8.304e-03
 ----
 +
 The columns are as follows (the quantities in square brackets are the
 values from the example line above) :
 +
-. Date [2015-02-03]
+. Date [2017-08-22]
 . Hour:Minute:Second. Note that the date-time pair is expressed in UTC, not the
-  local time zone. [05:40:50]
+  local time zone. [13:22:36]
 . The IP address of the server or peer to which the local system is synchronised.
   [203.0.113.15]
-. The stratum of the local system. [3]
+. The stratum of the local system. [2]
 . The local system frequency (in ppm, positive means the local system runs fast
-  of UTC). [340.529]
-. The error bounds on the frequency (in ppm). [1.606]
-. The estimated local offset at the epoch (which is rapidly corrected by
-  slewing the local clock. (In seconds, positive indicates the local system
-  is fast of UTC). [1.046e-3]
+  of UTC). [-3.541]
+. The error bounds on the frequency (in ppm). [0.075]
+. The estimated local offset at the epoch, which is normally corrected by
+  slewing the local clock (in seconds, positive indicates the clock is fast of
+  UTC). [-8.621e-06]
 . Leap status (_N_ means normal, _+_ means that the last minute of this month
   has 61 seconds, _-_ means that the last minute of the month has 59 seconds,
   _?_ means the clock is not currently synchronised.) [N]
-. The number of combined sources. [4]
+. The number of combined sources. [2]
 . The estimated standard deviation of the combined offset (in seconds).
-  [6.849e-03]
+  [2.940e-03]
 . The remaining offset correction from the previous update (in seconds,
-  positive means the system clock is slow of UTC). [-4.670e-04]
+  positive means the system clock is slow of UTC). [-2.084e-04]
+. The total of the network path delays to the reference clock to which
+  the local clock is ultimately synchronised (in seconds). [1.534e-02]
+. The total dispersion accumulated through all the servers back to the
+  reference clock to which the local clock is ultimately synchronised
+  (in seconds). [3.472e-04]
+. The maximum estimated error of the system clock in the interval since the
+  previous update (in seconds). It includes the offset, remaining offset
+  correction, root delay, and dispersion from the previous update with the
+  dispersion which accumulated in the interval. [8.304e-03]
 +
 *rtc*:::
 This option logs information about the system's real-time clock. An example
@@ -1865,20 +1886,18 @@ be enabled by the *xleave* option in the <<server,*server*>> or the
 This directive is supported on Linux 3.19 and newer. The NIC must support HW
 timestamping, which can be verified with the *ethtool -T* command. The list of
 capabilities should include _SOF_TIMESTAMPING_RAW_HARDWARE_,
-_SOF_TIMESTAMPING_TX_HARDWARE_, _SOF_TIMESTAMPING_RX_HARDWARE_, and the filter
-modes should include _HWTSTAMP_FILTER_ALL_ or _HWTSTAMP_FILTER_NTP_ALL_. When
-*chronyd* is running, no other process (e.g. a PTP daemon) should be working
-with the NIC clock.
+_SOF_TIMESTAMPING_TX_HARDWARE_, and _SOF_TIMESTAMPING_RX_HARDWARE_. Receive
+filter _HWTSTAMP_FILTER_ALL_, or _HWTSTAMP_FILTER_NTP_ALL_, is necessary for
+timestamping of received packets. Timestamping of packets received from bridged
+and bonded interfaces is supported on Linux 4.13 and newer. When *chronyd* is
+running, no other process (e.g. a PTP daemon) should be working with the NIC
+clock.
 +
 If the kernel supports software timestamping, it will be enabled for all
-interfaces. With both hardware and software timestamping there are some
-limitations on which timestamps can be actually used, e.g. transmit
-timestamping does not currently work with IPv6 packets using IP options and
-hardware timestamping of packets received from bridges, bonds, and other
-virtual interfaces, works only on Linux 4.13 and newer. The source of
-timestamps (i.e. hardware, kernel, or daemon) is indicated in the
-_measurements.log_ file if enabled by the <<log,*log measurements*>> directive,
-and the <<chronyc.adoc#ntpdata,*ntpdata*>> report in *chronyc*.
+interfaces. The source of timestamps (i.e. hardware, kernel, or daemon) is
+indicated in the _measurements.log_ file if enabled by the <<log,*log
+measurements*>> directive, and the <<chronyc.adoc#ntpdata,*ntpdata*>> report in
+*chronyc*.
 +
 If the specified interface is _*_, *chronyd* will try to enable HW timestamping
 on all available interfaces.
@@ -1907,15 +1926,21 @@ is 0.
 Some hardware can precisely cross timestamp the NIC clock with the system
 clock. This option disables the use of the cross timestamping.
 *rxfilter* _filter_:::
-This option selects the receive timestamping filter. Possible values are:
-_all_, _ntp_, and _none_. The default value is _ntp_, which enables
-timestamping of NTP packets (_HWTSTAMP_FILTER_NTP_ALL_) if it is supported, or
-timestamping of all packets (_HWTSTAMP_FILTER_ALL_). Setting *rxfilter* to
-_all_ forces timestamping of all packets, which can be useful when the NIC
-supports both filters and NTP packets are received from or on a non-standard
-UDP port (e.g. specified by the *port* directive). Setting *rxfilter* to _none_
-disables receive HW timestamping and allows transmit HW timestamping to be
-enabled when the NIC supports only PTP-specific receive filters.
+This option selects the receive timestamping filter. The _filter_ can be one of
+the following:
+_all_::::
+Enables timestamping of all received packets.
+_ntp_::::
+Enables timestamping of received NTP packets.
+_none_::::
+Disables timestamping of received packets.
+:::
+The most specific filter for timestamping NTP packets which is supported by the
+NIC is selected by default. Some NICs can timestamp only PTP packets, which
+limits the selection to the _none_ filter. Forcing timestamping of all packets
+with the _all_ filter when the NIC supports both _all_ and _ntp_ filters can be
+useful when packets are received from or on a non-standard UDP port (e.g.
+specified by the *port* directive).
 ::
 +
 Examples of the directive are:

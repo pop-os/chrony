@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2016
+ * Copyright (C) Miroslav Lichvar  2016-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -38,6 +38,9 @@
 
 /* Maximum number of samples per clock */
 #define MAX_SAMPLES 16
+
+/* Maximum acceptable frequency offset of the clock */
+#define MAX_FREQ_OFFSET (2.0 / 3.0)
 
 struct HCL_Instance_Record {
   /* HW and local reference timestamp */
@@ -174,16 +177,17 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
   /* Drop unneeded samples */
   clock->n_samples -= best_start;
 
-  /* If the fit doesn't cross the error interval of the last sample, throw away
-     all previous samples and keep only the frequency estimate */
-  if (fabs(clock->offset) > err) {
-    DEBUG_LOG("HW clock reset offset=%e", clock->offset);
-    clock->offset = 0.0;
-    clock->n_samples = 1;
+  /* If the fit doesn't cross the error interval of the last sample,
+     or the frequency is not sane, drop all samples and start again */
+  if (fabs(clock->offset) > err ||
+      fabs(clock->frequency - 1.0) > MAX_FREQ_OFFSET) {
+    DEBUG_LOG("HW clock reset");
+    clock->n_samples = 0;
+    clock->valid_coefs = 0;
   }
 
-  DEBUG_LOG("HW clock samples=%d offset=%e freq=%.9e raw_freq=%.9e err=%e ref_diff=%e",
-            clock->n_samples, clock->offset, clock->frequency, raw_freq, err,
+  DEBUG_LOG("HW clock samples=%d offset=%e freq=%e raw_freq=%e err=%e ref_diff=%e",
+            clock->n_samples, clock->offset, clock->frequency - 1.0, raw_freq - 1.0, err,
             UTI_DiffTimespecsToDouble(&clock->hw_ref, &clock->local_ref));
 }
 
@@ -198,7 +202,7 @@ HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespec *cooked, 
     return 0;
 
   elapsed = UTI_DiffTimespecsToDouble(raw, &clock->hw_ref);
-  offset = clock->offset + elapsed / clock->frequency;
+  offset = elapsed / clock->frequency - clock->offset;
   UTI_AddDoubleToTimespec(&clock->local_ref, offset, cooked);
 
   /* Fow now, just return the error of the last sample */

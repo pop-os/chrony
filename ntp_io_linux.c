@@ -154,17 +154,25 @@ add_interface(CNF_HwTsInterface *conf_iface)
   ts_config.tx_type = HWTSTAMP_TX_ON;
 
   switch (conf_iface->rxfilter) {
+    case CNF_HWTS_RXFILTER_ANY:
+#ifdef HAVE_LINUX_TIMESTAMPING_RXFILTER_NTP
+      if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_NTP_ALL))
+        ts_config.rx_filter = HWTSTAMP_FILTER_NTP_ALL;
+      else
+#endif
+      if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_ALL))
+        ts_config.rx_filter = HWTSTAMP_FILTER_ALL;
+      else
+        ts_config.rx_filter = HWTSTAMP_FILTER_NONE;
+      break;
     case CNF_HWTS_RXFILTER_NONE:
       ts_config.rx_filter = HWTSTAMP_FILTER_NONE;
       break;
-    case CNF_HWTS_RXFILTER_NTP:
 #ifdef HAVE_LINUX_TIMESTAMPING_RXFILTER_NTP
-      if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_NTP_ALL)) {
-        ts_config.rx_filter = HWTSTAMP_FILTER_NTP_ALL;
-        break;
-      }
+    case CNF_HWTS_RXFILTER_NTP:
+      ts_config.rx_filter = HWTSTAMP_FILTER_NTP_ALL;
+      break;
 #endif
-      /* Fall through */
     default:
       ts_config.rx_filter = HWTSTAMP_FILTER_ALL;
       break;
@@ -203,7 +211,8 @@ add_interface(CNF_HwTsInterface *conf_iface)
 
   iface->clock = HCL_CreateInstance(UTI_Log2ToDouble(MAX(conf_iface->minpoll, MIN_PHC_POLL)));
 
-  LOG(LOGS_INFO, "Enabled HW timestamping on %s", iface->name);
+  LOG(LOGS_INFO, "Enabled HW timestamping %son %s",
+      ts_config.rx_filter == HWTSTAMP_FILTER_NONE ? "(TX only) " : "", iface->name);
 
   return 1;
 }
@@ -512,14 +521,43 @@ extract_udp_data(unsigned char *msg, NTP_Remote_Address *remote_addr, int len)
     len -= ihl + 8, msg += ihl + 8;
 #ifdef FEAT_IPV6
   } else if (len >= 48 && msg[0] >> 4 == 6) {
-    /* IPv6 extension headers are not supported */
-    if (msg[6] != 17)
-      return 0;
+    int eh_len, next_header = msg[6];
 
     memcpy(&addr.in6.sin6_addr.s6_addr, msg + 24, 16);
-    addr.in6.sin6_port = *(uint16_t *)(msg + 40 + 2);
+    len -= 40, msg += 40;
+
+    /* Skip IPv6 extension headers if present */
+    while (next_header != 17) {
+      switch (next_header) {
+        case 44:  /* Fragment Header */
+          /* Process only the first fragment */
+          if (ntohs(*(uint16_t *)(msg + 2)) >> 3 != 0)
+            return 0;
+          eh_len = 8;
+          break;
+        case 0:   /* Hop-by-Hop Options */
+        case 43:  /* Routing Header */
+        case 60:  /* Destination Options */
+        case 135: /* Mobility Header */
+          eh_len = 8 * (msg[1] + 1);
+          break;
+        case 51:  /* Authentication Header */
+          eh_len = 4 * (msg[1] + 2);
+          break;
+        default:
+          return 0;
+      }
+
+      if (eh_len < 8 || len < eh_len + 8)
+        return 0;
+
+      next_header = msg[0];
+      len -= eh_len, msg += eh_len;
+    }
+
+    addr.in6.sin6_port = *(uint16_t *)(msg + 2);
     addr.in6.sin6_family = AF_INET6;
-    len -= 48, msg += 48;
+    len -= 8, msg += 8;
 #endif
   } else {
     return 0;

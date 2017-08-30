@@ -118,15 +118,18 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
-#define CNF_HWTS_RXFILTER_NONE 0
-#define CNF_HWTS_RXFILTER_NTP 1
-#define CNF_HWTS_RXFILTER_ALL 2
+typedef enum {
+  CNF_HWTS_RXFILTER_ANY,
+  CNF_HWTS_RXFILTER_NONE,
+  CNF_HWTS_RXFILTER_NTP,
+  CNF_HWTS_RXFILTER_ALL,
+} CNF_HwTs_RxFilter;
 
 typedef struct {
   char *name;
   int minpoll;
   int nocrossts;
-  int rxfilter;
+  CNF_HwTs_RxFilter rxfilter;
   double precision;
   double tx_comp;
   double rx_comp;
