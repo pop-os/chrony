@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2012-2016
+ * Copyright (C) Miroslav Lichvar  2012-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -448,8 +448,13 @@ int main
         sched_priority = parse_int_arg(optarg);
         break;
       case 'q':
+        ref_mode = REF_ModeUpdateOnce;
+        nofork = 1;
+        client_only = 0;
+        system_log = 0;
+        break;
       case 'Q':
-        ref_mode = opt == 'q' ? REF_ModeUpdateOnce : REF_ModePrintOnce;
+        ref_mode = REF_ModePrintOnce;
         nofork = 1;
         client_only = 1;
         clock_control = 0;

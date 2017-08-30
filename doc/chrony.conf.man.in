@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-07-25
+.\"      Date: 2017-08-29
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2017-07-25" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2017-08-29" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -125,8 +125,7 @@ round\-trip delay of 0.3 seconds or more should be ignored. The default value is
 This option is similar to the maxdelay option above. \fBchronyd\fP keeps a record
 of the minimum round\-trip delay amongst the previous measurements that it has
 buffered. If a measurement has a round trip delay that is greater than the
-maxdelayratio times the minimum delay, it will be rejected. This option works
-only in the \fBserver\fP directive when not in the interleaved mode.
+maxdelayratio times the minimum delay, it will be rejected.
 .RE
 .sp
 \fBmaxdelaydevratio\fP \fIratio\fP
@@ -135,6 +134,25 @@ If a measurement has a ratio of the increase in the round\-trip delay from the
 minimum delay amongst the previous measurements to the standard deviation of
 the previous measurements that is greater than the specified ratio, it will be
 rejected. The default is 10.0.
+.RE
+.sp
+\fBmindelay\fP \fIdelay\fP
+.RS 4
+This options specifies a fixed minimum round\-trip delay to be used instead of
+the minimum amongst the previous measurements. This can be useful in networks
+with static configuration to improve the stability of corrections for
+asymmetric jitter, weighting of the measurements, and the \fBmaxdelayratio\fP and
+\fBmaxdelaydevratio\fP tests. The value should be set accurately in order to have a
+positive effect on the synchronisation.
+.RE
+.sp
+\fBasymmetry\fP \fIratio\fP
+.RS 4
+This options specifies the asymmetry of the network jitter on the path to the
+source, which is used to correct the measured offset according to the delay.
+The asymmetry can be between \-0.5 and +0.5. A negative value means the delay of
+packets sent to the source is more variable than the delay of packets sent from
+the source back. By default, \fBchronyd\fP estimates the asymmetry automatically.
 .RE
 .sp
 \fBoffset\fP \fIoffset\fP
@@ -221,10 +239,9 @@ and the state might be dropped when there are too many clients (e.g.
 by other clients that have the same IP address (e.g. computers behind NAT or
 someone sending requests with a spoofed source address).
 .sp
-With longer polling intervals, it is recommended to combine the \fBxleave\fP option
-with the \fBpresend\fP option in order to shorten the interval in which the server
-has to keep the state to be able to respond in the interleaved mode. The
-shorter interval also improves accuracy of the measured offset and delay.
+The \fBxleave\fP option can be combined with the \fBpresend\fP option in order to
+shorten the interval in which the server has to keep the state to be able to
+respond in the interleaved mode.
 .RE
 .sp
 \fBpolltarget\fP \fItarget\fP
@@ -2340,7 +2357,7 @@ Reference ID of the server\(cqs source as a hexadecimal number. [CB00717B]
 .IP " 18." 4.2
 .\}
 NTP mode of the received packet (\fI1\fP=active peer, \fI2\fP=passive peer,
-\fI3\fP=server, \fIB\fP=basic, \fII\fP=interleaved). [4B]
+\fI4\fP=server, \fIB\fP=basic, \fII\fP=interleaved). [4B]
 .RE
 .sp
 .RS 4
@@ -2553,11 +2570,11 @@ tabulated. Values of approximately half the number of samples are expected.
 .sp -1
 .IP " 13." 4.2
 .\}
-The estimated asymmetry of network jitter on the path to the source which was
-used to correct the measured offsets. The asymmetry can be between \-0.5 and
-0.5. A negative value means the delay of packets sent to the source is
-more variable than the delay of packets sent from the source back. [0.00,
-i.e. no correction for asymmetry]
+The estimated or configured asymmetry of network jitter on the path to the
+source which was used to correct the measured offsets. The asymmetry can be
+between \-0.5 and +0.5. A negative value means the delay of packets sent to
+the source is more variable than the delay of packets sent from the source
+back. [0.00, i.e. no correction for asymmetry]
 .RE
 .RE
 .sp
@@ -2572,8 +2589,8 @@ below.
 .RS 4
 .\}
 .nf
-2015\-02\-23 05:40:50 203.0.113.15     3    340.529      1.606  1.046e\-03 N \(rs
-            4  6.849e\-03 \-4.670e\-04
+2017\-08\-22 13:22:36 203.0.113.15     2     \-3.541      0.075 \-8.621e\-06 N \(rs
+            2  2.940e\-03 \-2.084e\-04  1.534e\-02  3.472e\-04  8.304e\-03
 .fi
 .if n \{\
 .RE
@@ -2590,7 +2607,7 @@ values from the example line above) :
 .sp -1
 .IP " 1." 4.2
 .\}
-Date [2015\-02\-03]
+Date [2017\-08\-22]
 .RE
 .sp
 .RS 4
@@ -2602,7 +2619,7 @@ Date [2015\-02\-03]
 .IP " 2." 4.2
 .\}
 Hour:Minute:Second. Note that the date\-time pair is expressed in UTC, not the
-local time zone. [05:40:50]
+local time zone. [13:22:36]
 .RE
 .sp
 .RS 4
@@ -2625,7 +2642,7 @@ The IP address of the server or peer to which the local system is synchronised.
 .sp -1
 .IP " 4." 4.2
 .\}
-The stratum of the local system. [3]
+The stratum of the local system. [2]
 .RE
 .sp
 .RS 4
@@ -2637,7 +2654,7 @@ The stratum of the local system. [3]
 .IP " 5." 4.2
 .\}
 The local system frequency (in ppm, positive means the local system runs fast
-of UTC). [340.529]
+of UTC). [\-3.541]
 .RE
 .sp
 .RS 4
@@ -2648,7 +2665,7 @@ of UTC). [340.529]
 .sp -1
 .IP " 6." 4.2
 .\}
-The error bounds on the frequency (in ppm). [1.606]
+The error bounds on the frequency (in ppm). [0.075]
 .RE
 .sp
 .RS 4
@@ -2659,9 +2676,9 @@ The error bounds on the frequency (in ppm). [1.606]
 .sp -1
 .IP " 7." 4.2
 .\}
-The estimated local offset at the epoch (which is rapidly corrected by
-slewing the local clock. (In seconds, positive indicates the local system
-is fast of UTC). [1.046e\-3]
+The estimated local offset at the epoch, which is normally corrected by
+slewing the local clock (in seconds, positive indicates the clock is fast of
+UTC). [\-8.621e\-06]
 .RE
 .sp
 .RS 4
@@ -2685,7 +2702,7 @@ has 61 seconds, \fI\-\fP means that the last minute of the month has 59 seconds,
 .sp -1
 .IP " 9." 4.2
 .\}
-The number of combined sources. [4]
+The number of combined sources. [2]
 .RE
 .sp
 .RS 4
@@ -2697,7 +2714,7 @@ The number of combined sources. [4]
 .IP " 10." 4.2
 .\}
 The estimated standard deviation of the combined offset (in seconds).
-[6.849e\-03]
+[2.940e\-03]
 .RE
 .sp
 .RS 4
@@ -2709,7 +2726,46 @@ The estimated standard deviation of the combined offset (in seconds).
 .IP " 11." 4.2
 .\}
 The remaining offset correction from the previous update (in seconds,
-positive means the system clock is slow of UTC). [\-4.670e\-04]
+positive means the system clock is slow of UTC). [\-2.084e\-04]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 12.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 12." 4.2
+.\}
+The total of the network path delays to the reference clock to which
+the local clock is ultimately synchronised (in seconds). [1.534e\-02]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 13.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 13." 4.2
+.\}
+The total dispersion accumulated through all the servers back to the
+reference clock to which the local clock is ultimately synchronised
+(in seconds). [3.472e\-04]
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04' 14.\h'+01'\c
+.\}
+.el \{\
+.sp -1
+.IP " 14." 4.2
+.\}
+The maximum estimated error of the system clock in the interval since the
+previous update (in seconds). It includes the offset, remaining offset
+correction, root delay, and dispersion from the previous update with the
+dispersion which accumulated in the interval. [8.304e\-03]
 .RE
 .RE
 .sp
@@ -3148,20 +3204,18 @@ be enabled by the \fBxleave\fP option in the \fBserver\fP or the
 This directive is supported on Linux 3.19 and newer. The NIC must support HW
 timestamping, which can be verified with the \fBethtool \-T\fP command. The list of
 capabilities should include \fISOF_TIMESTAMPING_RAW_HARDWARE\fP,
-\fISOF_TIMESTAMPING_TX_HARDWARE\fP, \fISOF_TIMESTAMPING_RX_HARDWARE\fP, and the filter
-modes should include \fIHWTSTAMP_FILTER_ALL\fP or \fIHWTSTAMP_FILTER_NTP_ALL\fP. When
-\fBchronyd\fP is running, no other process (e.g. a PTP daemon) should be working
-with the NIC clock.
+\fISOF_TIMESTAMPING_TX_HARDWARE\fP, and \fISOF_TIMESTAMPING_RX_HARDWARE\fP. Receive
+filter \fIHWTSTAMP_FILTER_ALL\fP, or \fIHWTSTAMP_FILTER_NTP_ALL\fP, is necessary for
+timestamping of received packets. Timestamping of packets received from bridged
+and bonded interfaces is supported on Linux 4.13 and newer. When \fBchronyd\fP is
+running, no other process (e.g. a PTP daemon) should be working with the NIC
+clock.
 .sp
 If the kernel supports software timestamping, it will be enabled for all
-interfaces. With both hardware and software timestamping there are some
-limitations on which timestamps can be actually used, e.g. transmit
-timestamping does not currently work with IPv6 packets using IP options and
-hardware timestamping of packets received from bridges, bonds, and other
-virtual interfaces, works only on Linux 4.13 and newer. The source of
-timestamps (i.e. hardware, kernel, or daemon) is indicated in the
-\fImeasurements.log\fP file if enabled by the \fBlog measurements\fP directive,
-and the \fBntpdata\fP report in \fBchronyc\fP.
+interfaces. The source of timestamps (i.e. hardware, kernel, or daemon) is
+indicated in the \fImeasurements.log\fP file if enabled by the \fBlog
+measurements\fP directive, and the \fBntpdata\fP report in
+\fBchronyc\fP.
 .sp
 If the specified interface is \fI*\fP, \fBchronyd\fP will try to enable HW timestamping
 on all available interfaces.
@@ -3206,15 +3260,33 @@ clock. This option disables the use of the cross timestamping.
 .sp
 \fBrxfilter\fP \fIfilter\fP
 .RS 4
-This option selects the receive timestamping filter. Possible values are:
-\fIall\fP, \fIntp\fP, and \fInone\fP. The default value is \fIntp\fP, which enables
-timestamping of NTP packets (\fIHWTSTAMP_FILTER_NTP_ALL\fP) if it is supported, or
-timestamping of all packets (\fIHWTSTAMP_FILTER_ALL\fP). Setting \fBrxfilter\fP to
-\fIall\fP forces timestamping of all packets, which can be useful when the NIC
-supports both filters and NTP packets are received from or on a non\-standard
-UDP port (e.g. specified by the \fBport\fP directive). Setting \fBrxfilter\fP to \fInone\fP
-disables receive HW timestamping and allows transmit HW timestamping to be
-enabled when the NIC supports only PTP\-specific receive filters.
+This option selects the receive timestamping filter. The \fIfilter\fP can be one of
+the following:
+.sp
+\fIall\fP
+.RS 4
+Enables timestamping of all received packets.
+.RE
+.sp
+\fIntp\fP
+.RS 4
+Enables timestamping of received NTP packets.
+.RE
+.sp
+\fInone\fP
+.RS 4
+Disables timestamping of received packets.
+.RE
+.RE
+.sp
+
+.RS 4
+The most specific filter for timestamping NTP packets which is supported by the
+NIC is selected by default. Some NICs can timestamp only PTP packets, which
+limits the selection to the \fInone\fP filter. Forcing timestamping of all packets
+with the \fIall\fP filter when the NIC supports both \fIall\fP and \fIntp\fP filters can be
+useful when packets are received from or on a non\-standard UDP port (e.g.
+specified by the \fBport\fP directive).
 .RE
 .RE
 .sp

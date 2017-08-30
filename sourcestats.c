@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2014, 2016
+ * Copyright (C) Miroslav Lichvar  2011-2014, 2016-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -81,6 +81,12 @@ struct SST_Stats_Record {
   /* User defined minimum and maximum number of samples */
   int min_samples;
   int max_samples;
+
+  /* User defined minimum delay */
+  double fixed_min_delay;
+
+  /* User defined asymmetry of network jitter */
+  double fixed_asymmetry;
 
   /* Number of samples currently stored.  The samples are stored in circular
      buffer. */
@@ -197,13 +203,16 @@ SST_Finalise(void)
 /* This function creates a new instance of the statistics handler */
 
 SST_Stats
-SST_CreateInstance(uint32_t refid, IPAddr *addr, int min_samples, int max_samples)
+SST_CreateInstance(uint32_t refid, IPAddr *addr, int min_samples, int max_samples,
+                   double min_delay, double asymmetry)
 {
   SST_Stats inst;
   inst = MallocNew(struct SST_Stats_Record);
 
   inst->min_samples = min_samples;
   inst->max_samples = max_samples;
+  inst->fixed_min_delay = min_delay;
+  inst->fixed_asymmetry = asymmetry;
 
   SST_SetRefid(inst, refid, addr);
   SST_ResetInstance(inst);
@@ -310,6 +319,9 @@ SST_AccumulateSample(SST_Stats inst, struct timespec *sample_time,
   inst->root_dispersions[m] = root_dispersion;
   inst->strata[m] = stratum;
  
+  if (inst->peer_delays[n] < inst->fixed_min_delay)
+    inst->peer_delays[n] = 2.0 * inst->fixed_min_delay - inst->peer_delays[n];
+
   if (!inst->n_samples || inst->peer_delays[n] < inst->peer_delays[inst->min_delay_sample])
     inst->min_delay_sample = n;
 
@@ -415,45 +427,63 @@ find_min_delay_sample(SST_Stats inst)
    minimum network delay.  This can significantly improve the accuracy and
    stability of the estimated offset and frequency. */
 
+static int
+estimate_asymmetry(double *times_back, double *offsets, double *delays, int n,
+                   double *asymmetry, int *asymmetry_run)
+{
+  double a;
+
+  /* Reset the counter when the regression fails or the sign changes */
+  if (!RGR_MultipleRegress(times_back, delays, offsets, n, &a) ||
+      a * *asymmetry_run < 0.0) {
+    *asymmetry = 0;
+    *asymmetry_run = 0.0;
+    return 0;
+  }
+
+  if (a <= -MIN_ASYMMETRY && *asymmetry_run > -MAX_ASYMMETRY_RUN)
+    (*asymmetry_run)--;
+  else if (a >= MIN_ASYMMETRY && *asymmetry_run < MAX_ASYMMETRY_RUN)
+    (*asymmetry_run)++;
+
+  if (abs(*asymmetry_run) < MIN_ASYMMETRY_RUN)
+    return 0;
+
+  *asymmetry = CLAMP(-MAX_ASYMMETRY, a, MAX_ASYMMETRY);
+
+  return 1;
+}
+
+/* ================================================== */
+
 static void
 correct_asymmetry(SST_Stats inst, double *times_back, double *offsets)
 {
-  double asymmetry, delays[MAX_SAMPLES * REGRESS_RUNS_RATIO];
+  double min_delay, delays[MAX_SAMPLES * REGRESS_RUNS_RATIO];
   int i, n;
 
-  /* Don't try to estimate the asymmetry with reference clocks */
-  if (!inst->ip_addr)
+  /* Check if the asymmetry was not specified to be zero */
+  if (inst->fixed_asymmetry == 0.0)
     return;
 
+  min_delay = SST_MinRoundTripDelay(inst);
   n = inst->runs_samples + inst->n_samples;
 
   for (i = 0; i < n; i++)
     delays[i] = inst->peer_delays[get_runsbuf_index(inst, i - inst->runs_samples)] -
-                inst->peer_delays[inst->min_delay_sample];
+                min_delay;
 
-  /* Reset the counter when the regression fails or the sign changes */
-  if (!RGR_MultipleRegress(times_back, delays, offsets, n, &asymmetry) ||
-      asymmetry * inst->asymmetry_run < 0.0) {
-    inst->asymmetry_run = 0;
-    inst->asymmetry = 0.0;
-    return;
+  if (fabs(inst->fixed_asymmetry) <= MAX_ASYMMETRY) {
+    inst->asymmetry = inst->fixed_asymmetry;
+  } else {
+    if (!estimate_asymmetry(times_back, offsets, delays, n,
+                            &inst->asymmetry, &inst->asymmetry_run))
+      return;
   }
-
-  asymmetry = CLAMP(-MAX_ASYMMETRY, asymmetry, MAX_ASYMMETRY);
-
-  if (asymmetry <= -MIN_ASYMMETRY && inst->asymmetry_run > -MAX_ASYMMETRY_RUN)
-    inst->asymmetry_run--;
-  else if (asymmetry >= MIN_ASYMMETRY && inst->asymmetry_run < MAX_ASYMMETRY_RUN)
-    inst->asymmetry_run++;
-
-  if (abs(inst->asymmetry_run) < MIN_ASYMMETRY_RUN)
-    return;
 
   /* Correct the offsets */
   for (i = 0; i < n; i++)
-    offsets[i] -= asymmetry * delays[i];
-
-  inst->asymmetry = asymmetry;
+    offsets[i] -= inst->asymmetry * delays[i];
 }
 
 /* ================================================== */
@@ -771,47 +801,33 @@ SST_PredictOffset(SST_Stats inst, struct timespec *when)
 double
 SST_MinRoundTripDelay(SST_Stats inst)
 {
+  if (inst->fixed_min_delay > 0.0)
+    return inst->fixed_min_delay;
+
   if (!inst->n_samples)
     return DBL_MAX;
+
   return inst->peer_delays[inst->min_delay_sample];
 }
 
 /* ================================================== */
 
 int
-SST_IsGoodSample(SST_Stats inst, double offset, double delay,
-    double max_delay_dev_ratio, double clock_error, struct timespec *when)
+SST_GetDelayTestData(SST_Stats inst, struct timespec *sample_time,
+                     double *last_sample_ago, double *predicted_offset,
+                     double *min_delay, double *skew, double *std_dev)
 {
-  double elapsed, allowed_increase, delay_increase;
-
   if (inst->n_samples < 6)
-    return 1;
+    return 0;
 
-  elapsed = UTI_DiffTimespecsToDouble(when, &inst->offset_time);
+  *last_sample_ago = UTI_DiffTimespecsToDouble(sample_time, &inst->offset_time);
+  *predicted_offset = inst->estimated_offset +
+                      *last_sample_ago * inst->estimated_frequency;
+  *min_delay = SST_MinRoundTripDelay(inst);
+  *skew = inst->skew;
+  *std_dev = inst->std_dev;
 
-  /* Require that the ratio of the increase in delay from the minimum to the
-     standard deviation is less than max_delay_dev_ratio. In the allowed
-     increase in delay include also skew and clock_error. */
-    
-  allowed_increase = inst->std_dev * max_delay_dev_ratio +
-    elapsed * (inst->skew + clock_error);
-  delay_increase = (delay - SST_MinRoundTripDelay(inst)) / 2.0;
-
-  if (delay_increase < allowed_increase)
-    return 1;
-
-  offset -= inst->estimated_offset + elapsed * inst->estimated_frequency;
-
-  /* Before we decide to drop the sample, make sure the difference between
-     measured offset and predicted offset is not significantly larger than
-     the increase in delay */
-  if (fabs(offset) - delay_increase > allowed_increase)
-    return 1;
-
-  DEBUG_LOG("Bad sample: offset=%f delay=%f incr_delay=%f allowed=%f",
-            offset, delay, delay_increase, allowed_increase);
-
-  return 0;
+  return 1;
 }
 
 /* ================================================== */

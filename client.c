@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Lonnie Abelbeck  2016
- * Copyright (C) Miroslav Lichvar  2009-2016
+ * Copyright (C) Miroslav Lichvar  2009-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -1101,6 +1101,8 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       msg->data.ntp_source.max_delay_ratio = UTI_FloatHostToNetwork(data.params.max_delay_ratio);
       msg->data.ntp_source.max_delay_dev_ratio =
         UTI_FloatHostToNetwork(data.params.max_delay_dev_ratio);
+      msg->data.ntp_source.min_delay = UTI_FloatHostToNetwork(data.params.min_delay);
+      msg->data.ntp_source.asymmetry = UTI_FloatHostToNetwork(data.params.asymmetry);
       msg->data.ntp_source.offset = UTI_FloatHostToNetwork(data.params.offset);
       msg->data.ntp_source.flags = htonl(
           (data.params.online ? REQ_ADDSRC_ONLINE : 0) |
@@ -1111,6 +1113,8 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
           (data.params.sel_options & SRC_SELECT_REQUIRE ? REQ_ADDSRC_REQUIRE : 0));
+      memset(msg->data.ntp_source.reserved, 0, sizeof (msg->data.ntp_source.reserved));
+
       result = 1;
 
       break;
@@ -1124,7 +1128,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
 static int
 process_cmd_add_server(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_ADD_SERVER2);
+  msg->command = htons(REQ_ADD_SERVER3);
   return process_cmd_add_server_or_peer(msg, line);
 }
 
@@ -1133,7 +1137,7 @@ process_cmd_add_server(CMD_Request *msg, char *line)
 static int
 process_cmd_add_peer(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_ADD_PEER2);
+  msg->command = htons(REQ_ADD_PEER3);
   return process_cmd_add_server_or_peer(msg, line);
 }
 
@@ -3143,7 +3147,7 @@ main(int argc, char **argv)
   optind = 1;
 
   /* Parse short command-line options */
-  while ((opt = getopt(argc, argv, "46acdf:h:mnp:v")) != -1) {
+  while ((opt = getopt(argc, argv, "+46acdf:h:mnp:v")) != -1) {
     switch (opt) {
       case '4':
       case '6':

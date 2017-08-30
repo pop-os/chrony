@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009, 2012-2016
+ * Copyright (C) Miroslav Lichvar  2009, 2012-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -610,13 +610,17 @@ UTI_SockaddrFamilyToString(int family)
 char *
 UTI_TimeToLogForm(time_t t)
 {
-  struct tm stm;
+  struct tm *stm;
   char *result;
 
   result = NEXT_BUFFER;
 
-  stm = *gmtime(&t);
-  strftime(result, BUFFER_LENGTH, "%Y-%m-%d %H:%M:%S", &stm);
+  stm = gmtime(&t);
+
+  if (stm)
+    strftime(result, BUFFER_LENGTH, "%Y-%m-%d %H:%M:%S", stm);
+  else
+    snprintf(result, BUFFER_LENGTH, "INVALID    INVALID ");
 
   return result;
 }
@@ -641,6 +645,7 @@ UTI_GetNtp64Fuzz(NTP_int64 *ts, int precision)
   int start, bits;
 
   assert(precision >= -32 && precision <= 32);
+  assert(sizeof (*ts) == 8);
 
   start = sizeof (*ts) - (precision + 32 + 7) / 8;
   ts->hi = ts->lo = 0;
@@ -855,7 +860,7 @@ UTI_TimespecNetworkToHost(Timespec *src, struct timespec *dest)
 #endif
 
   nsec = ntohl(src->tv_nsec);
-  dest->tv_nsec = CLAMP(0U, nsec, 999999999U);
+  dest->tv_nsec = MIN(nsec, 999999999U);
 }
 
 /* ================================================== */

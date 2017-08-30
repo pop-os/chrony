@@ -38,7 +38,9 @@ extern void SST_Initialise(void);
 extern void SST_Finalise(void);
 
 /* This function creates a new instance of the statistics handler */
-extern SST_Stats SST_CreateInstance(uint32_t refid, IPAddr *addr, int min_samples, int max_samples);
+extern SST_Stats SST_CreateInstance(uint32_t refid, IPAddr *addr,
+                                    int min_samples, int max_samples,
+                                    double min_delay, double asymmetry);
 
 /* This function deletes an instance of the statistics handler. */
 extern void SST_DeleteInstance(SST_Stats inst);
@@ -124,10 +126,10 @@ extern double SST_PredictOffset(SST_Stats inst, struct timespec *when);
 /* Find the minimum round trip delay in the register */
 extern double SST_MinRoundTripDelay(SST_Stats inst);
 
-/* This routine determines if a new sample is good enough that it should be
-   accumulated */
-extern int SST_IsGoodSample(SST_Stats inst, double offset, double delay,
-   double max_delay_dev_ratio, double clock_error, struct timespec *when);
+/* Get data needed for testing NTP delay */
+extern int SST_GetDelayTestData(SST_Stats inst, struct timespec *sample_time,
+                                double *last_sample_ago, double *predicted_offset,
+                                double *min_delay, double *skew, double *std_dev);
 
 extern void SST_SaveToFile(SST_Stats inst, FILE *out);
 
