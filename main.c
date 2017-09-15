@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2012-2016
+ * Copyright (C) Miroslav Lichvar  2012-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -86,6 +86,10 @@ static void
 delete_pidfile(void)
 {
   const char *pidfile = CNF_GetPidFile();
+
+  if (!pidfile[0])
+    return;
+
   /* Don't care if this fails, there's not a lot we can do */
   unlink(pidfile);
 }
@@ -97,7 +101,7 @@ MAI_CleanupAndExit(void)
 {
   if (!initialised) exit(exit_status);
   
-  if (CNF_GetDumpOnExit()) {
+  if (CNF_GetDumpDir()[0] != '\0') {
     SRC_DumpSources();
   }
 
@@ -127,9 +131,8 @@ MAI_CleanupAndExit(void)
   delete_pidfile();
   
   CNF_Finalise();
-  LOG_Finalise();
-
   HSH_Finalise();
+  LOG_Finalise();
 
   exit(exit_status);
 }
@@ -242,55 +245,45 @@ post_init_rtc_hook(void *anything)
 }
 
 /* ================================================== */
-/* Return 1 if the process exists on the system. */
 
-static int
-does_process_exist(int pid)
-{
-  int status;
-  status = getsid(pid);
-  if (status >= 0) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-/* ================================================== */
-
-static int
-maybe_another_chronyd_running(int *other_pid)
+static void
+check_pidfile(void)
 {
   const char *pidfile = CNF_GetPidFile();
   FILE *in;
   int pid, count;
   
-  *other_pid = 0;
-
   in = fopen(pidfile, "r");
-  if (!in) return 0;
+  if (!in)
+    return;
 
   count = fscanf(in, "%d", &pid);
   fclose(in);
   
-  if (count != 1) return 0;
+  if (count != 1)
+    return;
 
-  *other_pid = pid;
-  return does_process_exist(pid);
-  
+  if (getsid(pid) < 0)
+    return;
+
+  LOG_FATAL("Another chronyd may already be running (pid=%d), check %s",
+            pid, pidfile);
 }
 
 /* ================================================== */
 
 static void
-write_lockfile(void)
+write_pidfile(void)
 {
   const char *pidfile = CNF_GetPidFile();
   FILE *out;
 
+  if (!pidfile[0])
+    return;
+
   out = fopen(pidfile, "w");
   if (!out) {
-    LOG_FATAL(LOGF_Main, "could not open lockfile %s for writing", pidfile);
+    LOG_FATAL("Could not open %s : %s", pidfile, strerror(errno));
   } else {
     fprintf(out, "%d\n", (int)getpid());
     fclose(out);
@@ -307,14 +300,14 @@ go_daemon(void)
   /* Create pipe which will the daemon use to notify the grandparent
      when it's initialised or send an error message */
   if (pipe(pipefd)) {
-    LOG_FATAL(LOGF_Main, "Could not detach, pipe failed : %s", strerror(errno));
+    LOG_FATAL("pipe() failed : %s", strerror(errno));
   }
 
   /* Does this preserve existing signal handlers? */
   pid = fork();
 
   if (pid < 0) {
-    LOG_FATAL(LOGF_Main, "Could not detach, fork failed : %s", strerror(errno));
+    LOG_FATAL("fork() failed : %s", strerror(errno));
   } else if (pid > 0) {
     /* In the 'grandparent' */
     char message[1024];
@@ -340,7 +333,7 @@ go_daemon(void)
     pid = fork();
 
     if (pid < 0) {
-      LOG_FATAL(LOGF_Main, "Could not detach, fork failed : %s", strerror(errno));
+      LOG_FATAL("fork() failed : %s", strerror(errno));
     } else if (pid > 0) {
       exit(0); /* In the 'parent' */
     } else {
@@ -348,7 +341,7 @@ go_daemon(void)
 
       /* Change current directory to / */
       if (chdir("/") < 0) {
-        LOG_FATAL(LOGF_Main, "Could not chdir to / : %s", strerror(errno));
+        LOG_FATAL("chdir() failed : %s", strerror(errno));
       }
 
       /* Don't keep stdin/out/err from before. But don't close
@@ -365,142 +358,176 @@ go_daemon(void)
 
 /* ================================================== */
 
+static void
+print_help(const char *progname)
+{
+      printf("Usage: %s [-4|-6] [-n|-d] [-q|-Q] [-r] [-R] [-s] [-t TIMEOUT] [-f FILE|COMMAND...]\n",
+             progname);
+}
+
+/* ================================================== */
+
+static void
+print_version(void)
+{
+  printf("chronyd (chrony) version %s (%s)\n", CHRONY_VERSION, CHRONYD_FEATURES);
+}
+
+/* ================================================== */
+
+static int
+parse_int_arg(const char *arg)
+{
+  int i;
+
+  if (sscanf(arg, "%d", &i) != 1)
+    LOG_FATAL("Invalid argument %s", arg);
+  return i;
+}
+
+/* ================================================== */
+
 int main
 (int argc, char **argv)
 {
   const char *conf_file = DEFAULT_CONF_FILE;
   const char *progname = argv[0];
-  char *user = NULL;
+  char *user = NULL, *log_file = NULL;
   struct passwd *pw;
-  int debug = 0, nofork = 0, address_family = IPADDR_UNSPEC;
-  int do_init_rtc = 0, restarted = 0, timeout = 0;
-  int other_pid;
+  int opt, debug = 0, nofork = 0, address_family = IPADDR_UNSPEC;
+  int do_init_rtc = 0, restarted = 0, client_only = 0, timeout = 0;
   int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
-  int system_log = 1;
+  int clock_control = 1, system_log = 1;
   int config_args = 0;
 
   do_platform_checks();
 
   LOG_Initialise();
 
-  /* Parse command line options */
-  while (++argv, (--argc)>0) {
-
-    if (!strcmp("-f", *argv)) {
-      ++argv, --argc;
-      conf_file = *argv;
-    } else if (!strcmp("-P", *argv)) {
-      ++argv, --argc;
-      if (argc == 0 || sscanf(*argv, "%d", &sched_priority) != 1) {
-        LOG_FATAL(LOGF_Main, "Bad scheduler priority");
-      }
-    } else if (!strcmp("-m", *argv)) {
-      lock_memory = 1;
-    } else if (!strcmp("-r", *argv)) {
-      reload = 1;
-    } else if (!strcmp("-R", *argv)) {
-      restarted = 1;
-    } else if (!strcmp("-u", *argv)) {
-      ++argv, --argc;
-      if (argc == 0) {
-        LOG_FATAL(LOGF_Main, "Missing user name");
-      } else {
-        user = *argv;
-      }
-    } else if (!strcmp("-F", *argv)) {
-      ++argv, --argc;
-      if (argc == 0 || sscanf(*argv, "%d", &scfilter_level) != 1)
-        LOG_FATAL(LOGF_Main, "Bad syscall filter level");
-    } else if (!strcmp("-s", *argv)) {
-      do_init_rtc = 1;
-    } else if (!strcmp("-v", *argv) || !strcmp("--version",*argv)) {
-      /* This write to the terminal is OK, it comes before we turn into a daemon */
-      printf("chronyd (chrony) version %s (%s)\n", CHRONY_VERSION, CHRONYD_FEATURES);
+  /* Parse (undocumented) long command-line options */
+  for (optind = 1; optind < argc; optind++) {
+    if (!strcmp("--help", argv[optind])) {
+      print_help(progname);
       return 0;
-    } else if (!strcmp("-n", *argv)) {
-      nofork = 1;
-    } else if (!strcmp("-d", *argv)) {
-      debug++;
-      nofork = 1;
-      system_log = 0;
-    } else if (!strcmp("-q", *argv)) {
-      ref_mode = REF_ModeUpdateOnce;
-      nofork = 1;
-      system_log = 0;
-    } else if (!strcmp("-Q", *argv)) {
-      ref_mode = REF_ModePrintOnce;
-      nofork = 1;
-      system_log = 0;
-    } else if (!strcmp("-t", *argv)) {
-      ++argv, --argc;
-      if (argc == 0 || sscanf(*argv, "%d", &timeout) != 1 || timeout <= 0)
-        LOG_FATAL(LOGF_Main, "Bad timeout");
-    } else if (!strcmp("-4", *argv)) {
-      address_family = IPADDR_INET4;
-    } else if (!strcmp("-6", *argv)) {
-      address_family = IPADDR_INET6;
-    } else if (!strcmp("-h", *argv) || !strcmp("--help", *argv)) {
-      printf("Usage: %s [-4|-6] [-n|-d] [-q|-Q] [-r] [-R] [-s] [-t TIMEOUT] [-f FILE|COMMAND...]\n",
-             progname);
+    } else if (!strcmp("--version", argv[optind])) {
+      print_version();
       return 0;
-    } else if (*argv[0] == '-') {
-      LOG_FATAL(LOGF_Main, "Unrecognized command line option [%s]", *argv);
-    } else {
-      /* Process remaining arguments and configuration lines */
-      config_args = argc;
-      break;
     }
   }
 
-  if (getuid() != 0) {
-    /* This write to the terminal is OK, it comes before we turn into a daemon */
-    fprintf(stderr,"Not superuser\n");
-    return 1;
+  optind = 1;
+
+  /* Parse short command-line options */
+  while ((opt = getopt(argc, argv, "46df:F:hl:mnP:qQrRst:u:vx")) != -1) {
+    switch (opt) {
+      case '4':
+      case '6':
+        address_family = opt == '4' ? IPADDR_INET4 : IPADDR_INET6;
+        break;
+      case 'd':
+        debug++;
+        nofork = 1;
+        system_log = 0;
+        break;
+      case 'f':
+        conf_file = optarg;
+        break;
+      case 'F':
+        scfilter_level = parse_int_arg(optarg);
+        break;
+      case 'l':
+        log_file = optarg;
+        break;
+      case 'm':
+        lock_memory = 1;
+        break;
+      case 'n':
+        nofork = 1;
+        break;
+      case 'P':
+        sched_priority = parse_int_arg(optarg);
+        break;
+      case 'q':
+        ref_mode = REF_ModeUpdateOnce;
+        nofork = 1;
+        client_only = 0;
+        system_log = 0;
+        break;
+      case 'Q':
+        ref_mode = REF_ModePrintOnce;
+        nofork = 1;
+        client_only = 1;
+        clock_control = 0;
+        system_log = 0;
+        break;
+      case 'r':
+        reload = 1;
+        break;
+      case 'R':
+        restarted = 1;
+        break;
+      case 's':
+        do_init_rtc = 1;
+        break;
+      case 't':
+        timeout = parse_int_arg(optarg);
+        break;
+      case 'u':
+        user = optarg;
+        break;
+      case 'v':
+        print_version();
+        return 0;
+      case 'x':
+        clock_control = 0;
+        break;
+      default:
+        print_help(progname);
+        return opt != 'h';
+    }
   }
+
+  if (getuid() && !client_only)
+    LOG_FATAL("Not superuser");
 
   /* Turn into a daemon */
   if (!nofork) {
     go_daemon();
   }
 
-  if (system_log) {
+  if (log_file) {
+    LOG_OpenFileLog(log_file);
+  } else if (system_log) {
     LOG_OpenSystemLog();
   }
   
   LOG_SetDebugLevel(debug);
   
-  LOG(LOGS_INFO, LOGF_Main, "chronyd version %s starting (%s)",
-      CHRONY_VERSION, CHRONYD_FEATURES);
+  LOG(LOGS_INFO, "chronyd version %s starting (%s)", CHRONY_VERSION, CHRONYD_FEATURES);
 
   DNS_SetAddressFamily(address_family);
 
-  CNF_Initialise(restarted);
+  CNF_Initialise(restarted, client_only);
 
   /* Parse the config file or the remaining command line arguments */
+  config_args = argc - optind;
   if (!config_args) {
     CNF_ReadFile(conf_file);
   } else {
-    do {
-      CNF_ParseLine(NULL, config_args - argc + 1, *argv);
-    } while (++argv, --argc);
+    for (; optind < argc; optind++)
+      CNF_ParseLine(NULL, config_args + optind - argc + 1, argv[optind]);
   }
 
-  /* Check whether another chronyd may already be running.  Do this after
-   * forking, so that message logging goes to the right place (i.e. syslog), in
-   * case this chronyd is being run from a boot script. */
-  if (maybe_another_chronyd_running(&other_pid)) {
-    LOG_FATAL(LOGF_Main, "Another chronyd may already be running (pid=%d), check lockfile (%s)",
-              other_pid, CNF_GetPidFile());
-  }
+  /* Check whether another chronyd may already be running */
+  check_pidfile();
 
-  /* Write our lockfile to prevent other chronyds running.  This has *GOT* to
-   * be done *AFTER* the daemon-creation fork() */
-  write_lockfile();
+  /* Write our pidfile to prevent other chronyds running */
+  write_pidfile();
 
   PRV_Initialise();
   LCL_Initialise();
   SCH_Initialise();
-  SYS_Initialise();
+  SYS_Initialise(clock_control);
   RTC_Initialise(do_init_rtc);
   SRC_Initialise();
   RCL_Initialise();
@@ -529,13 +556,13 @@ int main
   }
 
   if ((pw = getpwnam(user)) == NULL)
-    LOG_FATAL(LOGF_Main, "Could not get %s uid/gid", user);
+    LOG_FATAL("Could not get %s uid/gid", user);
 
   /* Create all directories before dropping root */
   CNF_CreateDirs(pw->pw_uid, pw->pw_gid);
 
-  /* Drop root privileges if the user has non-zero uid or gid */
-  if (pw->pw_uid || pw->pw_gid)
+  /* Drop root privileges if the specified user has a non-zero UID */
+  if (!geteuid() && (pw->pw_uid || pw->pw_gid))
     SYS_DropRoot(pw->pw_uid, pw->pw_gid);
 
   REF_Initialise();
@@ -564,7 +591,7 @@ int main
   REF_SetModeEndHandler(reference_mode_end);
   REF_SetMode(ref_mode);
 
-  if (timeout)
+  if (timeout > 0)
     SCH_AddTimeoutByDelay(timeout, quit_timeout, NULL);
 
   if (do_init_rtc) {
@@ -577,7 +604,7 @@ int main
      the scheduler. */
   SCH_MainLoop();
 
-  LOG(LOGS_INFO, LOGF_Main, "chronyd exiting");
+  LOG(LOGS_INFO, "chronyd exiting");
 
   MAI_CleanupAndExit();
 

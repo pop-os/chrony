@@ -31,7 +31,7 @@
 #include "addressing.h"
 #include "reference.h"
 
-extern void CNF_Initialise(int restarted);
+extern void CNF_Initialise(int restarted, int client_only);
 extern void CNF_Finalise(void);
 
 extern char *CNF_GetRtcDevice(void);
@@ -60,7 +60,6 @@ extern int CNF_GetLogRefclocks(void);
 extern int CNF_GetLogTempComp(void);
 extern char *CNF_GetKeysFile(void);
 extern char *CNF_GetRtcFile(void);
-extern int CNF_GetDumpOnExit(void);
 extern int CNF_GetManualEnabled(void);
 extern int CNF_GetCommandPort(void);
 extern int CNF_GetRtcOnUtc(void);
@@ -119,10 +118,18 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
+typedef enum {
+  CNF_HWTS_RXFILTER_ANY,
+  CNF_HWTS_RXFILTER_NONE,
+  CNF_HWTS_RXFILTER_NTP,
+  CNF_HWTS_RXFILTER_ALL,
+} CNF_HwTs_RxFilter;
+
 typedef struct {
   char *name;
   int minpoll;
   int nocrossts;
+  CNF_HwTs_RxFilter rxfilter;
   double precision;
   double tx_comp;
   double rx_comp;

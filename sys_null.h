@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Richard P. Curnow  1997-2002
+ * Copyright (C) Miroslav Lichvar  2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -21,23 +21,14 @@
 
   =======================================================================
 
-  Header file for memory functions
+  Header file for null clock driver
   */
 
-#ifndef GOT_MEMORY_H
-#define GOT_MEMORY_H
+#ifndef GOT_SYS_NULL_H
+#define GOT_SYS_NULL_H
 
-/* Wrappers checking for errors */
-extern void *Malloc(size_t size);
-extern void *Realloc(void *ptr, size_t size);
-extern void *Malloc2(size_t nmemb, size_t size);
-extern void *Realloc2(void *ptr, size_t nmemb, size_t size);
-extern char *Strdup(const char *s);
+extern void SYS_Null_Initialise(void);
 
-/* Convenient macros */
-#define MallocNew(T) ((T *) Malloc(sizeof(T)))
-#define MallocArray(T, n) ((T *) Malloc2(n, sizeof(T)))
-#define ReallocArray(T, n, x) ((T *) Realloc2((void *)(x), n, sizeof(T)))
-#define Free(x) free(x)
+extern void SYS_Null_Finalise(void);
 
-#endif /* GOT_MEMORY_H */
+#endif

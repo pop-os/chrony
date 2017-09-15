@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2001
  * Copyright (C) J. Hannken-Illjes  2001
- * Copyright (C) Bryan Christianson 2015
+ * Copyright (C) Bryan Christianson  2015, 2017
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -45,6 +45,15 @@
 #include "sched.h"
 #include "privops.h"
 #include "util.h"
+
+#ifdef HAVE_MACOS_SYS_TIMEX
+#include <dlfcn.h>
+#include "sys_netbsd.h"
+#include "sys_timex.h"
+
+static int have_ntp_adjtime = 0;
+static int have_bad_adjtime = 0;
+#endif
 
 /* ================================================== */
 
@@ -116,7 +125,7 @@ clock_initialise(void)
   newadj.tv_usec = 0;
 
   if (PRV_AdjustTime(&newadj, &oldadj) < 0) {
-    LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
+    LOG_FATAL("adjtime() failed");
   }
 }
 
@@ -154,10 +163,9 @@ start_adjust(void)
 
   predicted_error = (current_drift_removal_interval - drift_removal_elapsed) / 2.0 * current_freq;
 
-  DEBUG_LOG(LOGF_SysMacOSX, "drift_removal_elapsed: %.3f current_drift_removal_interval: %.3f predicted_error: %.3f",
-                            1.0e6 * drift_removal_elapsed,
-                            1.0e6 * current_drift_removal_interval,
-                            1.0e6 * predicted_error);
+  DEBUG_LOG("drift_removal_elapsed: %.3f current_drift_removal_interval: %.3f predicted_error: %.3f",
+            1.0e6 * drift_removal_elapsed, 1.0e6 * current_drift_removal_interval,
+            1.0e6 * predicted_error);
 
   adjust_required = - (accrued_error + offset_register + predicted_error);
 
@@ -166,7 +174,7 @@ start_adjust(void)
   rounding_error = adjust_required - adjustment_requested;
 
   if (PRV_AdjustTime(&newadj, &oldadj) < 0) {
-    LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
+    LOG_FATAL("adjtime() failed");
   }
 
   old_adjust_remaining = UTI_TimevalToDouble(&oldadj);
@@ -190,7 +198,7 @@ stop_adjust(void)
   zeroadj.tv_usec = 0;
 
   if (PRV_AdjustTime(&zeroadj, &remadj) < 0) {
-    LOG_FATAL(LOGF_SysMacOSX, "adjtime() failed");
+    LOG_FATAL("adjtime() failed");
   }
 
   LCL_ReadRawTime(&T1);
@@ -239,7 +247,7 @@ apply_step_offset(double offset)
   UTI_TimespecToTimeval(&new_time, &new_time_tv);
 
   if (PRV_SetTime(&new_time_tv, NULL) < 0) {
-    DEBUG_LOG(LOGF_SysMacOSX, "settimeofday() failed");
+    DEBUG_LOG("settimeofday() failed");
     return 0;
   }
 
@@ -338,14 +346,14 @@ set_sync_status(int synchronised, double est_error, double max_error)
         /* update the RTC by applying a step of 0.0 secs */
         apply_step_offset(0.0);
         last_rtc_sync = now;
-        DEBUG_LOG(LOGF_SysMacOSX, "rtc synchronised");
+        DEBUG_LOG("rtc synchronised");
       }
     }
 
     interval = ERROR_WEIGHT * est_error / (fabs(current_freq) + FREQUENCY_RES);
     drift_removal_interval = MAX(interval, DRIFT_REMOVAL_INTERVAL_MIN);
 
-    DEBUG_LOG(LOGF_SysMacOSX, "est_error: %.3f current_freq: %.3f est drift_removal_interval: %.3f act drift_removal_interval: %.3f",
+    DEBUG_LOG("est_error: %.3f current_freq: %.3f est drift_removal_interval: %.3f act drift_removal_interval: %.3f",
                 est_error * 1.0e6, current_freq * 1.0e6, interval, drift_removal_interval);
   }
 
@@ -389,7 +397,7 @@ set_realtime(void)
           THREAD_TIME_CONSTRAINT_POLICY_COUNT);
 
   if (kr != KERN_SUCCESS) {
-    LOG(LOGS_WARN, LOGF_SysMacOSX, "Cannot set real-time priority: %d", kr);
+    LOG(LOGS_WARN, "Cannot set real-time priority: %d", kr);
     return -1;
   }
   return 0;
@@ -418,8 +426,8 @@ void SYS_MacOSX_DropRoot(uid_t uid, gid_t gid)
 
 /* ================================================== */
 
-void
-SYS_MacOSX_Initialise(void)
+static void
+legacy_MacOSX_Initialise(void)
 {
   clock_initialise();
 
@@ -435,8 +443,8 @@ SYS_MacOSX_Initialise(void)
 
 /* ================================================== */
 
-void
-SYS_MacOSX_Finalise(void)
+static void
+legacy_MacOSX_Finalise(void)
 {
   SCH_RemoveTimeout(drift_removal_id);
 
@@ -444,5 +452,68 @@ SYS_MacOSX_Finalise(void)
 }
 
 /* ================================================== */
+
+#ifdef HAVE_MACOS_SYS_TIMEX
+/*
+    Test adjtime() to see if Apple have fixed the signed/unsigned bug
+*/
+static int
+test_adjtime()
+{
+  struct timeval tv1 = {-1, 0};
+  struct timeval tv2 = {0, 0};
+  struct timeval tv;
+
+  if (PRV_AdjustTime(&tv1, &tv) != 0) {
+    return 0;
+  }
+  if (PRV_AdjustTime(&tv2, &tv) != 0) {
+    return 0;
+  }
+  if (tv.tv_sec < -1 || tv.tv_sec > 1) {
+    return 0;
+  }
+  return 1;
+}
+#endif
+
+/* ================================================== */
+
+void
+SYS_MacOSX_Initialise(void)
+{
+#ifdef HAVE_MACOS_SYS_TIMEX
+  have_ntp_adjtime = (dlsym(RTLD_NEXT, "ntp_adjtime") != NULL);
+  if (have_ntp_adjtime) {
+    have_bad_adjtime = !test_adjtime();
+    if (have_bad_adjtime) {
+      LOG(LOGS_WARN, "adjtime() is buggy - using timex driver");
+      SYS_Timex_Initialise();
+    } else {
+      SYS_NetBSD_Initialise();
+    }
+    return;
+  }
+#endif
+  legacy_MacOSX_Initialise();
+}
+
+/* ================================================== */
+
+void
+SYS_MacOSX_Finalise(void)
+{
+#ifdef HAVE_MACOS_SYS_TIMEX
+  if (have_ntp_adjtime) {
+    if (have_bad_adjtime) {
+      SYS_Timex_Finalise();
+    } else {
+      SYS_NetBSD_Finalise();
+    }
+    return;
+  }
+#endif
+  legacy_MacOSX_Finalise();
+}
 
 #endif

@@ -208,7 +208,7 @@ update_stages(void)
   stages[2].length = l3;
 
   for (i = 0; i < NUM_STAGES; i++) {
-    DEBUG_LOG(LOGF_Smooth, "Smooth stage %d wander %e length %f",
+    DEBUG_LOG("Smooth stage %d wander %e length %f",
               i + 1, stages[i].wander, stages[i].length);
   }
 }
@@ -230,7 +230,7 @@ update_smoothing(struct timespec *now, double offset, double freq)
 
   update_stages();
 
-  DEBUG_LOG(LOGF_Smooth, "Smooth offset %e freq %e", smooth_offset, smooth_freq);
+  DEBUG_LOG("Smooth offset %e freq %e", smooth_offset, smooth_freq);
 }
 
 static void
@@ -246,7 +246,8 @@ handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
       update_smoothing(cooked, doffset, dfreq);
   }
 
-  UTI_AdjustTimespec(&last_update, cooked, &last_update, &delta, dfreq, doffset);
+  if (!UTI_IsZeroTimespec(&last_update))
+    UTI_AdjustTimespec(&last_update, cooked, &last_update, &delta, dfreq, doffset);
 }
 
 void SMT_Initialise(void)
@@ -263,6 +264,8 @@ void SMT_Initialise(void)
   /* Convert from ppm */
   max_freq *= 1e-6;
   max_wander *= 1e-6;
+
+  UTI_ZeroTimespec(&last_update);
 
   LCL_AddParameterChangeHandler(handle_slew, NULL);
 }
@@ -295,7 +298,7 @@ SMT_Activate(struct timespec *now)
   if (!enabled || !locked)
     return;
 
-  LOG(LOGS_INFO, LOGF_Smooth, "Time smoothing activated%s", leap_only_mode ?
+  LOG(LOGS_INFO, "Time smoothing activated%s", leap_only_mode ?
       " (leap seconds only)" : "");
   locked = 0;
   last_update = *now;

@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2014
+ * Copyright (C) Miroslav Lichvar  2014, 2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -37,7 +37,7 @@ Malloc(size_t size)
 
   r = malloc(size);
   if (!r && size)
-    LOG_FATAL(LOGF_Memory, "Could not allocate memory");
+    LOG_FATAL("Could not allocate memory");
 
   return r;
 }
@@ -49,9 +49,35 @@ Realloc(void *ptr, size_t size)
 
   r = realloc(ptr, size);
   if (!r && size)
-    LOG_FATAL(LOGF_Memory, "Could not allocate memory");
+    LOG_FATAL("Could not allocate memory");
 
   return r;
+}
+
+static size_t
+get_array_size(size_t nmemb, size_t size)
+{
+  size_t array_size;
+
+  array_size = nmemb * size;
+
+  /* Check for overflow */
+  if (nmemb > 0 && array_size / nmemb != size)
+    LOG_FATAL("Could not allocate memory");
+
+  return array_size;
+}
+
+void *
+Malloc2(size_t nmemb, size_t size)
+{
+  return Malloc(get_array_size(nmemb, size));
+}
+
+void *
+Realloc2(void *ptr, size_t nmemb, size_t size)
+{
+  return Realloc(ptr, get_array_size(nmemb, size));
 }
 
 char *
@@ -61,7 +87,7 @@ Strdup(const char *s)
 
   r = strdup(s);
   if (!r)
-    LOG_FATAL(LOGF_Memory, "Could not allocate memory");
+    LOG_FATAL("Could not allocate memory");
 
   return r;
 }

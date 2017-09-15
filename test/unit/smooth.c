@@ -29,7 +29,7 @@ test_unit(void)
   double offset, freq, wander;
   char conf[] = "smoothtime 300 0.01";
 
-  CNF_Initialise(0);
+  CNF_Initialise(0, 0);
   CNF_ParseLine(NULL, 1, conf);
 
   LCL_Initialise();
@@ -40,7 +40,7 @@ test_unit(void)
     UTI_ZeroTimespec(&ts);
     SMT_Reset(&ts);
 
-    DEBUG_LOG(0, "iteration %d", i);
+    DEBUG_LOG("iteration %d", i);
 
     offset = (random() % 1000000 - 500000) / 1.0e6;
     freq = (random() % 1000000 - 500000) / 1.0e9;

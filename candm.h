@@ -97,7 +97,9 @@
 #define REQ_NTP_DATA 57
 #define REQ_ADD_SERVER2 58
 #define REQ_ADD_PEER2 59
-#define N_REQUEST_TYPES 60
+#define REQ_ADD_SERVER3 60
+#define REQ_ADD_PEER3 61
+#define N_REQUEST_TYPES 62
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -267,8 +269,11 @@ typedef struct {
   Float max_delay;
   Float max_delay_ratio;
   Float max_delay_dev_ratio;
+  Float min_delay;
+  Float asymmetry;
   Float offset;
   uint32_t flags;
+  uint32_t reserved[4];
   int32_t EOR;
 } REQ_NTP_Source;
 
@@ -362,8 +367,9 @@ typedef struct {
    domain socket.
 
    Version 6 (no authentication) : changed format of client accesses by index
-   (using new request/reply types), new fields and flags in NTP source request
-   and report, new commands: ntpdata, refresh, serverstats
+   (using new request/reply types) and manual timestamp, new fields and flags
+   in NTP source request and report, new commands: ntpdata, refresh,
+   serverstats
  */
 
 #define PROTO_VERSION_NUMBER 6
@@ -461,7 +467,8 @@ typedef struct {
 #define RPY_SERVER_STATS 14
 #define RPY_CLIENT_ACCESSES_BY_INDEX2 15
 #define RPY_NTP_DATA 16
-#define N_REPLY_TYPES 17
+#define RPY_MANUAL_TIMESTAMP2 17
+#define N_REPLY_TYPES 18
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -569,7 +576,7 @@ typedef struct {
 } RPY_Rtc;
 
 typedef struct {
-  uint32_t centiseconds;
+  Float offset;
   Float dfreq_ppm;
   Float new_afreq_ppm;
   int32_t EOR;

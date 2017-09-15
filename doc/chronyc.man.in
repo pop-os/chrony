@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-01-31
+.\"      Date: 2017-09-15
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2017-01-31" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2017-09-15" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -269,7 +269,7 @@ computer is correct) is given by:
 .RS 4
 .\}
 .nf
-clock_error <= root_dispersion + (0.5 * |root_delay|)
+clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay)
 .fi
 .if n \{\
 .RE
@@ -1775,17 +1775,11 @@ purged. An example of how to do this is shown below.
 \fBdump\fP
 .RS 4
 The \fBdump\fP command causes \fBchronyd\fP to write its current history of
-measurements for each of its sources to dump files, either for inspection or to
-support the \fB\-r\fP option when \fBchronyd\fP is restarted.
-.sp
-The \fBdump\fP command is somewhat equivalent to the
-\fBdumponexit\fP directive in the configuration
-file.
-.sp
-To use the \fBdump\fP command, you might want to configure the name of the
-directory into which the dump files will be written. This can only be
-done in the configuration file with the \fBdumpdir\fP
-directive.
+measurements for each of its sources to dump files in the directory specified
+in the configuration file by the \fBdumpdir\fP
+directive. Note that \fBchronyd\fP does this automatically when it exits. This
+command is mainly useful for inspection of the history whilst \fBchronyd\fP is
+running.
 .RE
 .sp
 \fBrekey\fP

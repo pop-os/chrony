@@ -4,10 +4,11 @@
 void test_unit(void) {
   NTP_int64 ntp_ts, ntp_fuzz;
   struct timespec ts, ts2;
+  struct sockaddr_un sun;
   double x, y;
   Float f;
   int i, j, c;
-  char buf[16];
+  char buf[16], *s;
 
   for (i = -31; i < 31; i++) {
     x = pow(2.0, i);
@@ -42,6 +43,10 @@ void test_unit(void) {
   ntp_ts.hi = htonl(JAN_1970);
   ntp_ts.lo = 0xffffffff;
   UTI_Ntp64ToTimespec(&ntp_ts, &ts);
+  TEST_CHECK(ts.tv_sec == 0);
+  TEST_CHECK(ts.tv_nsec == 999999999);
+
+  UTI_AddDoubleToTimespec(&ts, 1e-9, &ts);
   TEST_CHECK(ts.tv_sec == 1);
   TEST_CHECK(ts.tv_nsec == 0);
 
@@ -145,4 +150,18 @@ void test_unit(void) {
       c++;
   }
   TEST_CHECK(c > 46000 && c < 48000);
+
+  for (i = 1; i < 2 * BUFFER_LENGTH; i++) {
+    sun.sun_family = AF_UNIX;
+    for (j = 0; j + 1 < i && j + 1 < sizeof (sun.sun_path); j++)
+      sun.sun_path[j] = 'A' + j % 26;
+    sun.sun_path[j] = '\0';
+    s = UTI_SockaddrToString((struct sockaddr *)&sun);
+    if (i <= BUFFER_LENGTH) {
+      TEST_CHECK(!strcmp(s, sun.sun_path));
+    } else {
+      TEST_CHECK(!strncmp(s, sun.sun_path, BUFFER_LENGTH - 2));
+      TEST_CHECK(s[BUFFER_LENGTH - 2] == '>');
+    }
+  }
 }

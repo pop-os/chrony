@@ -30,7 +30,7 @@
 #define GOT_SYS_H
 
 /* Called at the start of the run to do initialisation */
-extern void SYS_Initialise(void);
+extern void SYS_Initialise(int clock_control);
 
 /* Called at the end of the run to do final clean-up */
 extern void SYS_Finalise(void);

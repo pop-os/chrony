@@ -2,7 +2,7 @@
 //
 // Copyright (C) Richard P. Curnow  1997-2003
 // Copyright (C) Stephen Wadeley  2016
-// Copyright (C) Miroslav Lichvar  2009-2016
+// Copyright (C) Miroslav Lichvar  2009-2017
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of version 2 of the GNU General Public License as
@@ -216,7 +216,7 @@ An absolute bound on the computer's clock accuracy (assuming the stratum-1
 computer is correct) is given by:
 +
 ----
-clock_error <= root_dispersion + (0.5 * |root_delay|)
+clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay)
 ----
 *Update interval*:::
 This is the interval between the last two clock updates.
@@ -1118,17 +1118,11 @@ purged. An example of how to do this is shown below.
 
 [[dump]]*dump*::
 The *dump* command causes *chronyd* to write its current history of
-measurements for each of its sources to dump files, either for inspection or to
-support the *-r* option when *chronyd* is restarted.
-+
-The *dump* command is somewhat equivalent to the
-<<chrony.conf.adoc#dumponexit,*dumponexit*>> directive in the configuration
-file.
-+
-To use the *dump* command, you might want to configure the name of the
-directory into which the dump files will be written. This can only be
-done in the configuration file with the <<chrony.conf.adoc#dumpdir,*dumpdir*>>
-directive.
+measurements for each of its sources to dump files in the directory specified
+in the configuration file by the <<chrony.conf.adoc#dumpdir,*dumpdir*>>
+directive. Note that *chronyd* does this automatically when it exits. This
+command is mainly useful for inspection of the history whilst *chronyd* is
+running.
 
 [[rekey]]*rekey*::
 The *rekey* command causes *chronyd* to re-read the key file specified in the

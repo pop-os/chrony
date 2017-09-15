@@ -37,6 +37,7 @@ typedef struct {
   int driver_poll;
   int poll;
   int filter_length;
+  int pps_forced;
   int pps_rate;
   int min_samples;
   int max_samples;
@@ -48,6 +49,7 @@ typedef struct {
   double delay;
   double precision;
   double max_dispersion;
+  double pulse_width;
 } RefclockParameters;
 
 typedef struct RCL_Instance_Record *RCL_Instance;
@@ -71,6 +73,9 @@ extern char *RCL_GetDriverParameter(RCL_Instance instance);
 extern char *RCL_GetDriverOption(RCL_Instance instance, char *name);
 extern int RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset, int leap);
 extern int RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second);
+extern int RCL_AddCookedPulse(RCL_Instance instance, struct timespec *cooked_time,
+                              double second, double dispersion, double raw_correction);
 extern double RCL_GetPrecision(RCL_Instance instance);
+extern int RCL_GetDriverPoll(RCL_Instance instance);
 
 #endif

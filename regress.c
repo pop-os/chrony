@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011, 2016
+ * Copyright (C) Miroslav Lichvar  2011, 2016-2017
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -34,7 +34,7 @@
 #include "logging.h"
 #include "util.h"
 
-#define MAX_POINTS 128
+#define MAX_POINTS 64
 
 void
 RGR_WeightedRegression
@@ -285,7 +285,7 @@ RGR_FindBestRegression
         n - start <= min_samples) {
       if (start != resid_start) {
         /* Ignore extra samples in returned nruns */
-        nruns = n_runs_from_residuals(resid - resid_start + start, n - start);
+        nruns = n_runs_from_residuals(resid + (start - resid_start), n - start);
       }
       break;
     } else {
@@ -340,7 +340,7 @@ RGR_FindBestRegression
    0-521-43108-5). */
 
 static double
-find_ordered_entry_with_flags(double *x, int n, int index, int *flags)
+find_ordered_entry_with_flags(double *x, int n, int index, char *flags)
 {
   int u, v, l, r;
   double temp;
@@ -403,9 +403,9 @@ find_ordered_entry_with_flags(double *x, int n, int index, int *flags)
 static double
 find_ordered_entry(double *x, int n, int index)
 {
-  int flags[MAX_POINTS];
+  char flags[MAX_POINTS];
 
-  memset(flags, 0, n * sizeof(int));
+  memset(flags, 0, n * sizeof (flags[0]));
   return find_ordered_entry_with_flags(x, n, index, flags);
 }
 #endif
@@ -417,9 +417,9 @@ static double
 find_median(double *x, int n)
 {
   int k;
-  int flags[MAX_POINTS];
+  char flags[MAX_POINTS];
 
-  memset(flags, 0, n*sizeof(int));
+  memset(flags, 0, n * sizeof (flags[0]));
   k = n>>1;
   if (n&1) {
     return find_ordered_entry_with_flags(x, n, k, flags);
@@ -427,6 +427,19 @@ find_median(double *x, int n)
     return 0.5 * (find_ordered_entry_with_flags(x, n, k, flags) +
                   find_ordered_entry_with_flags(x, n, k-1, flags));
   }
+}
+
+/* ================================================== */
+
+double
+RGR_FindMedian(double *x, int n)
+{
+  double tmp[MAX_POINTS];
+
+  assert(n > 0 && n <= MAX_POINTS);
+  memcpy(tmp, x, n * sizeof (tmp[0]));
+
+  return find_median(tmp, n);
 }
 
 /* ================================================== */
@@ -509,7 +522,7 @@ RGR_FindBestRobustRegression
   double mx, dx, my, dy;
   int nruns = 0;
 
-  assert(n < MAX_POINTS);
+  assert(n <= MAX_POINTS);
 
   if (n < 2) {
     return 0;
@@ -566,24 +579,18 @@ RGR_FindBestRobustRegression
        Estimate standard deviation of b and expand range about b based
        on that. */
     sb = sqrt(s2 * W/V);
-    if (sb > tol) {
-      incr = 3.0 * sb;
-    } else {
-      incr = 3.0 * tol;
-    }
+    incr = MAX(sb, tol);
   
-    blo = b;
-    bhi = b;
-
     do {
-      /* Make sure incr is significant to blo and bhi */
-      while (bhi + incr == bhi || blo - incr == blo) {
-        incr *= 2;
-      }
+      incr *= 2.0;
 
-      blo -= incr;
-      bhi += incr;
-      
+      /* Give up if the interval is too large */
+      if (incr > 100.0)
+        return 0;
+
+      blo = b - incr;
+      bhi = b + incr;
+
       /* We don't want 'a' yet */
       eval_robust_residual(x + start, y + start, n_points, blo, &a, &rlo);
       eval_robust_residual(x + start, y + start, n_points, bhi, &a, &rhi);
@@ -594,6 +601,8 @@ RGR_FindBestRobustRegression
     /* OK, so the root for b lies in (blo, bhi). Start bisecting */
     do {
       bmid = 0.5 * (blo + bhi);
+      if (!(blo < bmid && bmid < bhi))
+        break;
       eval_robust_residual(x + start, y + start, n_points, bmid, &a, &rmid);
       if (rmid == 0.0) {
         break;
@@ -606,7 +615,7 @@ RGR_FindBestRobustRegression
       } else {
         assert(0);
       }
-    } while ((bhi - blo) > tol && (bmid - blo) * (bhi - bmid) > 0.0);
+    } while (bhi - blo > tol);
 
     *b0 = a;
     *b1 = bmid;
