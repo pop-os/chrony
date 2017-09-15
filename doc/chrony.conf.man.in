@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-08-29
+.\"      Date: 2017-09-15
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2017-08-29" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2017-09-15" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -669,7 +669,7 @@ This option specifies the width of the pulses (in seconds). It is used to
 filter PPS samples when the driver provides samples for both rising and falling
 edges. Note that it reduces the maximum allowed error of the time source which
 completes the PPS samples. If the duty cycle is configurable, 50% should be
-prefered in order to maximise the allowed error.
+preferred in order to maximise the allowed error.
 .RE
 .sp
 \fBpps\fP
