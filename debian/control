@@ -16,6 +16,7 @@ Build-Depends: debhelper (>= 11),
 Homepage: https://chrony.tuxfamily.org
 Vcs-Git: https://anonscm.debian.org/git/collab-maint/chrony.git
 Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/chrony.git
+Rules-Requires-Root: no
 
 Package: chrony
 Architecture: linux-any
