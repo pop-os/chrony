@@ -67,9 +67,6 @@ case "$1" in
                 ucfr chrony /etc/chrony/chrony.keys
             fi
         fi
-
-        # obsolete, instead use logrotate
-        rm -rf /etc/cron.weekly/chrony
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
