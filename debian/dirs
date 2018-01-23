@@ -1,3 +1,4 @@
+etc/apparmor.d/force-complain
 etc/chrony
 etc/logrotate.d
 etc/NetworkManager/dispatcher.d

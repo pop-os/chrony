@@ -1,0 +1,31 @@
+#!/bin/sh
+# preinst script for chrony
+#
+# see: dh_installdeb(1)
+
+set -e
+
+# targets: install|upgrade|abort-upgrade
+
+case "$1" in
+    upgrade)
+        APP_PROFILE="usr.sbin.chronyd"
+        APP_CONFFILE="/etc/apparmor.d/$APP_PROFILE"
+        APP_COMPLAIN="/etc/apparmor.d/force-complain/$APP_PROFILE"
+        # force-complain on upgrade from pre-shipped profile
+        if dpkg --compare-versions "$2" lt "3.2-1ubuntu1" ; then
+            mkdir -p `dirname "$APP_COMPLAIN"` 2>/dev/null || true
+            ln -sf "$APP_CONFFILE" "$APP_COMPLAIN"
+        fi
+    ;;
+
+    install|abort-upgrade)
+    ;;
+
+    *)
+        echo "preinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0
