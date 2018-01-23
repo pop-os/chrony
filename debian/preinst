@@ -13,7 +13,7 @@ case "$1" in
         APP_CONFFILE="/etc/apparmor.d/$APP_PROFILE"
         APP_COMPLAIN="/etc/apparmor.d/force-complain/$APP_PROFILE"
         # force-complain on upgrade from pre-shipped profile
-        if dpkg --compare-versions "$2" lt "3.2-1ubuntu1" ; then
+        if dpkg --compare-versions "$2" lt "3.2-2" ; then
             mkdir -p `dirname "$APP_COMPLAIN"` 2>/dev/null || true
             ln -sf "$APP_CONFFILE" "$APP_COMPLAIN"
         fi
