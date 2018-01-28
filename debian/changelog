@@ -1,3 +1,33 @@
+chrony (3.2-2) unstable; urgency=medium
+
+  * Initial AppArmor profile for chronyd. Thanks to Jamie
+    Strandboge <jamie@ubuntu.com>. (Closes: #888038)
+
+  * debian/compat:
+    - Bump to debhelper compat 11.
+
+  * debian/control:
+    - Bump standard-version to 4.1.3 (no changes required).
+    - Build depend on debhelper ≥ 11.
+    - Set “Rules-Requires-Root: no”.
+    - Move Vcs-* to salsa.debian.org.
+
+  * debian/copyright:
+    - Add myself as a copyright holder for 2018.
+
+  * debian/postinst:
+    - Don’t force removal of cron file since it doesn’t exist anymore.
+
+  * debian/preinst:
+    - Update the chrony version on which to act.
+    - Add the debhelper token.
+
+  * debian/usr.sbin.chronyd:
+    - Improve AppArmor profile to support more chronyd features and ease
+    portability with other distros.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 28 Jan 2018 19:33:46 +0100
+
 chrony (3.2-1) unstable; urgency=medium
 
   * Import upstream version 3.2:
