@@ -12,6 +12,8 @@
   capability setgid,
   capability sys_nice,
   capability sys_resource,
+  # for /run/chrony to be created
+  capability chown,
 
   /usr/sbin/chronyd mr,
 
