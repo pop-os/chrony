@@ -1,3 +1,19 @@
+chrony (3.2-3) unstable; urgency=medium
+
+  [ Christian Ehrhardt ]
+  * debian/chrony.default:
+    - Mention systemd service file in the comment.
+
+  * debian/chrony.service:
+    - Support the DAEMON_OPTS variable from “/etc/default/chrony” in systemd
+    environment. (LP: #1746081, Closes: #889012)
+
+  * debian/usr.sbin.chronyd:
+    - Allow the creation of /run/chrony on demand.
+    (LP: #1746444, Closes: #889011)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 07 Feb 2018 21:27:09 +0100
+
 chrony (3.2-2) unstable; urgency=medium
 
   * Initial AppArmor profile for chronyd. Thanks to Jamie
