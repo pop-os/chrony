@@ -1,2 +1,3 @@
-debian/chrony.conf    usr/share/chrony
+debian/chrony.conf usr/share/chrony
+debian/chrony-helper usr/lib/chrony
 debian/usr.sbin.chronyd etc/apparmor.d
