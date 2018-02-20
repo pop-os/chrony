@@ -27,6 +27,7 @@ Depends: ${misc:Depends},
  iproute2 [linux-any],
  lsb-base,
  adduser
+Suggests: dnsutils
 Conflicts: time-daemon, ntp
 Provides: time-daemon
 Replaces: time-daemon
