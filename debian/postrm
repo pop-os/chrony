@@ -22,6 +22,7 @@ case "$1" in
             fi
         fi
         rm -rf /etc/chrony
+        rm -rf /run/chrony || true
         rm -rf /var/lib/chrony
         rm -rf /var/log/chrony
         # Remove "_chrony" system user/group
