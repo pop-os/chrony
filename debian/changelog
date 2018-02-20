@@ -1,3 +1,53 @@
+chrony (3.2-4) unstable; urgency=medium
+
+  * debian/changelog:
+    - Remove trailing spaces.
+
+  * debian/chrony-dnssrv@.service:
+    - Use NTP servers obtained from DNS SRV records.
+
+  * debian/chrony-dnssrv@.timer:
+    - Periodic lookup of DNS SRV records.
+
+  * debian/chrony-helper:
+    - New helper script to make use of NTP servers obtained from DHCP and
+    _ntp._udp DNS SRV records.
+
+  * debian/chrony.dhcp:
+    - Add a dhclient-exit-hook script to add/remove NTP servers depending
+    on the operations invoked by the DHCP client. (Closes: #889656)
+
+  * debian/chrony.service:
+    - Run “/usr/lib/chrony/chrony-helper update-daemon” after starting chronyd.
+
+  * debian/control:
+    - Suggest dnsutils. The dig utility is used to update files with NTP
+    servers from DNS SRV records.
+
+  * debian/init:
+    - Run “/usr/lib/chrony/chrony-helper update-daemon” after starting chronyd.
+
+  * debian/install:
+    - Install the chrony-helper script in /usr/lib/chrony.
+    - Install chrony-dnssrv@.* files in /lib/systemd/system.
+
+  * debian/postinst:
+    - Don’t use recursive chown as this is vulnerable to hardlink attacks on
+    mainline, non-Debian kernels that do not have fs.protected_hardlinks=1.
+    Thanks Lintian!
+
+  * debian/postrm:
+    - Remove “/run/chrony” on purge.
+
+  * debian/rules:
+    - Install the dhclient-exit-hook script in /etc/dhcp/dhclient-enter-hooks.
+
+  * debian/tests/:
+    - Use autopkgtest to ensure that chronyd can use NTP servers obtained from
+    DHCP servers.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 20 Feb 2018 18:27:10 +0100
+
 chrony (3.2-3) unstable; urgency=medium
 
   [ Christian Ehrhardt ]
