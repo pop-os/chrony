@@ -27,9 +27,9 @@ case "$1" in
         # subfiles to "_chrony" only if the user has not set the "user"
         # directive in chrony.conf
         if ! grep "^user" /etc/chrony/chrony.conf > /dev/null 2>&1; then
-            chown -R _chrony:_chrony /var/lib/chrony
+            chown _chrony:_chrony /var/lib/chrony
             if [ -d /var/log/chrony ]; then
-                chown -R _chrony:_chrony /var/log/chrony
+                chown _chrony:_chrony /var/log/chrony
             fi
         fi
 
