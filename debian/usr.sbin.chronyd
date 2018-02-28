@@ -32,11 +32,11 @@
 
   # rtc
   /etc/adjtime r,
-  /dev/rtc{,[0-9]*} r,
+  /dev/rtc{,[0-9]*} rw,
 
   # gps devices
-  /dev/pps[0-9]* r,
-  /dev/ptp[0-9]* r,
+  /dev/pps[0-9]* rw,
+  /dev/ptp[0-9]* rw,
 
   # For use with clocks that report via shared memory (e.g. gpsd),
   # you may need to give ntpd access to all of shared memory, though
