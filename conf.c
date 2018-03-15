@@ -681,7 +681,7 @@ static void
 parse_refclock(char *line)
 {
   int n, poll, dpoll, filter_length, pps_rate, min_samples, max_samples, sel_options;
-  int max_lock_age, pps_forced;
+  int max_lock_age, pps_forced, stratum, tai;
   uint32_t ref_id, lock_ref_id;
   double offset, delay, precision, max_dispersion, pulse_width;
   char *p, *cmd, *name, *param;
@@ -704,6 +704,8 @@ parse_refclock(char *line)
   ref_id = 0;
   max_lock_age = 2;
   lock_ref_id = 0;
+  stratum = 0;
+  tai = 0;
 
   if (!*line) {
     command_parse_error();
@@ -774,6 +776,13 @@ parse_refclock(char *line)
     } else if (!strcasecmp(cmd, "maxdispersion")) {
       if (sscanf(line, "%lf%n", &max_dispersion, &n) != 1)
         break;
+    } else if (!strcasecmp(cmd, "stratum")) {
+      if (sscanf(line, "%d%n", &stratum, &n) != 1 ||
+          stratum >= NTP_MAX_STRATUM || stratum < 0)
+        break;
+    } else if (!strcasecmp(cmd, "tai")) {
+      n = 0;
+      tai = 1;
     } else if (!strcasecmp(cmd, "width")) {
       if (sscanf(line, "%lf%n", &pulse_width, &n) != 1)
         break;
@@ -811,6 +820,8 @@ parse_refclock(char *line)
   refclock->min_samples = min_samples;
   refclock->max_samples = max_samples;
   refclock->sel_options = sel_options;
+  refclock->stratum = stratum;
+  refclock->tai = tai;
   refclock->offset = offset;
   refclock->delay = delay;
   refclock->precision = precision;
@@ -1335,7 +1346,11 @@ parse_include(char *line)
 
   check_number_of_args(line, 1);
 
-  if ((r = glob(line, GLOB_ERR | GLOB_NOMAGIC, NULL, &gl)) != 0) {
+  if ((r = glob(line,
+#ifdef GLOB_NOMAGIC
+                GLOB_NOMAGIC |
+#endif
+                GLOB_ERR, NULL, &gl)) != 0) {
     if (r != GLOB_NOMATCH)
       LOG_FATAL("Could not search for files matching %s", line);
 
