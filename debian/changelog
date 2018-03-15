@@ -1,3 +1,14 @@
+chrony (3.3~pre1-1) experimental; urgency=medium
+
+  * Import upstream version 3.3-pre1:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * debian/copyright:
+    - Add “hash_nettle.c” copyright information and update copyright year of
+    test/unit/*
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 15 Mar 2018 13:58:21 +0100
+
 chrony (3.2-5) unstable; urgency=medium
 
   [ Christian Ehrhardt ]
