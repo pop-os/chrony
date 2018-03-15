@@ -1,3 +1,12 @@
+chrony (3.2-5) unstable; urgency=medium
+
+  [ Christian Ehrhardt ]
+  * debian/usr.sbin.chronyd:
+    - Allow write access to RTC, PPS and PTP devices.
+    (Closes: #891201, LP: #1751241)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 28 Feb 2018 17:31:08 +0100
+
 chrony (3.2-4) unstable; urgency=medium
 
   * debian/changelog:
