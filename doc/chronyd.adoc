@@ -135,7 +135,7 @@ range of privileged system calls on behalf of the parent.
 *-F* _level_::
 This option configures a system call filter when *chronyd* is compiled with
 support for the Linux secure computing (seccomp) facility. In level 1 the
-process is killed when a forbidden system call is made, in level -1 the SYSSIG
+process is killed when a forbidden system call is made, in level -1 the SIGSYS
 signal is thrown instead and in level 0 the filter is disabled (default 0).
 +
 It's recommended to enable the filter only when it's known to work on the
@@ -157,11 +157,13 @@ This option will lock *chronyd* into RAM so that it will never be paged out.
 This mode is only supported on Linux.
 
 *-x*::
-This option disables the control of the system clock. *chronyd* will not make
-any adjustments of the clock, but it will still track its offset and frequency
-relative to the estimated true time, and be able to operate as an NTP server.
-This allows *chronyd* to run without the capability to adjust or set the system
-clock (e.g. in some containers).
+This option disables the control of the system clock. *chronyd* will not try to
+make any adjustments of the clock. It will assume the clock is free running and
+still track its offset and frequency relative to the estimated true time. This
+option allows *chronyd* to run without the capability to adjust or set the
+system clock (e.g. in some containers) in order to operate as an NTP server. It
+is not recommended to run *chronyd* (with or without *-x*) when another process
+is controlling the system clock.
 
 *-v*::
 With this option *chronyd* will print version number to the terminal and exit.

@@ -1,13 +1,13 @@
 '\" t
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHORS" section]
-.\" Generator: Asciidoctor 1.5.4
-.\"      Date: 2017-09-15
+.\" Generator: Asciidoctor 1.5.6.1
+.\"      Date: 2018-03-15
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2017-09-15" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2018-03-15" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -155,7 +155,7 @@ range of privileged system calls on behalf of the parent.
 .RS 4
 This option configures a system call filter when \fBchronyd\fP is compiled with
 support for the Linux secure computing (seccomp) facility. In level 1 the
-process is killed when a forbidden system call is made, in level \-1 the SYSSIG
+process is killed when a forbidden system call is made, in level \-1 the SIGSYS
 signal is thrown instead and in level 0 the filter is disabled (default 0).
 .sp
 It\(cqs recommended to enable the filter only when it\(cqs known to work on the
@@ -183,11 +183,13 @@ This mode is only supported on Linux.
 .sp
 \fB\-x\fP
 .RS 4
-This option disables the control of the system clock. \fBchronyd\fP will not make
-any adjustments of the clock, but it will still track its offset and frequency
-relative to the estimated true time, and be able to operate as an NTP server.
-This allows \fBchronyd\fP to run without the capability to adjust or set the system
-clock (e.g. in some containers).
+This option disables the control of the system clock. \fBchronyd\fP will not try to
+make any adjustments of the clock. It will assume the clock is free running and
+still track its offset and frequency relative to the estimated true time. This
+option allows \fBchronyd\fP to run without the capability to adjust or set the
+system clock (e.g. in some containers) in order to operate as an NTP server. It
+is not recommended to run \fBchronyd\fP (with or without \fB\-x\fP) when another process
+is controlling the system clock.
 .RE
 .sp
 \fB\-v\fP
