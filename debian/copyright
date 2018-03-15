@@ -56,7 +56,7 @@ Copyright: 2015, Bryan Christianson
 License: GPL-2
 
 Files: test/unit/*
-Copyright: 2016-2017, Miroslav Lichvar
+Copyright: 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: hwclock.?
@@ -121,6 +121,10 @@ License: GPL-2
 
 Files: stubs.c
 Copyright: 2014-2016, Miroslav Lichvar
+License: GPL-2
+
+Files: hash_nettle.c
+Copyright: 2018, Miroslav Lichvar
 License: GPL-2
 
 Files: md5.*
