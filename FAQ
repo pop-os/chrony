@@ -32,8 +32,9 @@ Table of Contents
       ? 5.3. I just keep getting the 513 RTC driver not running message
       ? 5.4. I get Could not open /dev/rtc, Device or resource busy in my
         syslog file
+      ? 5.5. What if my computer does not have an RTC or backup battery?
   o 6. NTP-specific issues
-      ? 6.1. Can chronyd be driven from broadcast NTP servers?
+      ? 6.1. Can chronyd be driven from broadcast/multicast NTP servers?
       ? 6.2. Can chronyd transmit broadcast NTP packets?
       ? 6.3. Can chronyd keep the system clock a fixed offset away from real
         time?
@@ -391,16 +392,31 @@ For the real-time clock support to work, you need the following three things
 
 Some other program running on the system may be using the device.
 
+5.5. What if my computer does not have an RTC or backup battery?
+
+In this case you can still use the -s option to set the system clock to the
+last modification time of the drift file, which should correspond to the system
+time when chronyd was previously stopped. The initial system time will be
+increasing across reboots and applications started after chronyd will not
+observe backward steps.
+
 6. NTP-specific issues
 
-6.1. Can chronyd be driven from broadcast NTP servers?
+6.1. Can chronyd be driven from broadcast/multicast NTP servers?
 
-No, the broadcast client mode is not supported and there is currently no plan
-to implement it. The broadcast and multicast modes are inherently less accurate
-and less secure (even with authentication) than the ordinary server/client mode
-and they are not as useful as they used to be. Even with very modest hardware a
-single NTP server can serve time to hundreds of thousands of clients using the
-ordinary mode.
+No, the broadcast/multicast client mode is not supported and there is currently
+no plan to implement it. While the mode may be useful to simplify configuration
+of clients in large networks, it is inherently less accurate and less secure
+(even with authentication) than the ordinary client/server mode.
+
+When configuring a large number of clients in a network, it is recommended to
+use the pool directive with a DNS name which resolves to addresses of multiple
+NTP servers. The clients will automatically replace the servers when they
+become unreachable, or otherwise unsuitable for synchronisation, with new
+servers from the pool.
+
+Even with very modest hardware, an NTP server can serve time to hundreds of
+thousands of clients using the ordinary client/server mode.
 
 6.2. Can chronyd transmit broadcast NTP packets?
 
@@ -441,4 +457,4 @@ needs to be made to work as a service.
 We have no plans to do this. Anyone is welcome to pick this work up and
 contribute it back to the project.
 
-Last updated 2018-03-15 09:00:47 CET
+Last updated 2018-04-04 09:18:44 CEST
