@@ -79,6 +79,8 @@ struct RCL_Instance_Record {
   int pps_rate;
   int pps_active;
   int max_lock_age;
+  int stratum;
+  int tai;
   struct MedianFilter filter;
   uint32_t ref_id;
   uint32_t lock_ref;
@@ -181,13 +183,13 @@ RCL_AddRefclock(RefclockParameters *params)
     inst->driver = &RCL_PHC_driver;
   } else {
     LOG_FATAL("unknown refclock driver %s", params->driver_name);
-    return 0;
   }
 
-  if (!inst->driver->init && !inst->driver->poll) {
+  if (!inst->driver->init && !inst->driver->poll)
     LOG_FATAL("refclock driver %s is not compiled in", params->driver_name);
-    return 0;
-  }
+
+  if (params->tai && !CNF_GetLeapSecTimezone())
+    LOG_FATAL("refclock tai option requires leapsectz");
 
   inst->data = NULL;
   inst->driver_parameter = params->driver_parameter;
@@ -200,6 +202,8 @@ RCL_AddRefclock(RefclockParameters *params)
   inst->pps_rate = params->pps_rate;
   inst->pps_active = 0;
   inst->max_lock_age = params->max_lock_age;
+  inst->stratum = params->stratum;
+  inst->tai = params->tai;
   inst->lock_ref = params->lock_ref_id;
   inst->offset = params->offset;
   inst->delay = params->delay;
@@ -251,11 +255,8 @@ RCL_AddRefclock(RefclockParameters *params)
     }
   }
 
-  if (inst->driver->init)
-    if (!inst->driver->init(inst)) {
-      LOG_FATAL("refclock %s initialisation failed", params->driver_name);
-      return 0;
-    }
+  if (inst->driver->init && !inst->driver->init(inst))
+    LOG_FATAL("refclock %s initialisation failed", params->driver_name);
 
   filter_init(&inst->filter, params->filter_length, params->max_dispersion);
 
@@ -356,6 +357,28 @@ RCL_GetDriverOption(RCL_Instance instance, char *name)
   return NULL;
 }
 
+static int
+convert_tai_offset(struct timespec *sample_time, double *offset)
+{
+  struct timespec tai_ts, utc_ts;
+  int tai_offset;
+
+  /* Get approximate TAI-UTC offset for the reference time in TAI */
+  UTI_AddDoubleToTimespec(sample_time, *offset, &tai_ts);
+  tai_offset = REF_GetTaiOffset(&tai_ts);
+
+  /* Get TAI-UTC offset for the reference time in UTC +/- 1 second */
+  UTI_AddDoubleToTimespec(&tai_ts, -tai_offset, &utc_ts);
+  tai_offset = REF_GetTaiOffset(&utc_ts);
+
+  if (!tai_offset)
+    return 0;
+
+  *offset -= tai_offset;
+
+  return 1;
+}
+
 int
 RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset, int leap)
 {
@@ -383,6 +406,11 @@ RCL_AddSample(RCL_Instance instance, struct timespec *sample_time, double offset
     default:
       DEBUG_LOG("refclock sample ignored bad leap %d", leap);
       return 0;
+  }
+
+  if (instance->tai && !convert_tai_offset(sample_time, &offset)) {
+    DEBUG_LOG("refclock sample ignored unknown TAI offset");
+    return 0;
   }
 
   filter_add_sample(&instance->filter, &cooked_time, offset - correction + instance->offset, dispersion);
@@ -635,7 +663,7 @@ poll_timeout(void *arg)
         /* Handle special case when PPS is used with local stratum */
         stratum = pps_stratum(inst, &sample_time);
       else
-        stratum = 0;
+        stratum = inst->stratum;
 
       SRC_UpdateReachability(inst->source, 1);
       SRC_AccumulateSample(inst->source, &sample_time, offset,

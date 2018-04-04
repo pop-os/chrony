@@ -51,6 +51,9 @@
 #define MIN_SKEW 1.0e-12
 #define MAX_SKEW 1.0e+02
 
+/* The minimum standard deviation */
+#define MIN_STDDEV 1.0e-9
+
 /* The asymmetry of network jitter when all jitter is in one direction */
 #define MAX_ASYMMETRY 0.5
 
@@ -571,7 +574,7 @@ SST_DoNewRegression(SST_Stats inst)
     inst->estimated_offset = est_intercept;
     inst->offset_time = inst->sample_times[inst->last_sample];
     inst->estimated_offset_sd = est_intercept_sd;
-    inst->std_dev = sqrt(est_var);
+    inst->std_dev = MAX(MIN_STDDEV, sqrt(est_var));
     inst->nruns = nruns;
 
     inst->skew = CLAMP(MIN_SKEW, inst->skew, MAX_SKEW);
@@ -884,7 +887,7 @@ SST_LoadFromFile(SST_Stats inst, FILE *in)
   char line[1024];
   double weight;
 
-  assert(!inst->n_samples);
+  SST_ResetInstance(inst);
 
   if (fgets(line, sizeof(line), in) &&
       sscanf(line, "%d", &inst->n_samples) == 1 &&
@@ -933,7 +936,6 @@ SST_LoadFromFile(SST_Stats inst, FILE *in)
     return 1;
 
   inst->last_sample = inst->n_samples - 1;
-  inst->runs_samples = 0;
 
   find_min_delay_sample(inst);
   SST_DoNewRegression(inst);

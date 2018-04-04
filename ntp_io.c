@@ -318,6 +318,9 @@ close_socket(int sock_fd)
   if (sock_fd == INVALID_SOCK_FD)
     return;
 
+#ifdef HAVE_LINUX_TIMESTAMPING
+  NIO_Linux_NotifySocketClosing(sock_fd);
+#endif
   SCH_RemoveFileHandler(sock_fd);
   close(sock_fd);
 }
@@ -685,6 +688,11 @@ read_from_socket(int sock_fd, int event, void *anything)
   unsigned int i, n;
   int status, flags = 0;
 
+#ifdef HAVE_LINUX_TIMESTAMPING
+  if (NIO_Linux_ProcessEvent(sock_fd, event))
+    return;
+#endif
+
   hdr = ARR_GetElements(recv_headers);
   n = ARR_GetSize(recv_headers);
   assert(n >= 1);
@@ -709,6 +717,20 @@ read_from_socket(int sock_fd, int event, void *anything)
 #endif
 
   if (status < 0) {
+#ifdef HAVE_LINUX_TIMESTAMPING
+    /* If reading from the error queue failed, the exception should be
+       for a socket error.  Clear the error to avoid a busy loop. */
+    if (flags & MSG_ERRQUEUE) {
+      int error = 0;
+      socklen_t len = sizeof (error);
+
+      if (getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, &error, &len))
+        DEBUG_LOG("Could not get SO_ERROR");
+      if (error)
+        errno = error;
+    }
+#endif
+
     DEBUG_LOG("Could not receive from fd %d : %s", sock_fd,
               strerror(errno));
     return;

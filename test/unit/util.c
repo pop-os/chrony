@@ -4,6 +4,7 @@
 void test_unit(void) {
   NTP_int64 ntp_ts, ntp_fuzz;
   struct timespec ts, ts2;
+  struct timeval tv;
   struct sockaddr_un sun;
   double x, y;
   Float f;
@@ -39,6 +40,32 @@ void test_unit(void) {
   TEST_CHECK(UTI_DoubleToNtp32(1.000001) == htonl(65537));
   TEST_CHECK(UTI_DoubleToNtp32(1000000) == htonl(0xffffffff));
   TEST_CHECK(UTI_DoubleToNtp32(-1.0) == htonl(0));
+
+  UTI_DoubleToTimeval(0.4e-6, &tv);
+  TEST_CHECK(tv.tv_sec == 0);
+  TEST_CHECK(tv.tv_usec == 0);
+  UTI_DoubleToTimeval(-0.4e-6, &tv);
+  TEST_CHECK(tv.tv_sec == 0);
+  TEST_CHECK(tv.tv_usec == 0);
+  UTI_DoubleToTimeval(0.5e-6, &tv);
+  TEST_CHECK(tv.tv_sec == 0);
+  TEST_CHECK(tv.tv_usec == 1);
+  UTI_DoubleToTimeval(-0.5e-6, &tv);
+  TEST_CHECK(tv.tv_sec == -1);
+  TEST_CHECK(tv.tv_usec == 999999);
+
+  UTI_DoubleToTimespec(0.9e-9, &ts);
+  TEST_CHECK(ts.tv_sec == 0);
+  TEST_CHECK(ts.tv_nsec == 0);
+  UTI_DoubleToTimespec(1.0e-9, &ts);
+  TEST_CHECK(ts.tv_sec == 0);
+  TEST_CHECK(ts.tv_nsec == 1);
+  UTI_DoubleToTimespec(-0.9e-9, &ts);
+  TEST_CHECK(ts.tv_sec == 0);
+  TEST_CHECK(ts.tv_nsec == 0);
+  UTI_DoubleToTimespec(-1.0e-9, &ts);
+  TEST_CHECK(ts.tv_sec == -1);
+  TEST_CHECK(ts.tv_nsec == 999999999);
 
   ntp_ts.hi = htonl(JAN_1970);
   ntp_ts.lo = 0xffffffff;
@@ -108,6 +135,11 @@ void test_unit(void) {
   TEST_CHECK(UTI_CompareNtp64(&ntp_ts, &ntp_ts) == 0);
   TEST_CHECK(UTI_CompareNtp64(&ntp_ts, &ntp_fuzz) < 0);
   TEST_CHECK(UTI_CompareNtp64(&ntp_fuzz, &ntp_ts) > 0);
+
+  TEST_CHECK(UTI_IsEqualAnyNtp64(&ntp_ts, &ntp_ts, NULL, NULL));
+  TEST_CHECK(UTI_IsEqualAnyNtp64(&ntp_ts, NULL, &ntp_ts, NULL));
+  TEST_CHECK(UTI_IsEqualAnyNtp64(&ntp_ts, NULL, NULL, &ntp_ts));
+  TEST_CHECK(!UTI_IsEqualAnyNtp64(&ntp_ts, &ntp_fuzz, &ntp_fuzz, &ntp_fuzz));
 
   ts.tv_sec = 1;
   ts.tv_nsec = 2;

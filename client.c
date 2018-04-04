@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Lonnie Abelbeck  2016
- * Copyright (C) Miroslav Lichvar  2009-2017
+ * Copyright (C) Miroslav Lichvar  2009-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -1109,6 +1109,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
           (data.params.auto_offline ? REQ_ADDSRC_AUTOOFFLINE : 0) |
           (data.params.iburst ? REQ_ADDSRC_IBURST : 0) |
           (data.params.interleaved ? REQ_ADDSRC_INTERLEAVED : 0) |
+          (data.params.burst ? REQ_ADDSRC_BURST : 0) |
           (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
@@ -1245,6 +1246,7 @@ give_help(void)
     "cyclelogs\0Close and re-open log files\0"
     "dump\0Dump all measurements to save files\0"
     "rekey\0Re-read keys from key file\0"
+    "shutdown\0Stop daemon\0"
     "\0\0"
     "Client commands:\0\0"
     "dns -n|+n\0Disable/enable resolving IP addresses to hostnames\0"
@@ -1279,9 +1281,9 @@ command_name_generator(const char *text, int state)
     "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
     "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online",
     "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist",
-    "retries", "rtcdata", "serverstats", "settime", "smoothing", "smoothtime",
-    "sources", "sources -v", "sourcestats", "sourcestats -v", "timeout",
-    "tracking", "trimrtc", "waitsync", "writertc",
+    "retries", "rtcdata", "serverstats", "settime", "shutdown", "smoothing",
+    "smoothtime", "sources", "sources -v", "sourcestats", "sourcestats -v",
+    "timeout", "tracking", "trimrtc", "waitsync", "writertc",
     NULL
   };
   static int list_index, len;
@@ -1324,18 +1326,16 @@ static int proto_version = PROTO_VERSION_NUMBER;
 static int
 submit_request(CMD_Request *request, CMD_Reply *reply)
 {
-  int bad_length, bad_sequence, bad_header;
   int select_status;
   int recv_status;
   int read_length;
-  int expected_length;
   int command_length;
   int padding_length;
   struct timespec ts_now, ts_start;
   struct timeval tv;
   int n_attempts, new_attempt;
   double timeout;
-  fd_set rdfd, wrfd, exfd;
+  fd_set rdfd;
 
   request->pkt_type = PKT_TYPE_CMD_REQUEST;
   request->res1 = 0;
@@ -1347,13 +1347,13 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
   new_attempt = 1;
 
   do {
+    if (gettimeofday(&tv, NULL))
+      return 0;
+
     if (new_attempt) {
       new_attempt = 0;
 
       if (n_attempts > max_retries)
-        return 0;
-
-      if (gettimeofday(&tv, NULL))
         return 0;
 
       UTI_TimevalToTimespec(&tv, &ts_start);
@@ -1383,9 +1383,6 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
       DEBUG_LOG("Sent %d bytes", command_length);
     }
 
-    if (gettimeofday(&tv, NULL))
-      return 0;
-
     UTI_TimevalToTimespec(&tv, &ts_now);
 
     /* Check if the clock wasn't stepped back */
@@ -1394,22 +1391,27 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
 
     timeout = initial_timeout / 1000.0 * (1U << (n_attempts - 1)) -
               UTI_DiffTimespecsToDouble(&ts_now, &ts_start);
-    UTI_DoubleToTimeval(timeout, &tv);
     DEBUG_LOG("Timeout %f seconds", timeout);
 
-    FD_ZERO(&rdfd);
-    FD_ZERO(&wrfd);
-    FD_ZERO(&exfd);
+    /* Avoid calling select() with an invalid timeout */
+    if (timeout <= 0.0) {
+      new_attempt = 1;
+      continue;
+    }
 
+    UTI_DoubleToTimeval(timeout, &tv);
+
+    FD_ZERO(&rdfd);
     FD_SET(sock_fd, &rdfd);
 
     if (quit)
       return 0;
 
-    select_status = select(sock_fd + 1, &rdfd, &wrfd, &exfd, &tv);
+    select_status = select(sock_fd + 1, &rdfd, NULL, NULL, &tv);
 
     if (select_status < 0) {
       DEBUG_LOG("select failed : %s", strerror(errno));
+      return 0;
     } else if (select_status == 0) {
       /* Timeout must have elapsed, try a resend? */
       new_attempt = 1;
@@ -1425,34 +1427,18 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
         DEBUG_LOG("Received %d bytes", recv_status);
         
         read_length = recv_status;
-        if (read_length >= offsetof(CMD_Reply, data)) {
-          expected_length = PKL_ReplyLength(reply);
-        } else {
-          expected_length = 0;
-        }
-
-        bad_length = (read_length < expected_length ||
-                      expected_length < offsetof(CMD_Reply, data));
         
-        if (!bad_length) {
-          bad_sequence = reply->sequence != request->sequence;
-        } else {
-          bad_sequence = 0;
-        }
-        
-        if (bad_length || bad_sequence) {
-          continue;
-        }
-        
-        bad_header = ((reply->version != proto_version &&
-                       !(reply->version >= PROTO_VERSION_MISMATCH_COMPAT_CLIENT &&
-                         ntohs(reply->status) == STT_BADPKTVERSION)) ||
-                      (reply->pkt_type != PKT_TYPE_CMD_REPLY) ||
-                      (reply->res1 != 0) ||
-                      (reply->res2 != 0) ||
-                      (reply->command != request->command));
-        
-        if (bad_header) {
+        /* Check if the header is valid */
+        if (read_length < offsetof(CMD_Reply, data) ||
+            (reply->version != proto_version &&
+             !(reply->version >= PROTO_VERSION_MISMATCH_COMPAT_CLIENT &&
+               ntohs(reply->status) == STT_BADPKTVERSION)) ||
+            reply->pkt_type != PKT_TYPE_CMD_REPLY ||
+            reply->res1 != 0 ||
+            reply->res2 != 0 ||
+            reply->command != request->command ||
+            reply->sequence != request->sequence) {
+          DEBUG_LOG("Invalid reply");
           continue;
         }
         
@@ -1470,6 +1456,15 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
 #else
 #error unknown compatibility with PROTO_VERSION - 1
 #endif
+
+        /* Check that the packet contains all data it is supposed to have.
+           Unknown responses will always pass this test as their expected
+           length is zero. */
+        if (read_length < PKL_ReplyLength(reply)) {
+          DEBUG_LOG("Reply too short");
+          new_attempt = 1;
+          continue;
+        }
 
         /* Good packet received, print out results */
         DEBUG_LOG("Reply cmd=%d reply=%d stat=%d",
@@ -1576,6 +1571,9 @@ request_reply(CMD_Request *request, CMD_Reply *reply, int requested_reply, int v
     printf("508 Bad reply from daemon\n");
     return 0;
   }
+
+  /* Make sure an unknown response was not requested */
+  assert(PKL_ReplyLength(reply));
 
   return 1;
 }
@@ -2540,7 +2538,7 @@ process_cmd_manual_list(const char *line)
   struct timespec when;
 
   request.command = htons(REQ_MANUAL_LIST);
-  if (!request_reply(&request, &reply, RPY_MANUAL_LIST, 0))
+  if (!request_reply(&request, &reply, RPY_MANUAL_LIST2, 0))
     return 0;
 
   n_samples = ntohl(reply.data.manual_list.n_samples);
@@ -2548,7 +2546,7 @@ process_cmd_manual_list(const char *line)
 
   print_header("#    Date     Time(UTC)    Slewed   Original   Residual");
 
-  for (i = 0; i < n_samples; i++) {
+  for (i = 0; i < n_samples && i < MAX_MANUAL_LIST_SAMPLES; i++) {
     sample = &reply.data.manual_list.samples[i];
     UTI_TimespecNetworkToHost(&sample->when, &when);
 
@@ -2705,6 +2703,14 @@ static void
 process_cmd_refresh(CMD_Request *msg, char *line)
 {
   msg->command = htons(REQ_REFRESH);
+}
+
+/* ================================================== */
+
+static void
+process_cmd_shutdown(CMD_Request *msg, char *line)
+{
+  msg->command = htons(REQ_SHUTDOWN);
 }
 
 /* ================================================== */
@@ -3004,6 +3010,8 @@ process_line(char *line)
   } else if (!strcmp(command, "settime")) {
     do_normal_submit = 0;
     ret = process_cmd_settime(line);
+  } else if (!strcmp(command, "shutdown")) {
+    process_cmd_shutdown(&tx_message, line);
   } else if (!strcmp(command, "smoothing")) {
     do_normal_submit = 0;
     ret = process_cmd_smoothing(line);
@@ -3098,7 +3106,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2017 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2018 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",

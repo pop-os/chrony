@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2017
+ * Copyright (C) Miroslav Lichvar  2009-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -88,6 +88,7 @@ struct NCR_Instance_Record {
   SCH_TimeoutID tx_timeout_id;  /* Timeout ID for next transmission */
   int tx_suspended;             /* Boolean indicating we can't transmit yet */
 
+  int auto_burst;               /* If 1, initiate a burst on each poll */
   int auto_offline;             /* If 1, automatically go offline if server/peer
                                    isn't responding */
 
@@ -149,14 +150,11 @@ struct NCR_Instance_Record {
      be used for synchronisation */
   int valid_timestamps;
 
-  /* Flag indicating the timestamps below were updated since last request */
-  int updated_timestamps;
-
-  /* Receive and transmit timestamps from the last received packet */
+  /* Receive and transmit timestamps from the last valid response */
   NTP_int64 remote_ntp_rx;
   NTP_int64 remote_ntp_tx;
 
-  /* Local timestamp when the last packet was received from the
+  /* Local timestamp when the last valid response was received from the
      source.  We have to be prepared to tinker with this if the local
      clock has its frequency adjusted before we repond.  The value we
      store here is what our own local time was when the same arrived.
@@ -182,6 +180,15 @@ struct NCR_Instance_Record {
   NTP_Local_Timestamp prev_local_tx;
   int prev_local_poll;
   unsigned int prev_tx_count;
+
+  /* Flag indicating the two timestamps below were updated since the
+     last transmission */
+  int updated_init_timestamps;
+
+  /* Timestamps used for (re)starting the symmetric protocol, when we
+     need to respond to a packet which is not a valid response */
+  NTP_int64 init_remote_ntp_tx;
+  NTP_Local_Timestamp init_local_rx;
 
   /* The instance record in the main source management module.  This
      performs the statistical analysis on the samples we generate */
@@ -229,6 +236,10 @@ static ARR_Instance broadcasts;
 /* Number of samples in initial burst */
 #define IBURST_GOOD_SAMPLES 4
 #define IBURST_TOTAL_SAMPLES SOURCE_REACH_BITS
+
+/* Number of samples in automatic burst */
+#define BURST_GOOD_SAMPLES 1
+#define MAX_BURST_TOTAL_SAMPLES 4
 
 /* Time to wait after sending packet to 'warm up' link */
 #define WARM_UP_DELAY 2.0
@@ -551,6 +562,7 @@ NCR_GetInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourcePar
   result->max_delay_ratio = CLAMP(0.0, params->max_delay_ratio, MAX_MAXDELAYRATIO);
   result->max_delay_dev_ratio = CLAMP(0.0, params->max_delay_dev_ratio, MAX_MAXDELAYDEVRATIO);
   result->offset_correction = params->offset;
+  result->auto_burst = params->burst;
   result->auto_offline = params->auto_offline;
   result->poll_target = params->poll_target;
 
@@ -652,7 +664,6 @@ NCR_ResetInstance(NCR_Instance instance)
 
   instance->valid_rx = 0;
   instance->valid_timestamps = 0;
-  instance->updated_timestamps = 0;
   UTI_ZeroNtp64(&instance->remote_ntp_rx);
   UTI_ZeroNtp64(&instance->remote_ntp_tx);
   UTI_ZeroNtp64(&instance->local_ntp_rx);
@@ -662,6 +673,10 @@ NCR_ResetInstance(NCR_Instance instance)
   zero_local_timestamp(&instance->prev_local_tx);
   instance->prev_local_poll = 0;
   instance->prev_tx_count = 0;
+
+  instance->updated_init_timestamps = 0;
+  UTI_ZeroNtp64(&instance->init_remote_ntp_tx);
+  zero_local_timestamp(&instance->init_local_rx);
 }
 
 /* ================================================== */
@@ -890,8 +905,10 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
                 NTP_Local_Timestamp *local_rx, /* The RX time of the received packet */
                 NTP_Local_Timestamp *local_tx, /* The TX time of the previous packet
                                                   RESULT : TX time of this packet */
-                NTP_int64 *local_ntp_rx, /* RESULT : receive timestamp from this packet */
-                NTP_int64 *local_ntp_tx, /* RESULT : transmit timestamp from this packet */
+                NTP_int64 *local_ntp_rx, /* The receive timestamp from the previous packet
+                                            RESULT : receive timestamp from this packet */
+                NTP_int64 *local_ntp_tx, /* The transmit timestamp from the previous packet
+                                            RESULT : transmit timestamp from this packet */
                 NTP_Remote_Address *where_to, /* Where to address the reponse to */
                 NTP_Local_Address *from /* From what address to send it */
                 )
@@ -914,8 +931,8 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     version = NTP_VERSION;
   }
 
-  /* Allow interleaved mode only if there was a prior transmission */
-  if (interleaved && (!local_tx || UTI_IsZeroTimespec(&local_tx->ts)))
+  /* Check if the packet can be formed in the interleaved mode */
+  if (interleaved && (!remote_ntp_rx || !local_tx || UTI_IsZeroTimespec(&local_tx->ts)))
     interleaved = 0;
 
   smooth_time = 0;
@@ -989,14 +1006,21 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     /* Originate - this comes from the last packet the source sent us */
     message.originate_ts = interleaved ? *remote_ntp_rx : *remote_ntp_tx;
 
-    /* Prepare random bits which will be added to the receive timestamp */
-    UTI_GetNtp64Fuzz(&ts_fuzz, precision);
+    do {
+      /* Prepare random bits which will be added to the receive timestamp */
+      UTI_GetNtp64Fuzz(&ts_fuzz, precision);
 
-    /* Receive - this is when we received the last packet from the source.
-       This timestamp will have been adjusted so that it will now look to
-       the source like we have been running on our latest estimate of
-       frequency all along */
-    UTI_TimespecToNtp64(&local_receive, &message.receive_ts, &ts_fuzz);
+      /* Receive - this is when we received the last packet from the source.
+         This timestamp will have been adjusted so that it will now look to
+         the source like we have been running on our latest estimate of
+         frequency all along */
+      UTI_TimespecToNtp64(&local_receive, &message.receive_ts, &ts_fuzz);
+
+      /* Do not send a packet with a non-zero receive timestamp equal to the
+         originate timestamp or previous receive timestamp */
+    } while (!UTI_IsZeroNtp64(&message.receive_ts) &&
+             UTI_IsEqualAnyNtp64(&message.receive_ts, &message.originate_ts,
+                                 local_ntp_rx, NULL));
   } else {
     UTI_ZeroNtp64(&message.originate_ts);
     UTI_ZeroNtp64(&message.receive_ts);
@@ -1055,10 +1079,16 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
                           &message.transmit_ts, &ts_fuzz);
     }
 
-    /* Avoid sending messages with non-zero transmit timestamp equal to the
-       receive timestamp to allow reliable detection of the interleaved mode */
-  } while (!UTI_CompareNtp64(&message.transmit_ts, &message.receive_ts) &&
-           !UTI_IsZeroNtp64(&message.transmit_ts));
+    /* Do not send a packet with a non-zero transmit timestamp which is
+       equal to any of the following timestamps:
+       - receive (to allow reliable detection of the interleaved mode)
+       - originate (to prevent the packet from being its own valid response
+                    in the symmetric mode)
+       - previous transmit (to invalidate responses to the previous packet)
+       (the precision must be at least -30 to prevent an infinite loop!) */
+  } while (!UTI_IsZeroNtp64(&message.transmit_ts) &&
+           UTI_IsEqualAnyNtp64(&message.transmit_ts, &message.receive_ts,
+                               &message.originate_ts, local_ntp_tx));
 
   ret = NIO_SendPacket(&message, where_to, from, length, local_tx != NULL);
 
@@ -1084,7 +1114,7 @@ transmit_timeout(void *arg)
 {
   NCR_Instance inst = (NCR_Instance) arg;
   NTP_Local_Address local_addr;
-  int interleaved, sent;
+  int interleaved, initial, sent;
 
   inst->tx_timeout_id = 0;
 
@@ -1093,9 +1123,19 @@ transmit_timeout(void *arg)
       /* With online burst switch to online before last packet */
       if (inst->burst_total_samples_to_go <= 1)
         inst->opmode = MD_ONLINE;
+      break;
     case MD_BURST_WAS_OFFLINE:
       if (inst->burst_total_samples_to_go <= 0)
         take_offline(inst);
+      break;
+    case MD_ONLINE:
+      /* Start a new burst if the burst option is enabled and the average
+         polling interval including the burst will not fall below the
+         minimum polling interval */
+      if (inst->auto_burst && inst->local_poll > inst->minpoll && inst->local_poll > 1)
+        NCR_InitiateSampleBurst(inst, BURST_GOOD_SAMPLES,
+                                MIN(1 << (inst->local_poll - inst->minpoll),
+                                    MAX_BURST_TOTAL_SAMPLES));
       break;
     default:
       break;
@@ -1137,6 +1177,19 @@ transmit_timeout(void *arg)
                  (inst->mode == MODE_ACTIVE &&
                   inst->prev_tx_count == 1 && inst->tx_count == 0));
 
+  /* In symmetric mode, if no valid response was received since the previous
+     transmission, respond to the last received packet even if it failed some
+     specific NTP tests.  This is necessary for starting and restarting the
+     protocol, e.g. when a packet was lost. */
+  initial = inst->mode == MODE_ACTIVE && !inst->valid_rx &&
+            !UTI_IsZeroNtp64(&inst->init_remote_ntp_tx);
+
+  /* Prepare for the response */
+  inst->valid_rx = 0;
+  inst->updated_init_timestamps = 0;
+  if (initial)
+    inst->valid_timestamps = 0;
+
   /* Check whether we need to 'warm up' the link to the other end by
      sending an NTP exchange to ensure both ends' ARP caches are
      primed or whether we need to send two packets first to ensure a
@@ -1148,18 +1201,16 @@ transmit_timeout(void *arg)
     inst->presend_done--;
   }
 
-  sent = transmit_packet(inst->mode, interleaved, inst->local_poll,
-                         inst->version,
+  /* Send the request (which may also be a response in the symmetric mode) */
+  sent = transmit_packet(inst->mode, interleaved, inst->local_poll, inst->version,
                          inst->auth_mode, inst->auth_key_id,
-                         &inst->remote_ntp_rx, &inst->remote_ntp_tx,
-                         &inst->local_rx, &inst->local_tx,
-                         &inst->local_ntp_rx, &inst->local_ntp_tx,
-                         &inst->remote_addr,
-                         &local_addr);
+                         initial ? NULL : &inst->remote_ntp_rx,
+                         initial ? &inst->init_remote_ntp_tx : &inst->remote_ntp_tx,
+                         initial ? &inst->init_local_rx : &inst->local_rx,
+                         &inst->local_tx, &inst->local_ntp_rx, &inst->local_ntp_tx,
+                         &inst->remote_addr, &local_addr);
 
   ++inst->tx_count;
-  inst->valid_rx = 0;
-  inst->updated_timestamps = 0;
   if (sent)
     inst->report.total_tx_count++;
 
@@ -1442,6 +1493,7 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
   NTP_Local_Timestamp local_receive, local_transmit;
   double remote_interval, local_interval, response_time;
   double delay_time, precision;
+  int updated_timestamps;
 
   /* ==================== */
 
@@ -1459,7 +1511,8 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
      The test values are 1 when passed and 0 when failed. */
   
   /* Test 1 checks for duplicate packet */
-  test1 = !!UTI_CompareNtp64(&message->transmit_ts, &inst->remote_ntp_tx);
+  test1 = UTI_CompareNtp64(&message->receive_ts, &inst->remote_ntp_rx) ||
+          UTI_CompareNtp64(&message->transmit_ts, &inst->remote_ntp_tx);
 
   /* Test 2 checks for bogus packet in the basic and interleaved modes.  This
      ensures the source is responding to the latest packet we sent to it. */
@@ -1644,21 +1697,34 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
      The authentication test (test5) is required to prevent DoS attacks using
      unauthenticated packets on authenticated symmetric associations. */
   if ((inst->mode == MODE_CLIENT && valid_packet && !inst->valid_rx) ||
-      (inst->mode == MODE_ACTIVE && (valid_packet || !inst->valid_rx) &&
-       test5 && !UTI_IsZeroNtp64(&message->transmit_ts) &&
-       (!inst->updated_timestamps || (valid_packet && !inst->valid_rx) ||
+      (inst->mode == MODE_ACTIVE && valid_packet &&
+       (!inst->valid_rx ||
         UTI_CompareNtp64(&inst->remote_ntp_tx, &message->transmit_ts) < 0))) {
     inst->remote_ntp_rx = message->receive_ts;
     inst->remote_ntp_tx = message->transmit_ts;
     inst->local_rx = *rx_ts;
     inst->valid_timestamps = synced_packet;
-    inst->updated_timestamps = 1;
+
+    UTI_ZeroNtp64(&inst->init_remote_ntp_tx);
+    zero_local_timestamp(&inst->init_local_rx);
+    inst->updated_init_timestamps = 0;
+    updated_timestamps = 2;
 
     /* Don't use the same set of timestamps for the next sample */
     if (interleaved_packet)
       inst->prev_local_tx = inst->local_tx;
     else
       zero_local_timestamp(&inst->prev_local_tx);
+  } else if (inst->mode == MODE_ACTIVE &&
+             test1 && !UTI_IsZeroNtp64(&message->transmit_ts) && test5 &&
+             (!inst->updated_init_timestamps ||
+              UTI_CompareNtp64(&inst->init_remote_ntp_tx, &message->transmit_ts) < 0)) {
+    inst->init_remote_ntp_tx = message->transmit_ts;
+    inst->init_local_rx = *rx_ts;
+    inst->updated_init_timestamps = 1;
+    updated_timestamps = 1;
+  } else {
+    updated_timestamps = 0;
   }
 
   /* Accept at most one response per request.  The NTP specification recommends
@@ -1694,10 +1760,11 @@ receive_packet(NCR_Instance inst, NTP_Local_Address *local_addr,
   DEBUG_LOG("remote_interval=%.9f local_interval=%.9f response_time=%.9f txs=%c rxs=%c",
             remote_interval, local_interval, response_time,
             tss_chars[local_transmit.source], tss_chars[local_receive.source]);
-  DEBUG_LOG("test123=%d%d%d test567=%d%d%d testABCD=%d%d%d%d kod_rate=%d interleaved=%d presend=%d valid=%d good=%d updated=%d",
+  DEBUG_LOG("test123=%d%d%d test567=%d%d%d testABCD=%d%d%d%d kod_rate=%d interleaved=%d"
+            " presend=%d valid=%d good=%d updated=%d",
             test1, test2, test3, test5, test6, test7, testA, testB, testC, testD,
             kod_rate, interleaved_packet, inst->presend_done, valid_packet, good_packet,
-            !UTI_CompareTimespecs(&inst->local_rx.ts, &rx_ts->ts));
+            updated_timestamps);
 
   if (valid_packet) {
     inst->remote_poll = message->poll;
@@ -1988,7 +2055,7 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   NTP_Mode pkt_mode, my_mode;
   NTP_int64 *local_ntp_rx, *local_ntp_tx;
   NTP_Local_Timestamp local_tx, *tx_ts;
-  int valid_auth, log_index, interleaved, poll;
+  int pkt_version, valid_auth, log_index, interleaved, poll;
   AuthenticationMode auth_mode;
   uint32_t key_id;
 
@@ -2009,6 +2076,7 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   }
 
   pkt_mode = NTP_LVM_TO_MODE(message->lvm);
+  pkt_version = NTP_LVM_TO_VERSION(message->lvm);
 
   switch (pkt_mode) {
     case MODE_ACTIVE:
@@ -2019,6 +2087,15 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
       /* Reply with server packet */
       my_mode = MODE_SERVER;
       break;
+    case MODE_UNDEFINED:
+      /* Check if it is an NTPv1 client request (NTPv1 packets have a reserved
+         field instead of the mode field and the actual mode is determined from
+         the port numbers).  Don't ever respond with a mode 0 packet! */
+      if (pkt_version == 1 && remote_addr->port != NTP_PORT) {
+        my_mode = MODE_SERVER;
+        break;
+      }
+      /* Fall through */
     default:
       /* Discard */
       DEBUG_LOG("NTP packet discarded pkt_mode=%d", pkt_mode);
@@ -2064,7 +2141,8 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   if (log_index >= 0) {
     CLG_GetNtpTimestamps(log_index, &local_ntp_rx, &local_ntp_tx);
     interleaved = !UTI_IsZeroNtp64(local_ntp_rx) &&
-                  !UTI_CompareNtp64(&message->originate_ts, local_ntp_rx);
+                  !UTI_CompareNtp64(&message->originate_ts, local_ntp_rx) &&
+                  UTI_CompareNtp64(&message->receive_ts, &message->transmit_ts);
 
     if (interleaved) {
       UTI_Ntp64ToTimespec(local_ntp_tx, &local_tx.ts);
@@ -2081,7 +2159,7 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   poll = MAX(poll, message->poll);
 
   /* Send a reply */
-  transmit_packet(my_mode, interleaved, poll, NTP_LVM_TO_VERSION(message->lvm),
+  transmit_packet(my_mode, interleaved, poll, pkt_version,
                   auth_mode, key_id, &message->receive_ts, &message->transmit_ts,
                   rx_ts, tx_ts, local_ntp_rx, NULL, remote_addr, local_addr);
 
@@ -2188,6 +2266,9 @@ NCR_SlewTimes(NCR_Instance inst, struct timespec *when, double dfreq, double dof
     UTI_AdjustTimespec(&inst->local_tx.ts, when, &inst->local_tx.ts, &delta, dfreq, doffset);
   if (!UTI_IsZeroTimespec(&inst->prev_local_tx.ts))
     UTI_AdjustTimespec(&inst->prev_local_tx.ts, when, &inst->prev_local_tx.ts, &delta, dfreq,
+                       doffset);
+  if (!UTI_IsZeroTimespec(&inst->init_local_rx.ts))
+    UTI_AdjustTimespec(&inst->init_local_rx.ts, when, &inst->init_local_rx.ts, &delta, dfreq,
                        doffset);
 }
 
