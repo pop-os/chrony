@@ -4,7 +4,7 @@ Upstream-Contact: Miroslav Lichvar <mlichvar@redhat.com>
 Source: https://download.tuxfamily.org/chrony/
 
 Files: *
-Copyright: 2009-2017, Miroslav Lichvar
+Copyright: 2009-2018, Miroslav Lichvar
            1997-2007, Richard P. Curnow
 License: GPL-2
 
@@ -64,7 +64,7 @@ Copyright: 2016-2017, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_io_linux.?
-Copyright: 2016-2017, Miroslav Lichvar
+Copyright: 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_signd.?
@@ -74,13 +74,13 @@ License: GPL-2
 Files: client.c
 Copyright: 1997-2003, Richard P. Curnow
            2016, Lonnie Abelbeck
-           2009-2017, Miroslav Lichvar
+           2009-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: configure
 Copyright: 1997-2003, Richard P. Curnow
            2016, Bryan Christianson
-           2009, 2012-2016, Miroslav Lichvar
+           2009, 2012-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: doc/chrony.conf.adoc
