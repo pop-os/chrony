@@ -14,6 +14,8 @@
   capability sys_resource,
   # for /run/chrony to be created
   capability chown,
+  # Needed to support HW timestamping
+  capability net_admin,
 
   /usr/sbin/chronyd mr,
 
