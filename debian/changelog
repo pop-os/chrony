@@ -1,3 +1,18 @@
+chrony (3.3-1) unstable; urgency=medium
+
+  * Import upstream version 3.3:
+    - Please see /usr/share/doc/chrony/changelog.gz for the release notes.
+
+  * Merge branch “experimental” into “master”.
+
+  * debian/copyright:
+    - Update copyright year.
+
+  * debian/usr.sbin.chronyd:
+    - Allow CAP_NET_ADMIN to support HW timestamping. (LP: #1761327)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 05 Apr 2018 02:08:31 +0200
+
 chrony (3.3~pre1-1) experimental; urgency=medium
 
   * Import upstream version 3.3-pre1:
