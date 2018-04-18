@@ -1,0 +1,5 @@
+# Update sources in response to systemd-networkd events (LP: #1718227).
+# This is reusing the NetworkManager dispatch script which has no hard
+# dependency to NetworkManager (not using any of its arguments)
+etc/NetworkManager/dispatcher.d/20-chrony usr/lib/networkd-dispatcher/routable.d/chrony
+etc/NetworkManager/dispatcher.d/20-chrony usr/lib/networkd-dispatcher/off.d/chrony
