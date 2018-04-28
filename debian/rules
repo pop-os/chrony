@@ -1,5 +1,8 @@
 #!/usr/bin/make -f
 
+-include /usr/share/dpkg/buildtools.mk
+export CC
+
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all
 
 BASE=debian/chrony
@@ -17,7 +20,8 @@ override_dh_auto_configure:
 		--with-ntp-era=$(shell date -d '1970-01-01 00:00:00+00:00' +'%s') \
 		--enable-ntp-signd \
 		--with-hwclockfile=/etc/adjtime \
-		--with-pidfile=/run/chronyd.pid
+		--with-pidfile=/run/chronyd.pid \
+		--host-system=Linux
 
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS
