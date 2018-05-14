@@ -1,3 +1,23 @@
+chrony (3.3-2) unstable; urgency=medium
+
+  * debian/chrony.service:
+    - Conflict with ntp.service.
+
+  * debian/control:
+    - Bump standard-version to 4.1.4 (no changes required).
+    - Switch to the Nettle cryptographic library for hash functions.
+
+  [ Helmut Grohne ]
+  * debian/rules:
+    - Pass CC to make and set “--host-system” to fix FTCBFS. (Closes: #895852)
+
+  [ Christian Ehrhardt ]
+  * debian/usr.sbin.chronyd:
+    - Support all paths suggested in the man page.
+    (LP: #1771028, Closes: #898614)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 14 May 2018 21:37:30 +0200
+
 chrony (3.3-1) unstable; urgency=medium
 
   * Import upstream version 3.3:
