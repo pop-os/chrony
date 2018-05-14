@@ -32,6 +32,16 @@
   # changes measured by a sensor close to the oscillator.
   @{sys}/class/hwmon/hwmon[0-9]*/temp[0-9]*_input r,
 
+  # Support all paths suggested in the man page (LP: #1771028). Assume these
+  # are common use cases; others should be set as local include (see below).
+  # Configs using a 'chrony.' prefix like the tempcomp config file example
+  /etc/chrony.* r,
+  # Example gpsd socket is outside /{,var/}run/chrony/
+  /{,var/}run/chrony.tty{,*}.sock rw,
+  # To sign replies to MS-SNTP clients by the smbd daemon
+  /var/lib/samba/ntp_signd r,
+  /var/lib/samba/ntp_signd/{,*} rw,
+
   # rtc
   /etc/adjtime r,
   /dev/rtc{,[0-9]*} rw,
