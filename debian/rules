@@ -23,9 +23,6 @@ override_dh_auto_configure:
 		--with-pidfile=/run/chronyd.pid \
 		--host-system=Linux
 
-override_dh_installchangelogs:
-	dh_installchangelogs NEWS
-
 override_dh_install:
 	dh_install
 	install -m 0640 -t $(BASE)/usr/share/chrony/ debian/chrony.keys
