@@ -1,8 +1,8 @@
+etc/NetworkManager/dispatcher.d
 etc/apparmor.d/force-complain
 etc/chrony
 etc/logrotate.d
-etc/NetworkManager/dispatcher.d
-etc/ppp/ip-up.d
 etc/ppp/ip-down.d
-var/log/chrony
+etc/ppp/ip-up.d
 var/lib/chrony
+var/log/chrony
