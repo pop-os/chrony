@@ -1,3 +1,25 @@
+chrony (3.3-3) unstable; urgency=medium
+
+  * debian/:
+    - Normalize packaging with “wrap-and-sort -ab”.
+
+  * debian/control:
+    - Bump standard-version to 4.2.0:
+        ↳ Install upstream release notes as “/usr/share/doc/chrony/NEWS.gz”.
+          Installing these as “/usr/share/doc/package/changelog.gz” is now
+          deprecated.
+
+  * debian/patches/:
+    - Cherry-pick upstream patch to avoid hangs when starting
+    chronyd on newer kernels by falling back to urandom.
+    Thanks to Gustavo Scalet <gustavo.scalet@collabora.com> for the report and
+    the initial patch. (LP: #1787366, Closes: #906276)
+
+  * debian/upstream/metadata:
+    - Add DEP12 upstream metadata file.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 18 Aug 2018 16:23:19 +0200
+
 chrony (3.3-2) unstable; urgency=medium
 
   * debian/chrony.service:
