@@ -142,6 +142,10 @@ prepare_socket(int family, int port_number, int client_only)
   /* Close on exec */
   UTI_FdSetCloexec(sock_fd);
 
+  /* Enable non-blocking mode on server sockets */
+  if (!client_only && fcntl(sock_fd, F_SETFL, O_NONBLOCK))
+    DEBUG_LOG("Could not set O_NONBLOCK : %s", strerror(errno));
+
   /* Prepare local address */
   memset(&my_addr, 0, sizeof (my_addr));
   my_addr_len = 0;
@@ -227,11 +231,11 @@ prepare_socket(int family, int port_number, int client_only)
 
   if (family == AF_INET) {
 #ifdef HAVE_IN_PKTINFO
-    /* We want the local IP info on server sockets */
-    if (setsockopt(sock_fd, IPPROTO_IP, IP_PKTINFO, (char *)&on_off, sizeof(on_off)) < 0) {
+    if (setsockopt(sock_fd, IPPROTO_IP, IP_PKTINFO, (char *)&on_off, sizeof(on_off)) < 0)
       LOG(LOGS_ERR, "Could not set %s socket option", "IP_PKTINFO");
-      /* Don't quit - we might survive anyway */
-    }
+#elif defined(IP_RECVDSTADDR)
+    if (setsockopt(sock_fd, IPPROTO_IP, IP_RECVDSTADDR, (char *)&on_off, sizeof(on_off)) < 0)
+      LOG(LOGS_ERR, "Could not set %s socket option", "IP_RECVDSTADDR");
 #endif
   }
 #ifdef FEAT_IPV6
@@ -570,6 +574,23 @@ NIO_IsServerSocket(int sock_fd)
 
 /* ================================================== */
 
+int
+NIO_IsServerConnectable(NTP_Remote_Address *remote_addr)
+{
+  int sock_fd, r;
+
+  sock_fd = prepare_separate_client_socket(remote_addr->ip_addr.family);
+  if (sock_fd == INVALID_SOCK_FD)
+    return 0;
+
+  r = connect_socket(sock_fd, remote_addr);
+  close_socket(sock_fd);
+
+  return r;
+}
+
+/* ================================================== */
+
 static void
 process_message(struct msghdr *hdr, int length, int sock_fd)
 {
@@ -621,6 +642,14 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
       local_addr.ip_addr.family = IPADDR_INET4;
       local_addr.if_index = ipi.ipi_ifindex;
     }
+#elif defined(IP_RECVDSTADDR)
+    if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_RECVDSTADDR) {
+      struct in_addr addr;
+
+      memcpy(&addr, CMSG_DATA(cmsg), sizeof (addr));
+      local_addr.ip_addr.addr.in4 = ntohl(addr.s_addr);
+      local_addr.ip_addr.family = IPADDR_INET4;
+    }
 #endif
 
 #ifdef HAVE_IN6_PKTINFO
@@ -663,7 +692,7 @@ process_message(struct msghdr *hdr, int length, int sock_fd)
     return;
 #endif
 
-  DEBUG_LOG("Received %d bytes from %s:%d to %s fd=%d if=%d tss=%d delay=%.9f",
+  DEBUG_LOG("Received %d bytes from %s:%d to %s fd=%d if=%d tss=%u delay=%.9f",
             length, UTI_IPToString(&remote_addr.ip_addr), remote_addr.port,
             UTI_IPToString(&local_addr.ip_addr), local_addr.sock_fd, local_addr.if_index,
             local_ts.source, UTI_DiffTimespecsToDouble(&sched_ts, &local_ts.ts));
@@ -717,6 +746,20 @@ read_from_socket(int sock_fd, int event, void *anything)
 #endif
 
   if (status < 0) {
+#ifdef HAVE_LINUX_TIMESTAMPING
+    /* If reading from the error queue failed, the exception should be
+       for a socket error.  Clear the error to avoid a busy loop. */
+    if (flags & MSG_ERRQUEUE) {
+      int error = 0;
+      socklen_t len = sizeof (error);
+
+      if (getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, &error, &len))
+        DEBUG_LOG("Could not get SO_ERROR");
+      if (error)
+        errno = error;
+    }
+#endif
+
     DEBUG_LOG("Could not receive from fd %d : %s", sock_fd,
               strerror(errno));
     return;
@@ -778,8 +821,8 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
   msg.msg_flags = 0;
   cmsglen = 0;
 
-#ifdef HAVE_IN_PKTINFO
   if (local_addr->ip_addr.family == IPADDR_INET4) {
+#ifdef HAVE_IN_PKTINFO
     struct in_pktinfo *ipi;
 
     cmsg = CMSG_FIRSTHDR(&msg);
@@ -792,8 +835,23 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
 
     ipi = (struct in_pktinfo *) CMSG_DATA(cmsg);
     ipi->ipi_spec_dst.s_addr = htonl(local_addr->ip_addr.addr.in4);
-  }
+    if (local_addr->if_index != INVALID_IF_INDEX)
+      ipi->ipi_ifindex = local_addr->if_index;
+#elif defined(IP_SENDSRCADDR)
+    struct in_addr *addr;
+
+    cmsg = CMSG_FIRSTHDR(&msg);
+    memset(cmsg, 0, CMSG_SPACE(sizeof (struct in_addr)));
+    cmsglen += CMSG_SPACE(sizeof (struct in_addr));
+
+    cmsg->cmsg_level = IPPROTO_IP;
+    cmsg->cmsg_type = IP_SENDSRCADDR;
+    cmsg->cmsg_len = CMSG_LEN(sizeof (struct in_addr));
+
+    addr = (struct in_addr *)CMSG_DATA(cmsg);
+    addr->s_addr = htonl(local_addr->ip_addr.addr.in4);
 #endif
+  }
 
 #ifdef HAVE_IN6_PKTINFO
   if (local_addr->ip_addr.family == IPADDR_INET6) {
@@ -810,6 +868,8 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
     ipi = (struct in6_pktinfo *) CMSG_DATA(cmsg);
     memcpy(&ipi->ipi6_addr.s6_addr, &local_addr->ip_addr.addr.in6,
         sizeof(ipi->ipi6_addr.s6_addr));
+    if (local_addr->if_index != INVALID_IF_INDEX)
+      ipi->ipi6_ifindex = local_addr->if_index;
   }
 #endif
 

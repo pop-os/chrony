@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2018-03-15
+.\"      Date: 2018-08-31
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2018-03-15" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2018-08-31" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -63,10 +63,12 @@ options:
 This option specifies the minimum interval between requests sent to the server
 as a power of 2 in seconds. For example, \fBminpoll 5\fP would mean that the
 polling interval should not drop below 32 seconds. The default is 6 (64
-seconds), the minimum is \-4 (1/16th of a second), and the maximum is 24 (6
+seconds), the minimum is \-6 (1/64th of a second), and the maximum is 24 (6
 months). Note that intervals shorter than 6 (64 seconds) should generally not
 be used with public servers on the Internet, because it might be considered
-abuse.
+abuse. A sub\-second interval will be enabled only when the server is reachable
+and the round\-trip delay is shorter than 10 milliseconds, i.e. the server
+should be in a local network.
 .RE
 .sp
 \fBmaxpoll\fP \fIpoll\fP
@@ -74,39 +76,43 @@ abuse.
 This option specifies the maximum interval between requests sent to the server
 as a power of 2 in seconds. For example, \fBmaxpoll 9\fP indicates that the polling
 interval should stay at or below 9 (512 seconds). The default is 10 (1024
-seconds), the minimum is 0 (1 second), and the maximum is 24 (6 months).
+seconds), the minimum is \-6 (1/64th of a second), and the maximum is 24 (6
+months).
 .RE
 .sp
 \fBiburst\fP
 .RS 4
 With this option, the interval between the first four requests sent to the
-server will be 2 seconds instead of the interval specified by the \fBminpoll\fP
-option, which allows \fBchronyd\fP to make the first update of the clock shortly
-after start.
+server will be 2 seconds or less instead of the interval specified by the
+\fBminpoll\fP option, which allows \fBchronyd\fP to make the first update of the clock
+shortly after start.
 .RE
 .sp
 \fBburst\fP
 .RS 4
 With this option, \fBchronyd\fP will shorten the interval between up to four
-requests to 2 seconds when it cannot get a good measurement from the server.
-The number of requests in the burst is limited by the current polling interval
-to keep the average interval at or above the minimum interval, i.e. the current
-interval needs to be at least two times longer than the minimum interval in
-order to allow a burst with two requests.
+requests to 2 seconds or less when it cannot get a good measurement from the
+server. The number of requests in the burst is limited by the current polling
+interval to keep the average interval at or above the minimum interval, i.e.
+the current interval needs to be at least two times longer than the minimum
+interval in order to allow a burst with two requests.
 .RE
 .sp
 \fBkey\fP \fIID\fP
 .RS 4
-The NTP protocol supports the inclusion of checksums in the packets, to prevent
+The NTP protocol supports a message authentication code (MAC) to prevent
 computers having their system time upset by rogue packets being sent to them.
-The checksums are generated as a function of a password, using the
-cryptographic hash function set in the key file, which is specified by the
-\fBkeyfile\fP directive.
+The MAC is generated as a function of a password specified in the key file,
+which is specified by the \fBkeyfile\fP directive.
 .sp
 The \fBkey\fP option specifies which key (with an ID in the range 1 through 2^32\-1)
 should \fBchronyd\fP use to authenticate requests sent to the server and verify its
 responses. The server must have the same key for this number configured,
 otherwise no relationship between the computers will be possible.
+.sp
+If the server is running \fBntpd\fP and the output size of the hash function used
+by the key is longer than 160 bits (e.g. SHA256), the \fBversion\fP option needs to
+be set to 4 for compatibility.
 .RE
 .sp
 \fBmaxdelay\fP \fIdelay\fP
@@ -187,6 +193,14 @@ Set the maximum number of samples kept for this source. This overrides the
 \fBmaxsamples\fP directive.
 .RE
 .sp
+\fBfilter\fP \fIsamples\fP
+.RS 4
+This option enables a median filter to reduce noise in NTP measurements. The
+filter will reduce the specified number of samples to a single sample. It is
+intended to be used with very short polling intervals in local networks where
+it is acceptable to generate a lot of NTP traffic.
+.RE
+.sp
 \fBoffline\fP
 .RS 4
 If the server will not be reachable when \fBchronyd\fP is started, the \fBoffline\fP
@@ -197,13 +211,12 @@ enabled to do so (by using the \fBonline\fP command in
 .sp
 \fBauto_offline\fP
 .RS 4
-With this option, the server will be assumed to have gone offline when two
-requests have been sent to it without receiving a response. This option avoids
+With this option, the server will be assumed to have gone offline when sending
+a request fails, e.g. due to a missing route to the network. This option avoids
 the need to run the \fBoffline\fP command from \fBchronyc\fP
-when disconnecting the network link, if it is safe to assume that the requests
-and responses will not be dropped in the network, e.g. in a trusted local
-network. (It will still be necessary to use the \fBonline\fP
-command when the link has been established, to enable measurements to start.)
+when disconnecting the network link. (It will still be necessary to use the
+\fBonline\fP command when the link has been established, to
+enable measurements to start.)
 .RE
 .sp
 \fBprefer\fP
@@ -1029,9 +1042,10 @@ driftfile @CHRONYVARDIR@/drift
 \fBfallbackdrift\fP \fImin\-interval\fP \fImax\-interval\fP
 .RS 4
 Fallback drifts are long\-term averages of the system clock drift calculated
-over exponentially increasing intervals. They are used when the clock is no
-longer synchronised to avoid quickly drifting away from true time if there was
-a short\-term deviation in the drift before the synchronisation was lost.
+over exponentially increasing intervals. They are used to avoid quickly
+drifting away from true time when the clock was not updated for a longer period
+of time and there was a short\-term deviation in the drift before the updates
+stopped.
 .sp
 The directive specifies the minimum and maximum interval since the last clock
 update to switch between fallback drifts. They are defined as a power of 2 (in
@@ -1049,8 +1063,10 @@ fallbackdrift 16 19
 .sp
 In this example, the minimum interval is 16 (18 hours) and the maximum interval is
 19 (6 days). The system clock frequency will be set to the first fallback 18
-hours after last clock update, to the second after 36 hours, etc. This might be
-a good setting to cover daily and weekly temperature fluctuations.
+hours after last clock update, to the second after 36 hours, and so on. This
+might be a good setting to cover frequency changes due to daily and weekly
+temperature fluctuations. When the frequency is set to a fallback, the state of
+the clock will change to \(oqNot synchronised\(cq.
 .sp
 By default (or if the specified maximum or minimum is 0), no fallbacks are used
 and the clock frequency changes only with new measurements from NTP sources,
@@ -3262,6 +3278,18 @@ clients. The default value is 0 (1 second) and the minimum value is \-6 (1/64th
 of a second).
 .RE
 .sp
+\fBminsamples\fP \fIsamples\fP
+.RS 4
+This option specifies the minimum number of readings kept for tracking of the
+NIC clock. The default value is 2.
+.RE
+.sp
+\fBmaxsamples\fP \fIsamples\fP
+.RS 4
+This option specifies the maximum number of readings kept for tracking of the
+NIC clock. The default value is 16.
+.RE
+.sp
 \fBprecision\fP \fIprecision\fP
 .RS 4
 This option specifies the assumed precision of reading of the NIC clock. The
@@ -3431,10 +3459,11 @@ significant impact on performance as \fBchronyd\(cqs\fP memory usage is modest. 
 .sp
 \fBpidfile\fP \fIfile\fP
 .RS 4
-\fBchronyd\fP always writes its process ID (PID) to a file, and checks this file on
-startup to see if another \fBchronyd\fP might already be running on the system. By
-default, the file used is \fI@DEFAULT_PID_FILE@\fP. The \fBpidfile\fP directive
-allows the name to be changed, e.g.:
+Unless \fBchronyd\fP is started with the \fB\-Q\fP option, it writes its process ID
+(PID) to a file, and checks this file on startup to see if another \fBchronyd\fP
+might already be running on the system. By default, the file used is
+\fI@DEFAULT_PID_FILE@\fP. The \fBpidfile\fP directive allows the name to be changed,
+e.g.:
 .sp
 .if n \{\
 .RS 4

@@ -107,6 +107,8 @@ determine_hash_delay(uint32_t key_id)
   double diff, min_diff;
   int i, nsecs;
 
+  memset(&pkt, 0, sizeof (pkt));
+
   for (i = 0; i < 10; i++) {
     LCL_ReadRawTime(&before);
     KEY_GenerateAuth(key_id, (unsigned char *)&pkt, NTP_NORMAL_PACKET_LENGTH,
@@ -212,7 +214,7 @@ KEY_Reload(void)
       continue;
 
     if (!CPS_ParseKey(line, &key_id, &hashname, &keyval)) {
-      LOG(LOGS_WARN, "Could not parse key at line %d in file %s", line_number, key_file);
+      LOG(LOGS_WARN, "Could not parse key at line %u in file %s", line_number, key_file);
       continue;
     }
 

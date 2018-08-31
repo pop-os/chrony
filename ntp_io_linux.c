@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2016-2017
+ * Copyright (C) Miroslav Lichvar  2016-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -171,6 +171,12 @@ add_interface(CNF_HwTsInterface *conf_iface)
     return 0;
   }
 
+  if (ts_info.phc_index < 0) {
+    DEBUG_LOG("PHC missing on %s", req.ifr_name);
+    close(sock_fd);
+    return 0;
+  }
+
   ts_config.flags = 0;
   ts_config.tx_type = HWTSTAMP_TX_ON;
 
@@ -230,7 +236,8 @@ add_interface(CNF_HwTsInterface *conf_iface)
   iface->tx_comp = conf_iface->tx_comp;
   iface->rx_comp = conf_iface->rx_comp;
 
-  iface->clock = HCL_CreateInstance(UTI_Log2ToDouble(MAX(conf_iface->minpoll, MIN_PHC_POLL)));
+  iface->clock = HCL_CreateInstance(conf_iface->min_samples, conf_iface->max_samples,
+                                    UTI_Log2ToDouble(MAX(conf_iface->minpoll, MIN_PHC_POLL)));
 
   LOG(LOGS_INFO, "Enabled HW timestamping %son %s",
       ts_config.rx_filter == HWTSTAMP_FILTER_NONE ? "(TX only) " : "", iface->name);
@@ -315,7 +322,7 @@ check_timestamping_option(int option)
     return 0;
 
   if (setsockopt(sock_fd, SOL_SOCKET, SO_TIMESTAMPING, &option, sizeof (option)) < 0) {
-    DEBUG_LOG("Could not enable timestamping option %x", option);
+    DEBUG_LOG("Could not enable timestamping option %x", (unsigned int)option);
     close(sock_fd);
     return 0;
   }
@@ -784,7 +791,7 @@ NIO_Linux_ProcessMessage(NTP_Remote_Address *remote_addr, NTP_Local_Address *loc
   l2_length = length;
   length = extract_udp_data(hdr->msg_iov[0].iov_base, remote_addr, length);
 
-  DEBUG_LOG("Received %d (%d) bytes from error queue for %s:%d fd=%d if=%d tss=%d",
+  DEBUG_LOG("Received %d (%d) bytes from error queue for %s:%d fd=%d if=%d tss=%u",
             l2_length, length, UTI_IPToString(&remote_addr->ip_addr), remote_addr->port,
             local_addr->sock_fd, local_addr->if_index, local_ts->source);
 

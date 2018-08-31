@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Lonnie Abelbeck  2016
- * Copyright (C) Miroslav Lichvar  2009-2017
+ * Copyright (C) Miroslav Lichvar  2009-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -111,7 +111,7 @@ read_line(void)
     char *cmd;
 
     rl_attempted_completion_function = command_name_completion;
-    rl_basic_word_break_characters = "\t\n\r";
+    rl_basic_word_break_characters = " \t\n\r";
 
     /* save line only if not empty */
     cmd = readline(prompt);
@@ -422,6 +422,14 @@ process_cmd_online(CMD_Request *msg, char *line)
 
   return ok;
 
+}
+
+/* ================================================== */
+
+static void
+process_cmd_onoffline(CMD_Request *msg, char *line)
+{
+  msg->command = htons(REQ_ONOFFLINE);
 }
 
 /* ================================================== */
@@ -1105,7 +1113,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       msg->data.ntp_source.asymmetry = UTI_FloatHostToNetwork(data.params.asymmetry);
       msg->data.ntp_source.offset = UTI_FloatHostToNetwork(data.params.offset);
       msg->data.ntp_source.flags = htonl(
-          (data.params.online ? REQ_ADDSRC_ONLINE : 0) |
+          (data.params.connectivity == SRC_ONLINE ? REQ_ADDSRC_ONLINE : 0) |
           (data.params.auto_offline ? REQ_ADDSRC_AUTOOFFLINE : 0) |
           (data.params.iburst ? REQ_ADDSRC_IBURST : 0) |
           (data.params.interleaved ? REQ_ADDSRC_INTERLEAVED : 0) |
@@ -1114,6 +1122,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
           (data.params.sel_options & SRC_SELECT_REQUIRE ? REQ_ADDSRC_REQUIRE : 0));
+      msg->data.ntp_source.filter_length = htonl(data.params.filter_length);
       memset(msg->data.ntp_source.reserved, 0, sizeof (msg->data.ntp_source.reserved));
 
       result = 1;
@@ -1208,6 +1217,8 @@ give_help(void)
     "minstratum <address> <stratum>\0Modify minimum stratum\0"
     "offline [<mask>/<address>]\0Set sources in subnet to offline status\0"
     "online [<mask>/<address>]\0Set sources in subnet to online status\0"
+    "onoffline\0Set all sources to online or offline status\0"
+    "\0according to network configuration\0"
     "polltarget <address> <target>\0Modify poll target\0"
     "refresh\0Refresh IP addresses\0"
     "\0\0"
@@ -1270,30 +1281,52 @@ give_help(void)
 /* Tab-completion when editline/readline is available */
 
 #ifdef FEAT_READLINE
+
+enum {
+  TAB_COMPLETE_BASE_CMDS,
+  TAB_COMPLETE_ADD_OPTS,
+  TAB_COMPLETE_MANUAL_OPTS,
+  TAB_COMPLETE_SOURCES_OPTS,
+  TAB_COMPLETE_SOURCESTATS_OPTS,
+  TAB_COMPLETE_MAX_INDEX
+};
+
+static int tab_complete_index;
+
 static char *
 command_name_generator(const char *text, int state)
 {
-  const char *name, *names[] = {
-    "accheck", "activity", "add peer", "add server", "allow", "burst",
+  const char *name, **names[TAB_COMPLETE_MAX_INDEX];
+  const char *base_commands[] = {
+    "accheck", "activity", "add", "allow", "burst",
     "clients", "cmdaccheck", "cmdallow", "cmddeny", "cyclelogs", "delete",
     "deny", "dns", "dump", "exit", "help", "keygen", "local", "makestep",
-    "manual on", "manual off", "manual delete", "manual list", "manual reset",
-    "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
-    "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online",
+    "manual", "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
+    "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online", "onoffline",
     "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist",
     "retries", "rtcdata", "serverstats", "settime", "shutdown", "smoothing",
-    "smoothtime", "sources", "sources -v", "sourcestats", "sourcestats -v",
+    "smoothtime", "sources", "sourcestats",
     "timeout", "tracking", "trimrtc", "waitsync", "writertc",
     NULL
   };
+  const char *add_options[] = { "peer", "server", NULL };
+  const char *manual_options[] = { "on", "off", "delete", "list", "reset", NULL };
+  const char *sources_options[] = { "-v", NULL };
+  const char *sourcestats_options[] = { "-v", NULL };
   static int list_index, len;
+
+  names[TAB_COMPLETE_BASE_CMDS] = base_commands;
+  names[TAB_COMPLETE_ADD_OPTS] = add_options;
+  names[TAB_COMPLETE_MANUAL_OPTS] = manual_options;
+  names[TAB_COMPLETE_SOURCES_OPTS] = sources_options;
+  names[TAB_COMPLETE_SOURCESTATS_OPTS] = sourcestats_options;
 
   if (!state) {
     list_index = 0;
     len = strlen(text);
   }
 
-  while ((name = names[list_index++])) {
+  while ((name = names[tab_complete_index][list_index++])) {
     if (strncmp(name, text, len) == 0) {
       return strdup(name);
     }
@@ -1307,7 +1340,25 @@ command_name_generator(const char *text, int state)
 static char **
 command_name_completion(const char *text, int start, int end)
 {
+  char first[32];
+
+  snprintf(first, MIN(sizeof (first), start + 1), "%s", rl_line_buffer);
   rl_attempted_completion_over = 1;
+
+  if (!strcmp(first, "add ")) {
+    tab_complete_index = TAB_COMPLETE_ADD_OPTS;
+  } else if (!strcmp(first, "manual ")) {
+    tab_complete_index = TAB_COMPLETE_MANUAL_OPTS;
+  } else if (!strcmp(first, "sources ")) {
+    tab_complete_index = TAB_COMPLETE_SOURCES_OPTS;
+  } else if (!strcmp(first, "sourcestats ")) {
+    tab_complete_index = TAB_COMPLETE_SOURCESTATS_OPTS;
+  } else if (first[0] == '\0') {
+    tab_complete_index = TAB_COMPLETE_BASE_CMDS;
+  } else {
+    return NULL;
+  }
+
   return rl_completion_matches(text, command_name_generator);
 }
 #endif
@@ -1588,17 +1639,17 @@ print_seconds(unsigned long s)
   if (s == (uint32_t)-1) {
     printf("   -");
   } else if (s < 1200) {
-    printf("%4ld", s);
+    printf("%4lu", s);
   } else if (s < 36000) {
-    printf("%3ldm", s / 60);
+    printf("%3lum", s / 60);
   } else if (s < 345600) {
-    printf("%3ldh", s / 3600);
+    printf("%3luh", s / 3600);
   } else {
     d = s / 86400;
     if (d > 999) {
-      printf("%3ldy", d / 365);
+      printf("%3luy", d / 365);
     } else {
-      printf("%3ldd", d);
+      printf("%3lud", d);
     }
   }
 }
@@ -2840,7 +2891,7 @@ process_cmd_keygen(char *line)
   snprintf(hash_name, sizeof (hash_name), "MD5");
 #endif
 
-  if (sscanf(line, "%u %16s %d", &id, hash_name, &bits))
+  if (sscanf(line, "%u %16s %u", &id, hash_name, &bits))
     ;
 
   length = CLAMP(10, (bits + 7) / 8, sizeof (key));
@@ -2984,6 +3035,8 @@ process_line(char *line)
     do_normal_submit = process_cmd_offline(&tx_message, line);
   } else if (!strcmp(command, "online")) {
     do_normal_submit = process_cmd_online(&tx_message, line);
+  } else if (!strcmp(command, "onoffline")) {
+    process_cmd_onoffline(&tx_message, line);
   } else if (!strcmp(command, "polltarget")) {
     do_normal_submit = process_cmd_polltarget(&tx_message, line);
   } else if (!strcmp(command, "quit")) {
@@ -3106,7 +3159,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2017 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2018 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",
@@ -3206,7 +3259,7 @@ main(int argc, char **argv)
     hostnames = DEFAULT_COMMAND_SOCKET",127.0.0.1,::1";
   }
 
-  UTI_SetQuitSignalsHandler(signal_handler);
+  UTI_SetQuitSignalsHandler(signal_handler, 0);
 
   sockaddrs = get_sockaddrs(hostnames, port);
 
