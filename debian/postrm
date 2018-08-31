@@ -12,11 +12,11 @@ case "$1" in
         rm -f /var/lib/chrony/*
         rm -f /etc/chrony/chrony.conf
         rm -f /etc/chrony/chrony.keys
-        if `which ucf >/dev/null`
+        if command -v ucf >/dev/null
         then
             ucf --purge /etc/chrony/chrony.conf
             ucf --purge /etc/chrony/chrony.keys
-            if [ -x "$(which ucfr)" ]; then
+            if [ -x "$(command -v ucfr)" ]; then
                 ucfr --purge chrony /etc/chrony/chrony.conf
                 ucfr --purge chrony /etc/chrony/chrony.keys
             fi
@@ -26,7 +26,7 @@ case "$1" in
         rm -rf /var/lib/chrony
         rm -rf /var/log/chrony
         # Remove "_chrony" system user/group
-        if [ -x "$(which deluser)" ]
+        if [ -x "$(command -v deluser)" ]
         then
             deluser --quiet --system _chrony > /dev/null 2>&1 || true
         fi

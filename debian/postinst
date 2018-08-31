@@ -58,11 +58,11 @@ case "$1" in
             fi
         fi
 
-        if `which ucf >/dev/null`
+        if command -v ucf >/dev/null
         then
             ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
             ucf --three-way /usr/share/chrony/chrony.keys /etc/chrony/chrony.keys
-            if [ -x "$(which ucfr)" ]; then
+            if [ -x "$(command -v ucfr)" ]; then
                 ucfr chrony /etc/chrony/chrony.conf
                 ucfr chrony /etc/chrony/chrony.keys
             fi
