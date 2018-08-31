@@ -1,0 +1,30 @@
+image: debian:sid
+
+variables:
+    DEBIAN_FRONTEND: noninteractive
+    WORKING_DIR: ./debian/output
+
+stages:
+    - build
+    - test
+
+package_build:
+    stage: build
+    script:
+        - apt update
+        - apt install eatmydata -y
+        - eatmydata apt build-dep ./ -y
+        - eatmydata apt install git-buildpackage -y
+        - gbp pull --ignore-branch
+        - gbp buildpackage --git-ignore-branch --git-export-dir=${WORKING_DIR} -us -uc
+    artifacts:
+        name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
+        paths:
+            - ${WORKING_DIR}/
+
+lintian:
+    stage: test
+    script:
+        - apt update
+        - apt install lintian -y --no-install-recommends
+        - lintian -EIi --pedantic ${WORKING_DIR}/*.changes
