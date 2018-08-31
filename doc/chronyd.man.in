@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2018-04-04
+.\"      Date: 2018-08-31
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2018-04-04" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2018-08-31" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -91,9 +91,9 @@ started without root privileges.
 \fB\-r\fP
 .RS 4
 This option will try to reload and then delete files containing sample
-histories for each of the servers and reference clocks being used. These
-histories are created by using the \fBdump\fP command in
-\fBchronyc\fP, or by setting the \fBdumponexit\fP
+histories for each of the servers and reference clocks being used. The
+files are expected to be in the directory specified by the
+\fBdumpdir\fP
 directive in the configuration file. This option is useful if you want to stop
 and restart \fBchronyd\fP briefly for any reason, e.g. to install a new version.
 However, it should be used only on systems where the kernel can maintain clock

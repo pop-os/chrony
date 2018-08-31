@@ -171,6 +171,11 @@ network latency and stability of the system clock (which mainly depends on the
 temperature sensitivity of the crystal oscillator and the maximum rate of the
 temperature change).
 
+Generally, if the `sourcestats` command usually reports a small number of
+samples retained for a source (e.g. fewer than 16), a shorter polling interval
+should be considered. If the number of samples is usually at the maximum of 64,
+a longer polling interval may work better.
+
 An example of the directive for an NTP server on the Internet that you are
 allowed to poll frequently could be
 
@@ -178,15 +183,15 @@ allowed to poll frequently could be
 server foo.example.net minpoll 4 maxpoll 6 polltarget 16
 ----
 
-An example using very short polling intervals for a server located in the same
+An example using shorter polling intervals with a server located in the same
 LAN could be
 
 ----
 server ntp.local minpoll 2 maxpoll 4 polltarget 30
 ----
 
-The maxdelay options are useful to ignore measurements with larger delay (e.g.
-due to congestion in the network) and improve the stability of the
+The maxdelay options are useful to ignore measurements with an unusally large
+delay (e.g. due to congestion in the network) and improve the stability of the
 synchronisation. The `maxdelaydevratio` option could be added to the example
 with local NTP server
 
@@ -194,15 +199,32 @@ with local NTP server
 server ntp.local minpoll 2 maxpoll 4 polltarget 30 maxdelaydevratio 2
 ----
 
-If your server supports the interleaved mode, the `xleave` option should be
-added to the `server` directive in order to allow the server to send the
-client more accurate hardware or kernel transmit timestamps. When combined with
-local hardware timestamping, sub-microsecond accuracy may be possible. An
-example could be
+If your server supports the interleaved mode (e.g. it is running `chronyd`),
+the `xleave` option should be added to the `server` directive in order to allow
+the server to send the client more accurate transmit timestamps (kernel or
+preferably hardware). For example:
 
 ----
-server ntp.local minpoll 2 maxpoll 2 xleave
+server ntp.local minpoll 2 maxpoll 4 xleave
+----
+
+When combined with local hardware timestamping, good network switches, and even
+shorter polling intervals, a sub-microsecond accuracy and stability of a few
+tens of nanoseconds may be possible. For example:
+
+----
+server ntp.local minpoll 0 maxpoll 0 xleave
 hwtimestamp eth0
+----
+
+If it is acceptable for NTP clients in the network to send requests at an
+excessive rate, a sub-second polling interval may be specified. A median filter
+can be enabled in order to update the clock at a reduced rate with more stable
+measurements. For example:
+
+----
+server ntp.local minpoll -6 maxpoll -6 filter 15 xleave
+hwtimestamp eth0 minpoll -6
 ----
 
 === Does `chronyd` have an ntpdate mode?
@@ -291,6 +313,49 @@ to
 ----
 makestep 1 -1
 ----
+
+=== Using a Windows NTP server?
+
+A common issue with Windows NTP servers is that they report a very large root
+dispersion (e.g. three seconds or more), which causes `chronyd` to ignore the
+server for being too inaccurate. The `sources` command may show a valid
+measurement, but the server is not selected for synchronisation. You can check
+the root dispersion of the server with the ``chronyc``'s `ntpdata` command.
+
+The `maxdistance` value needs to be increased in _chrony.conf_ to enable
+synchronisation to such a server. For example:
+
+----
+maxdistance 16.0
+----
+
+=== Using a PPS reference clock?
+
+A pulse-per-second (PPS) reference clock requires a non-PPS time source to
+determine which second of UTC corresponds to each pulse. If it is another
+reference clock specified with the `lock` option in the `refclock` directive,
+the offset between the two reference clocks must be smaller than 0.2 seconds in
+order for the PPS reference clock to work. With NMEA reference clocks it is
+common to have a larger offset. It needs to be corrected with the `offset`
+option.
+
+One approach to find out a good value of the `offset` option is to configure
+the reference clocks with the `noselect` option and compare them to an NTP
+server. For example, if the `sourcestats` command showed
+
+----
+Name/IP Address            NP  NR  Span  Frequency  Freq Skew  Offset  Std Dev
+==============================================================================
+PPS0                        0   0     0     +0.000   2000.000     +0ns  4000ms
+NMEA                       58  30   231    -96.494     38.406   +504ms  6080us
+foo.example.net             7   3   200     -2.991     16.141   -107us   492us
+----
+
+the offset of the NMEA source would need to be increased by about 0.504
+seconds. It does not have to be very accurate. As long as the offset of the
+NMEA reference clock stays below 0.2 seconds, the PPS reference clock should be
+able to determine the seconds corresponding to the pulses and allow the samples
+to be used for synchronisation.
 
 == Issues with `chronyc`
 
