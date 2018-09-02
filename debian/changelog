@@ -1,3 +1,29 @@
+chrony (3.4~pre1-1) experimental; urgency=medium
+
+  * Import upstream version 3.4-pre1:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * debian/:
+    - Add “.gitlab-ci.yml” file to use GitLab Continuous Integration.
+
+  * debian/chrony.if-{post-down,up}:
+    - Use the new “onoffline” command to tell chronyd to switch all sources to
+    the online or offline status according to the current network configuration.
+
+  * debian/chrony.ppp.ip-{down,up}:
+    - As for ifupdown scripts, use the “onoffline” command.
+
+  * debian/control:
+    - Bump standard-version to 4.2.1 (no changes required).
+
+  * debian/patches/*:
+    - Remove fall-back-to-urandom.patch. Applied in this prerelease.
+
+  * debian/post{inst,rm}:
+    - Use “command -v” instead of “which” to enhance portability.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 02 Sep 2018 19:14:08 +0200
+
 chrony (3.3-3) unstable; urgency=medium
 
   * debian/:
