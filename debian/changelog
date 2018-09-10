@@ -1,3 +1,12 @@
+chrony (3.4~pre1-2) experimental; urgency=medium
+
+  * debian/patches/*:
+    - Cherry-pick upstream patch to fix samplefilt unit test to work with
+    low-precision clocks. This should prevent chrony from failing to build
+    from source on HPPA and Alpha.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 10 Sep 2018 18:39:58 +0200
+
 chrony (3.4~pre1-1) experimental; urgency=medium
 
   * Import upstream version 3.4-pre1:
