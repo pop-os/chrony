@@ -10,13 +10,13 @@ License: GPL-2
 
 Files: main.c
        sys_linux.c
-Copyright: 2009-2017, Miroslav Lichvar
+Copyright: 2009-2018, Miroslav Lichvar
            2009, John G. Hasler
            1997-2003, Richard P. Curnow
 License: GPL-2
 
 Files: ntp_io.c
-Copyright: 2009-2016, Miroslav Lichvar
+Copyright: 2009, 2013-2016, 2018, Miroslav Lichvar
            2009, Timo Teras
            1997-2003, Richard P. Curnow
 License: GPL-2
@@ -60,7 +60,7 @@ Copyright: 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: hwclock.?
-Copyright: 2016-2017, Miroslav Lichvar
+Copyright: 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_io_linux.?
@@ -97,7 +97,7 @@ Copyright: 1997-2003, Richard P. Curnow
 License: GPL-2
 
 Files: refclock.c
-Copyright: 2009-2011, 2013-2014, 2016-2017, Miroslav Lichvar
+Copyright: 2009-2011, 2013-2014, 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: refclock_phc.c
@@ -116,7 +116,7 @@ License: GPL-2
 
 Files: sourcestats.c
 Copyright: 1997-2003, Richard P. Curnow
-           2011-2014, 2016-2017, Miroslav Lichvar
+           2011-2014, 2016-2018, Miroslav Lichvar
 License: GPL-2
 
 Files: stubs.c
