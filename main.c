@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2012-2017
+ * Copyright (C) Miroslav Lichvar  2012-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -530,9 +530,6 @@ int main
   /* Check whether another chronyd may already be running */
   check_pidfile();
 
-  /* Write our pidfile to prevent other chronyds running */
-  write_pidfile();
-
   if (!user)
     user = CNF_GetUser();
 
@@ -542,6 +539,9 @@ int main
 
   /* Create directories for sockets, log files, and dump files */
   CNF_CreateDirs(pw->pw_uid, pw->pw_gid);
+
+  /* Write our pidfile to prevent other instances from running */
+  write_pidfile();
 
   PRV_Initialise();
   LCL_Initialise();
@@ -586,7 +586,7 @@ int main
   /* From now on, it is safe to do finalisation on exit */
   initialised = 1;
 
-  UTI_SetQuitSignalsHandler(signal_cleanup);
+  UTI_SetQuitSignalsHandler(signal_cleanup, 1);
 
   CAM_OpenUnixSocket();
 

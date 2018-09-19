@@ -161,7 +161,7 @@ extern Float UTI_FloatHostToNetwork(double x);
 /* Set FD_CLOEXEC on descriptor */
 extern int UTI_FdSetCloexec(int fd);
 
-extern int UTI_SetQuitSignalsHandler(void (*handler)(int));
+extern void UTI_SetQuitSignalsHandler(void (*handler)(int), int ignore_sigpipe);
 
 /* Get directory (as an allocated string) for a path */
 extern char *UTI_PathToDir(const char *path);
@@ -199,5 +199,7 @@ extern void UTI_GetRandomBytes(void *buf, unsigned int len);
 
 /* Macro to clamp a value between two values */
 #define CLAMP(min, x, max) (MAX((min), MIN((x), (max))))
+
+#define SQUARE(x) ((x) * (x))
 
 #endif /* GOT_UTIL_H */

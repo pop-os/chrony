@@ -100,7 +100,8 @@
 #define REQ_ADD_SERVER3 60
 #define REQ_ADD_PEER3 61
 #define REQ_SHUTDOWN 62
-#define N_REQUEST_TYPES 63
+#define REQ_ONOFFLINE 63
+#define N_REQUEST_TYPES 64
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -275,7 +276,8 @@ typedef struct {
   Float asymmetry;
   Float offset;
   uint32_t flags;
-  uint32_t reserved[4];
+  int32_t filter_length;
+  uint32_t reserved[3];
   int32_t EOR;
 } REQ_NTP_Source;
 

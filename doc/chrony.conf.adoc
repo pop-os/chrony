@@ -69,27 +69,30 @@ options:
 This option specifies the minimum interval between requests sent to the server
 as a power of 2 in seconds. For example, *minpoll 5* would mean that the
 polling interval should not drop below 32 seconds. The default is 6 (64
-seconds), the minimum is -4 (1/16th of a second), and the maximum is 24 (6
+seconds), the minimum is -6 (1/64th of a second), and the maximum is 24 (6
 months). Note that intervals shorter than 6 (64 seconds) should generally not
 be used with public servers on the Internet, because it might be considered
-abuse.
+abuse. A sub-second interval will be enabled only when the server is reachable
+and the round-trip delay is shorter than 10 milliseconds, i.e. the server
+should be in a local network.
 *maxpoll* _poll_:::
 This option specifies the maximum interval between requests sent to the server
 as a power of 2 in seconds. For example, *maxpoll 9* indicates that the polling
 interval should stay at or below 9 (512 seconds). The default is 10 (1024
-seconds), the minimum is 0 (1 second), and the maximum is 24 (6 months).
+seconds), the minimum is -6 (1/64th of a second), and the maximum is 24 (6
+months).
 *iburst*:::
 With this option, the interval between the first four requests sent to the
-server will be 2 seconds instead of the interval specified by the *minpoll*
-option, which allows *chronyd* to make the first update of the clock shortly
-after start.
+server will be 2 seconds or less instead of the interval specified by the
+*minpoll* option, which allows *chronyd* to make the first update of the clock
+shortly after start.
 *burst*:::
 With this option, *chronyd* will shorten the interval between up to four
-requests to 2 seconds when it cannot get a good measurement from the server.
-The number of requests in the burst is limited by the current polling interval
-to keep the average interval at or above the minimum interval, i.e. the current
-interval needs to be at least two times longer than the minimum interval in
-order to allow a burst with two requests.
+requests to 2 seconds or less when it cannot get a good measurement from the
+server. The number of requests in the burst is limited by the current polling
+interval to keep the average interval at or above the minimum interval, i.e.
+the current interval needs to be at least two times longer than the minimum
+interval in order to allow a burst with two requests.
 *key* _ID_:::
 The NTP protocol supports a message authentication code (MAC) to prevent
 computers having their system time upset by rogue packets being sent to them.
@@ -158,19 +161,23 @@ Set the minimum number of samples kept for this source. This overrides the
 *maxsamples* _samples_:::
 Set the maximum number of samples kept for this source. This overrides the
 <<maxsamples,*maxsamples*>> directive.
+*filter* _samples_:::
+This option enables a median filter to reduce noise in NTP measurements. The
+filter will reduce the specified number of samples to a single sample. It is
+intended to be used with very short polling intervals in local networks where
+it is acceptable to generate a lot of NTP traffic.
 *offline*:::
 If the server will not be reachable when *chronyd* is started, the *offline*
 option can be specified. *chronyd* will not try to poll the server until it is
 enabled to do so (by using the <<chronyc.adoc#online,*online*>> command in
 *chronyc*).
 *auto_offline*:::
-With this option, the server will be assumed to have gone offline when two
-requests have been sent to it without receiving a response. This option avoids
+With this option, the server will be assumed to have gone offline when sending
+a request fails, e.g. due to a missing route to the network. This option avoids
 the need to run the <<chronyc.adoc#offline,*offline*>> command from *chronyc*
-when disconnecting the network link, if it is safe to assume that the requests
-and responses will not be dropped in the network, e.g. in a trusted local
-network. (It will still be necessary to use the <<chronyc.adoc#online,*online*>>
-command when the link has been established, to enable measurements to start.)
+when disconnecting the network link. (It will still be necessary to use the
+<<chronyc.adoc#online,*online*>> command when the link has been established, to
+enable measurements to start.)
 *prefer*:::
 Prefer this source over sources without the *prefer* option.
 *noselect*:::
@@ -654,6 +661,13 @@ The *minsamples* directive sets the default minimum number of samples that
 *chronyd* should keep for each source. This setting can be overridden for
 individual sources in the <<server,*server*>> and <<refclock,*refclock*>>
 directives. The default value is 6. The useful range is 4 to 64.
++
+Forcing *chronyd* to keep more samples than it would normally keep reduces
+noise in the estimated frequency and offset, but slows down the response to
+changes in the frequency and offset of the clock. The offsets in the
+<<chronyc.adoc#tracking,*tracking*>> and
+<<chronyc.adoc#sourcestats,*sourcestats*>> reports (and the _tracking.log_ and
+_statistics.log_ files) may be smaller than the actual offsets.
 
 === Source selection
 
@@ -1938,6 +1952,12 @@ It's defined as a power of two. It should correspond to the minimum polling
 interval of all NTP sources and the minimum expected polling interval of NTP
 clients. The default value is 0 (1 second) and the minimum value is -6 (1/64th
 of a second).
+*minsamples* _samples_:::
+This option specifies the minimum number of readings kept for tracking of the
+NIC clock. The default value is 2.
+*maxsamples* _samples_:::
+This option specifies the maximum number of readings kept for tracking of the
+NIC clock. The default value is 16.
 *precision* _precision_:::
 This option specifies the assumed precision of reading of the NIC clock. The
 default value is 100e-9 (100 nanoseconds).
@@ -2036,6 +2056,10 @@ that has password shorter than 80 bits.
 The <<chronyc.adoc#keygen,*keygen*>> command of *chronyc* can be used to
 generate random keys for the key file. By default, it generates 160-bit MD5 or
 SHA1 keys.
++
+For security reasons, the file should be readable only by root and the user
+under which *chronyd* is normally running (to allow *chronyd* to re-read the
+file when the <<chronyc.adoc#rekey,*rekey*>> command is issued by *chronyc*).
 
 [[lock_all]]*lock_all*::
 The *lock_all* directive will lock chronyd into RAM so that it will never be
@@ -2046,10 +2070,11 @@ significant impact on performance as *chronyd's* memory usage is modest. The
 *mlockall(2)* man page has more details.
 
 [[pidfile]]*pidfile* _file_::
-*chronyd* always writes its process ID (PID) to a file, and checks this file on
-startup to see if another *chronyd* might already be running on the system. By
-default, the file used is _@DEFAULT_PID_FILE@_. The *pidfile* directive
-allows the name to be changed, e.g.:
+Unless *chronyd* is started with the *-Q* option, it writes its process ID
+(PID) to a file, and checks this file on startup to see if another *chronyd*
+might already be running on the system. By default, the file used is
+_@DEFAULT_PID_FILE@_. The *pidfile* directive allows the name to be changed,
+e.g.:
 +
 ----
 pidfile /run/chronyd.pid

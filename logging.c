@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2014
+ * Copyright (C) Miroslav Lichvar  2011-2014, 2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -132,14 +132,16 @@ void LOG_Message(LOG_Severity severity,
   char buf[2048];
   va_list other_args;
   time_t t;
-  struct tm stm;
+  struct tm *tm;
 
   if (!system_log && file_log) {
     /* Don't clutter up syslog with timestamps and internal debugging info */
     time(&t);
-    stm = *gmtime(&t);
-    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &stm);
-    fprintf(file_log, "%s ", buf);
+    tm = gmtime(&t);
+    if (tm) {
+      strftime(buf, sizeof (buf), "%Y-%m-%dT%H:%M:%SZ", tm);
+      fprintf(file_log, "%s ", buf);
+    }
 #if DEBUG > 0
     if (debug_level >= DEBUG_LEVEL_PRINT_FUNCTION)
       fprintf(file_log, "%s:%d:(%s) ", filename, line_number, function_name);
@@ -182,12 +184,19 @@ LOG_OpenFileLog(const char *log_file)
 {
   FILE *f;
 
-  f = fopen(log_file, "a");
-  if (!f)
-    LOG_FATAL("Could not open log file %s", log_file);
+  if (log_file) {
+    f = fopen(log_file, "a");
+    if (!f)
+      LOG_FATAL("Could not open log file %s", log_file);
+  } else {
+    f = stderr;
+  }
 
   /* Enable line buffering */
   setvbuf(f, NULL, _IOLBF, BUFSIZ);
+
+  if (file_log && file_log != stderr)
+    fclose(file_log);
 
   file_log = f;
 }

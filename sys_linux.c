@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
- * Copyright (C) Miroslav Lichvar  2009-2012, 2014-2017
+ * Copyright (C) Miroslav Lichvar  2009-2012, 2014-2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -42,11 +42,6 @@
 #include <sys/resource.h>
 #endif
 
-#ifdef FEAT_PRIVDROP
-#include <sys/prctl.h>
-#include <sys/capability.h>
-#endif
-
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
 #include <linux/ptp_clock.h>
 #endif
@@ -64,6 +59,11 @@
 #ifdef HAVE_LINUX_TIMESTAMPING
 #include <linux/sockios.h>
 #endif
+#endif
+
+#ifdef FEAT_PRIVDROP
+#include <sys/prctl.h>
+#include <sys/capability.h>
 #endif
 
 #include "sys_linux.h"
@@ -309,9 +309,9 @@ get_version_specific_details(void)
   nominal_tick = (1000000L + (hz/2))/hz; /* Mirror declaration in kernel */
   max_tick_bias = nominal_tick / 10;
 
-  /* We can't reliably detect the internal kernel HZ, it may not even be fixed
-     (CONFIG_NO_HZ aka tickless), assume the lowest commonly used fixed rate */
-  tick_update_hz = 100;
+  /* In modern kernels the frequency of the clock is updated immediately in the
+     adjtimex() system call.  Assume a maximum delay of 10 microseconds. */
+  tick_update_hz = 100000;
 
   get_kernel_version(&major, &minor, &patch);
   DEBUG_LOG("Linux kernel major=%d minor=%d patch=%d", major, minor, patch);
@@ -322,9 +322,15 @@ get_version_specific_details(void)
 
   if (kernelvercmp(major, minor, patch, 2, 6, 27) >= 0 &&
       kernelvercmp(major, minor, patch, 2, 6, 33) < 0) {
-    /* Tickless kernels before 2.6.33 accumulated ticks only in
-       half-second intervals */
+    /* In tickless kernels before 2.6.33 the frequency is updated in
+       a half-second interval */
     tick_update_hz = 2;
+  } else if (kernelvercmp(major, minor, patch, 4, 19, 0) < 0) {
+    /* In kernels before 4.19 the frequency is updated only on internal ticks
+       (CONFIG_HZ).  As their rate cannot be reliably detected from the user
+       space, and it may not even be constant (CONFIG_NO_HZ - aka tickless),
+       assume the lowest commonly used constant rate */
+    tick_update_hz = 100;
   }
 
   /* ADJ_SETOFFSET support */
@@ -334,8 +340,8 @@ get_version_specific_details(void)
     have_setoffset = 1;
   }
 
-  DEBUG_LOG("hz=%d nominal_tick=%d max_tick_bias=%d",
-      hz, nominal_tick, max_tick_bias);
+  DEBUG_LOG("hz=%d nominal_tick=%d max_tick_bias=%d tick_update_hz=%d",
+            hz, nominal_tick, max_tick_bias, tick_update_hz);
 }
 
 /* ================================================== */
@@ -385,7 +391,7 @@ test_step_offset(void)
 static void
 report_time_adjust_blockers(void)
 {
-#ifdef FEAT_PRIVDROP
+#if defined(FEAT_PRIVDROP) && defined(CAP_IS_SUPPORTED)
   if (CAP_IS_SUPPORTED(CAP_SYS_TIME) && cap_get_bound(CAP_SYS_TIME))
     return;
   LOG(LOGS_WARN, "CAP_SYS_TIME not present");
@@ -529,7 +535,7 @@ SYS_Linux_EnableSystemCallFilter(int level)
 #endif
   };
 
-  const static int fcntls[] = { F_GETFD, F_SETFD };
+  const static int fcntls[] = { F_GETFD, F_SETFD, F_SETFL };
 
   const static unsigned long ioctls[] = {
     FIONREAD, TCGETS,

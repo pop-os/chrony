@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2018-04-04
+.\"      Date: 2018-09-19
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2018-04-04" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2018-09-19" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -504,8 +504,9 @@ from the last eight transmissions.
 .sp
 \fBLastRx\fP
 .RS 4
-This column shows how long ago the last sample was received from the source.
-This is normally in seconds. The letters \fIm\fP, \fIh\fP, \fId\fP or \fIy\fP indicate
+This column shows how long ago the last good sample (which is shown in the next
+column) was received from the source. Measurements that failed some tests are
+ignored. This is normally in seconds. The letters \fIm\fP, \fIh\fP, \fId\fP or \fIy\fP indicate
 minutes, hours, days, or years.
 .RE
 .sp
@@ -1059,6 +1060,14 @@ command. It is used to advise \fBchronyd\fP that network connectivity to a
 particular source or sources has been restored.
 .sp
 The syntax is identical to that of the \fBoffline\fP command.
+.RE
+.sp
+\fBonoffline\fP
+.RS 4
+The \fBonoffline\fP command tells \fBchronyd\fP to switch all sources to the online or
+offline status according to the current network configuration. A source is
+considered online if it is possible to send requests to it, i.e. a route to the
+network is present.
 .RE
 .sp
 \fBpolltarget\fP \fIaddress\fP \fIpolltarget\fP

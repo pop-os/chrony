@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2016
+ * Copyright (C) Miroslav Lichvar  2011-2016, 2018
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -54,6 +54,7 @@ static int initialised = 0;
 /* ================================================== */
 /* Structure used to hold info for selecting between sources */
 struct SelectInfo {
+  NTP_Leap leap;
   int stratum;
   int select_ok;
   double std_dev;
@@ -91,7 +92,6 @@ typedef enum {
    source */
 struct SRC_Instance_Record {
   SST_Stats stats;
-  NTP_Leap leap_status;         /* Leap status */
   int index;                    /* Index back into the array of source */
   uint32_t ref_id;              /* The reference ID of this source
                                    (i.e. from its IP address, NOT the
@@ -291,7 +291,6 @@ void SRC_DestroyInstance(SRC_Instance instance)
 void
 SRC_ResetInstance(SRC_Instance instance)
 {
-  instance->leap_status = LEAP_Normal;
   instance->active = 0;
   instance->updates = 0;
   instance->reachability = 0;
@@ -330,39 +329,24 @@ SRC_GetSourcestats(SRC_Instance instance)
    This function causes the frequency estimation to be re-run for the
    designated source, and the clock selection procedure to be re-run
    afterwards.
-
-   Parameters are described in sources.h
-
    */
 
-void SRC_AccumulateSample
-(SRC_Instance inst, 
- struct timespec *sample_time,
- double offset, 
- double peer_delay,
- double peer_dispersion,
- double root_delay, 
- double root_dispersion, 
- int stratum,
- NTP_Leap leap_status)
+void
+SRC_AccumulateSample(SRC_Instance inst, NTP_Sample *sample)
 {
 
   assert(initialised);
 
-  inst->leap_status = leap_status;
-
   DEBUG_LOG("ip=[%s] t=%s ofs=%f del=%f disp=%f str=%d",
-            source_to_string(inst), UTI_TimespecToString(sample_time), -offset,
-            root_delay, root_dispersion, stratum);
+            source_to_string(inst), UTI_TimespecToString(&sample->time), -sample->offset,
+            sample->root_delay, sample->root_dispersion, sample->stratum);
 
   if (REF_IsLeapSecondClose()) {
     LOG(LOGS_INFO, "Dropping sample around leap second");
     return;
   }
 
-  /* WE HAVE TO NEGATE OFFSET IN THIS CALL, IT IS HERE THAT THE SENSE OF OFFSET
-     IS FLIPPED */
-  SST_AccumulateSample(inst->stats, sample_time, -offset, peer_delay, peer_dispersion, root_delay, root_dispersion, stratum);
+  SST_AccumulateSample(inst->stats, sample);
   SST_DoNewRegression(inst->stats);
 }
 
@@ -512,20 +496,21 @@ mark_ok_sources(SRC_Status status)
 
 static int
 combine_sources(int n_sel_sources, struct timespec *ref_time, double *offset,
-                double *offset_sd, double *frequency, double *skew)
+                double *offset_sd, double *frequency, double *frequency_sd, double *skew)
 {
   struct timespec src_ref_time;
-  double src_offset, src_offset_sd, src_frequency, src_skew;
+  double src_offset, src_offset_sd, src_frequency, src_frequency_sd, src_skew;
   double src_root_delay, src_root_dispersion, sel_src_distance, elapsed;
   double offset_weight, sum_offset_weight, sum_offset, sum2_offset_sd;
-  double frequency_weight, sum_frequency_weight, sum_frequency, inv_sum2_skew;
+  double frequency_weight, sum_frequency_weight, sum_frequency;
+  double inv_sum2_frequency_sd, inv_sum2_skew;
   int i, index, combined;
 
   if (n_sel_sources == 1)
     return 1;
 
   sum_offset_weight = sum_offset = sum2_offset_sd = 0.0;
-  sum_frequency_weight = sum_frequency = inv_sum2_skew = 0.0;
+  sum_frequency_weight = sum_frequency = inv_sum2_frequency_sd = inv_sum2_skew = 0.0;
 
   sel_src_distance = sources[selected_source_index]->sel_info.root_distance;
   if (sources[selected_source_index]->type == SRC_NTP)
@@ -535,7 +520,7 @@ combine_sources(int n_sel_sources, struct timespec *ref_time, double *offset,
     index = sel_sources[i];
     SST_GetTrackingData(sources[index]->stats, &src_ref_time,
                         &src_offset, &src_offset_sd,
-                        &src_frequency, &src_skew,
+                        &src_frequency, &src_frequency_sd, &src_skew,
                         &src_root_delay, &src_root_dispersion);
 
     /* Don't include this source if its distance is longer than the distance of
@@ -563,20 +548,23 @@ combine_sources(int n_sel_sources, struct timespec *ref_time, double *offset,
 
     elapsed = UTI_DiffTimespecsToDouble(ref_time, &src_ref_time);
     src_offset += elapsed * src_frequency;
+    src_offset_sd += elapsed * src_frequency_sd;
     offset_weight = 1.0 / sources[index]->sel_info.root_distance;
-    frequency_weight = 1.0 / src_skew;
+    frequency_weight = 1.0 / SQUARE(src_frequency_sd);
 
-    DEBUG_LOG("combining index=%d oweight=%e offset=%e sd=%e fweight=%e freq=%e skew=%e",
-        index, offset_weight, src_offset, src_offset_sd, frequency_weight, src_frequency, src_skew);
+    DEBUG_LOG("combining index=%d oweight=%e offset=%e osd=%e fweight=%e freq=%e fsd=%e skew=%e",
+              index, offset_weight, src_offset, src_offset_sd,
+              frequency_weight, src_frequency, src_frequency_sd, src_skew);
 
     sum_offset_weight += offset_weight;
     sum_offset += offset_weight * src_offset;
-    sum2_offset_sd += offset_weight * (src_offset_sd * src_offset_sd +
-        (src_offset - *offset) * (src_offset - *offset));
+    sum2_offset_sd += offset_weight * (SQUARE(src_offset_sd) +
+                                       SQUARE(src_offset - *offset));
 
     sum_frequency_weight += frequency_weight;
     sum_frequency += frequency_weight * src_frequency;
-    inv_sum2_skew += 1.0 / (src_skew * src_skew);
+    inv_sum2_frequency_sd += 1.0 / SQUARE(src_frequency_sd);
+    inv_sum2_skew += 1.0 / SQUARE(src_skew);
 
     combined++;
   }
@@ -585,10 +573,11 @@ combine_sources(int n_sel_sources, struct timespec *ref_time, double *offset,
   *offset = sum_offset / sum_offset_weight;
   *offset_sd = sqrt(sum2_offset_sd / sum_offset_weight);
   *frequency = sum_frequency / sum_frequency_weight;
+  *frequency_sd = 1.0 / sqrt(inv_sum2_frequency_sd);
   *skew = 1.0 / sqrt(inv_sum2_skew);
 
-  DEBUG_LOG("combined result offset=%e sd=%e freq=%e skew=%e",
-      *offset, *offset_sd, *frequency, *skew);
+  DEBUG_LOG("combined result offset=%e osd=%e freq=%e fsd=%e skew=%e",
+            *offset, *offset_sd, *frequency, *frequency_sd, *skew);
 
   return combined;
 }
@@ -602,12 +591,12 @@ SRC_SelectSource(SRC_Instance updated_inst)
 {
   struct SelectInfo *si;
   struct timespec now, ref_time;
-  int i, j, j1, j2, index, sel_prefer, n_endpoints, n_sel_sources;
-  int n_badstats_sources, max_sel_reach, max_badstat_reach, sel_req_source;
+  int i, j, j1, j2, index, sel_prefer, n_endpoints, n_sel_sources, sel_req_source;
+  int n_badstats_sources, max_sel_reach, max_sel_reach_size, max_badstat_reach;
   int depth, best_depth, trust_depth, best_trust_depth;
   int combined, stratum, min_stratum, max_score_index;
   int orphan_stratum, orphan_source, leap_votes, leap_ins, leap_del;
-  double src_offset, src_offset_sd, src_frequency, src_skew;
+  double src_offset, src_offset_sd, src_frequency, src_frequency_sd, src_skew;
   double src_root_delay, src_root_dispersion;
   double best_lo, best_hi, distance, sel_src_distance, max_score;
   double first_sample_ago, max_reach_sample_ago;
@@ -635,6 +624,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
   n_badstats_sources = 0;
   sel_req_source = 0;
   max_sel_reach = max_badstat_reach = 0;
+  max_sel_reach_size = 0;
   max_reach_sample_ago = 0.0;
 
   for (i = 0; i < n_sources; i++) {
@@ -652,7 +642,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
 
     si = &sources[i]->sel_info;
-    SST_GetSelectionData(sources[i]->stats, &now, &si->stratum,
+    SST_GetSelectionData(sources[i]->stats, &now, &si->stratum, &si->leap,
                          &si->lo_limit, &si->hi_limit, &si->root_distance,
                          &si->std_dev, &first_sample_ago,
                          &si->last_sample_ago, &si->select_ok);
@@ -694,6 +684,9 @@ SRC_SelectSource(SRC_Instance updated_inst)
 
     if (max_sel_reach < sources[i]->reachability)
       max_sel_reach = sources[i]->reachability;
+
+    if (max_sel_reach_size < sources[i]->reachability_size)
+      max_sel_reach_size = sources[i]->reachability_size;
   }
 
   orphan_stratum = REF_GetOrphanStratum();
@@ -777,18 +770,17 @@ SRC_SelectSource(SRC_Instance updated_inst)
     n_endpoints += 2;
   }
 
-  DEBUG_LOG("badstat=%d sel=%d badstat_reach=%x sel_reach=%x max_reach_ago=%f",
-            n_badstats_sources, n_sel_sources, max_badstat_reach,
-            max_sel_reach, max_reach_sample_ago);
+  DEBUG_LOG("badstat=%d sel=%d badstat_reach=%x sel_reach=%x size=%d max_reach_ago=%f",
+            n_badstats_sources, n_sel_sources, (unsigned int)max_badstat_reach,
+            (unsigned int)max_sel_reach, max_sel_reach_size, max_reach_sample_ago);
 
   /* Wait for the next call if we have no source selected and there is
      a source with bad stats (has less than 3 samples) with reachability
      equal to shifted maximum reachability of sources with valid stats.
      This delays selecting source on start with servers using the same
      polling interval until they all have valid stats. */
-  if (n_badstats_sources && n_sel_sources &&
-      selected_source_index == INVALID_SOURCE &&
-      max_sel_reach >> 1 == max_badstat_reach) {
+  if (n_badstats_sources && n_sel_sources && selected_source_index == INVALID_SOURCE &&
+      max_sel_reach_size < SOURCE_REACH_BITS && max_sel_reach >> 1 == max_badstat_reach) {
     mark_ok_sources(SRC_WAITS_STATS);
     return;
   }
@@ -929,9 +921,9 @@ SRC_SelectSource(SRC_Instance updated_inst)
     if (best_trust_depth && !(sources[index]->sel_options & SRC_SELECT_TRUST))
       continue;
     leap_votes++;
-    if (sources[index]->leap_status == LEAP_InsertSecond)
+    if (sources[index]->sel_info.leap == LEAP_InsertSecond)
       leap_ins++;
-    else if (sources[index]->leap_status == LEAP_DeleteSecond)
+    else if (sources[index]->sel_info.leap == LEAP_DeleteSecond)
       leap_del++;
   }
 
@@ -1015,7 +1007,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
       sources[i]->sel_score = 1.0 / distance;
     }
 
-    DEBUG_LOG("select score=%f refid=%"PRIx32" match_refid=%"PRIx32" status=%d dist=%f",
+    DEBUG_LOG("select score=%f refid=%"PRIx32" match_refid=%"PRIx32" status=%u dist=%f",
               sources[i]->sel_score, sources[i]->ref_id,
               updated_inst ? updated_inst->ref_id : 0,
               sources[i]->status, distance);
@@ -1078,18 +1070,18 @@ SRC_SelectSource(SRC_Instance updated_inst)
 
   SST_GetTrackingData(sources[selected_source_index]->stats, &ref_time,
                       &src_offset, &src_offset_sd,
-                      &src_frequency, &src_skew,
+                      &src_frequency, &src_frequency_sd, &src_skew,
                       &src_root_delay, &src_root_dispersion);
 
-  combined = combine_sources(n_sel_sources, &ref_time, &src_offset,
-                             &src_offset_sd, &src_frequency, &src_skew);
+  combined = combine_sources(n_sel_sources, &ref_time, &src_offset, &src_offset_sd,
+                             &src_frequency, &src_frequency_sd, &src_skew);
 
   REF_SetReference(sources[selected_source_index]->sel_info.stratum,
                    leap_status, combined,
                    sources[selected_source_index]->ref_id,
                    sources[selected_source_index]->ip_addr,
                    &ref_time, src_offset, src_offset_sd,
-                   src_frequency, src_skew,
+                   src_frequency, src_frequency_sd, src_skew,
                    src_root_delay, src_root_dispersion);
 }
 
