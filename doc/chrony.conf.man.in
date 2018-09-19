@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2018-08-31
+.\"      Date: 2018-09-19
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2018-08-31" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2018-09-19" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -903,6 +903,13 @@ The \fBminsamples\fP directive sets the default minimum number of samples that
 \fBchronyd\fP should keep for each source. This setting can be overridden for
 individual sources in the \fBserver\fP and \fBrefclock\fP
 directives. The default value is 6. The useful range is 4 to 64.
+.sp
+Forcing \fBchronyd\fP to keep more samples than it would normally keep reduces
+noise in the estimated frequency and offset, but slows down the response to
+changes in the frequency and offset of the clock. The offsets in the
+\fBtracking\fP and
+\fBsourcestats\fP reports (and the \fItracking.log\fP and
+\fIstatistics.log\fP files) may be smaller than the actual offsets.
 .RE
 .SS "Source selection"
 .sp
@@ -3445,6 +3452,10 @@ that has password shorter than 80 bits.
 The \fBkeygen\fP command of \fBchronyc\fP can be used to
 generate random keys for the key file. By default, it generates 160\-bit MD5 or
 SHA1 keys.
+.sp
+For security reasons, the file should be readable only by root and the user
+under which \fBchronyd\fP is normally running (to allow \fBchronyd\fP to re\-read the
+file when the \fBrekey\fP command is issued by \fBchronyc\fP).
 .RE
 .sp
 \fBlock_all\fP

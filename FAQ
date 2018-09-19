@@ -15,7 +15,8 @@ Table of Contents
       ? 2.6. How can I improve the accuracy of the system clock with NTP
         sources?
       ? 2.7. Does chronyd have an ntpdate mode?
-      ? 2.8. What happened to the commandkey and generatecommandkey directives?
+      ? 2.8. Can chronyd be configured to control the clock like ntpd?
+      ? 2.9. What happened to the commandkey and generatecommandkey directives?
   o 3. Computer is not synchronising
       ? 3.1. Behind a firewall?
       ? 3.2. Are NTP servers specified with the offline option?
@@ -243,7 +244,28 @@ command line. For example:
 
 # chronyd -q 'pool pool.ntp.org iburst'
 
-2.8. What happened to the commandkey and generatecommandkey directives?
+2.8. Can chronyd be configured to control the clock like ntpd?
+
+It is not possible to perfectly emulate ntpd, but there are some options that
+can configure chronyd to behave more like ntpd.
+
+In the following example the minsamples directive slows down the response to
+changes in the frequency and offset of the clock. The maxslewrate and
+corrtimeratio directives reduce the maximum frequency error due to an offset
+correction and the maxdrift directive reduces the maximum assumed frequency
+error of the clock. The makestep directive enables a step threshold and the
+maxchange directive enables a panic threshold. The maxclockerror directive
+increases the minimum dispersion rate.
+
+minsamples 32
+maxslewrate 500
+corrtimeratio 100
+maxdrift 500
+makestep 0.128 -1
+maxchange 1000 1 1
+maxclockerror 15
+
+2.9. What happened to the commandkey and generatecommandkey directives?
 
 They were removed in version 2.2. Authentication is no longer supported in the
 command protocol. Commands that required authentication are now allowed only
@@ -516,4 +538,4 @@ needs to be made to work as a service.
 We have no plans to do this. Anyone is welcome to pick this work up and
 contribute it back to the project.
 
-Last updated 2018-08-31 10:11:17 CEST
+Last updated 2018-09-19 16:38:15 CEST

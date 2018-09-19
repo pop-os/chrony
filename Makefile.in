@@ -70,7 +70,8 @@ distclean : clean
 	-rm -f Makefile config.h config.log
 
 clean :
-	-rm -f *.o *.s chronyc chronyd core *~
+	-rm -f *.o *.s chronyc chronyd core.* *~
+	-rm -f *.gcda *.gcno
 	-rm -rf .deps
 	-rm -rf *.dSYM
 
@@ -116,6 +117,9 @@ quickcheck : chronyd chronyc
 check : chronyd chronyc
 	$(MAKE) -C test/unit check
 	cd test/simulation && ./run -i 20 -m 2
+
+print-chronyd-objects :
+	@echo $(OBJS) $(EXTRA_OBJS)
 
 Makefile : Makefile.in configure
 	@echo
