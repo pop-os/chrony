@@ -1,3 +1,22 @@
+chrony (3.4-1) unstable; urgency=medium
+
+  * Import upstream version 3.4:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * Merge branch “experimental” into “master”.
+
+  * debian/chrony.service:
+    - Conflict with ntpsec.service.
+
+  * debian/copyright:
+    - Update copyright years.
+
+  * debian/patches/*:
+    - Remove fix-samplefilt-unit-test-to-work-with-low-precision-clock.patch,
+    fixed upstream.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 21 Sep 2018 14:12:03 +0200
+
 chrony (3.4~pre1-2) experimental; urgency=medium
 
   * debian/patches/*:
