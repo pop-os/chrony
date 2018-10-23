@@ -1,6 +1,5 @@
 # Last Modified: Sat Jan 20 10:45:05 2018
 #include <tunables/global>
-#include <tunables/sys>
 
 /usr/sbin/chronyd (attach_disconnected) {
   #include <abstractions/base>
