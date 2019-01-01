@@ -1,30 +1,16 @@
-image: debian:sid
+include: https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
 
-variables:
-    DEBIAN_FRONTEND: noninteractive
-    WORKING_DIR: ./debian/output
+build:
+    extends: .build-unstable
 
-stages:
-    - build
-    - test
-
-package_build:
-    stage: build
-    script:
-        - apt update
-        - apt install eatmydata -y
-        - eatmydata apt build-dep ./ -y
-        - eatmydata apt install git-buildpackage -y
-        - gbp pull --ignore-branch
-        - gbp buildpackage --git-ignore-branch --git-export-dir=${WORKING_DIR} -us -uc
-    artifacts:
-        name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
-        paths:
-            - ${WORKING_DIR}/
+reprotest:
+    extends: .test-reprotest
 
 lintian:
-    stage: test
-    script:
-        - apt update
-        - apt install lintian -y --no-install-recommends
-        - lintian -EIi --pedantic ${WORKING_DIR}/*.changes
+    extends: .test-lintian
+
+autopkgtest:
+    extends: .test-autopkgtest
+
+piuparts:
+    extends: .test-piuparts
