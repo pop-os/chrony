@@ -28,7 +28,8 @@ Depends: adduser,
          ucf,
          ${misc:Depends},
          ${shlibs:Depends}
-Suggests: dnsutils
+Suggests: dnsutils,
+          networkd-dispatcher
 Conflicts: ntp,
            time-daemon
 Provides: time-daemon
