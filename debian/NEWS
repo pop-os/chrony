@@ -1,3 +1,21 @@
+chrony (3.4-2) unstable; urgency=medium
+
+  To reduce the range of operations available to chronyd, and thereby decrease
+  the kernel attack surface, a system call filter is now active by default
+  wherever¹ possible.
+  Please, take into account that this change prevents the use of the
+  “mailonchange” directive in chrony.conf as the chronyd process will not be
+  allowed to fork and execute the sendmail binary. Therefore, it is fundamental
+  to disable the system call filter to continue using this directive!
+
+  To do so, edit the /etc/default/chrony file and substitute the “-F -1”
+  parameter with “-F 0”. Restart chrony afterward.
+
+  ¹Are currently excluded alpha, ia64, m68k, riscv64, sh4 and sparc64
+   architectures due to lack of support in “libseccomp” and/or the Linux kernel.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 10 Feb 2019 18:44:22 +0100
+
 chrony (2.2.1-1) unstable; urgency=medium
 
   In chrony versions before 2.2, the 'chrony.keys' file contained a command
