@@ -1,3 +1,48 @@
+chrony (3.4-2) unstable; urgency=medium
+
+  * debian/.gitlab-ci.yml:
+    - Replace home-made GitLab CI with the standard Salsa pipeline.
+
+  * debian/chrony.default:
+    - Enable the system call filter by default.
+
+  * debian/control:
+    - Bump standard-version to 4.3.0 (no changes required).
+    - Use the new debhelper-compat (= 12) notation and drop d/compat.
+    - Add Pre-Depends: ${misc:Pre-Depends}. Debhelper compatibility level 12
+    makes use of the “--skip-systemd-native” flag from “invoke-rc.d”. Adding
+    Pre-Depends: ${misc:Pre-Depends} to d/control ensure that we have a recent
+    enough version of “init-system-helpers”.
+    - Suggest networkd-dispatcher.
+
+  * debian/copyright:
+    - Add myself as a copyright holder for 2019.
+
+  * debian/links:
+    - Now that “networkd-dispatcher” is in the Debian archive, link
+    NetworkManager dispatcher script to networkd-dispatcher routable and off
+    states. Patch cherry-picked from Ubuntu; thanks to Christian Ehrhardt
+    <christian.ehrhardt@canonical.com> for working on this.
+
+  * debian/NEWS:
+    - Report that a system call filter is now enabled by default and the way
+    to disable it if needed.
+
+  * debian/rules:
+    - Don’t enable the system call filter on some architectures due to missing
+    support in the “libseccomp” and/or the Linux kernel.
+
+  * debian/upstream/:
+    - Strip upstream key from extra signatures. Thanks lintian!
+    - Remove the Miroslav-Lichvar.txt file as it serves no purpose.
+
+  * debian/usr.sbin.chronyd:
+    - Don’t include “tunables/sys”. The etc/apparmor.d/tunables/sys file has
+    been deprecated in AppArmor 2.13.1! The @{sys} variable is now defined in
+    “tunables/kernelvars” which is included in “tunables/global”.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 10 Feb 2019 20:00:34 +0100
+
 chrony (3.4-1) unstable; urgency=medium
 
   * Import upstream version 3.4:
