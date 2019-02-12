@@ -3,7 +3,7 @@
 -include /usr/share/dpkg/buildtools.mk
 export CC
 
-DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+include /usr/share/dpkg/architecture.mk
 
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all
 
