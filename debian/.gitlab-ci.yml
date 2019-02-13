@@ -11,6 +11,7 @@ lintian:
 
 autopkgtest:
     extends: .test-autopkgtest
+    allow_failure: true
 
 piuparts:
     extends: .test-piuparts
