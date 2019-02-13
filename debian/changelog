@@ -2,6 +2,8 @@ chrony (3.4-2) unstable; urgency=medium
 
   * debian/.gitlab-ci.yml:
     - Replace home-made GitLab CI with the standard Salsa pipeline.
+    - Allow autopkgtest job to fail. The time-sources-from-dhcp-servers test
+    currently fails due to a testbed issue on salsa CI.
 
   * debian/chrony.default:
     - Enable the system call filter by default.
@@ -41,7 +43,7 @@ chrony (3.4-2) unstable; urgency=medium
     been deprecated in AppArmor 2.13.1! The @{sys} variable is now defined in
     “tunables/kernelvars” which is included in “tunables/global”.
 
- -- Vincent Blut <vincent.debian@free.fr>  Sun, 10 Feb 2019 20:00:34 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 13 Feb 2019 17:08:17 +0100
 
 chrony (3.4-1) unstable; urgency=medium
 
