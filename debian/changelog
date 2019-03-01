@@ -1,3 +1,27 @@
+chrony (3.4-3) unstable; urgency=medium
+
+  * debian/.gitlab-ci.yml:
+    - Check for missing hardening flags.
+
+  * debian/chrony.keys:
+    - Fix the comment about the location of the list of supported hash
+    functions and output encoding. These information are now available by
+    consulting the “keyfile” directive in the chrony.conf(5) man page.
+
+  * debian/patches/*:
+    - Add allow-_llseek-in-seccomp-filter.patch. Needed on various 32-bit
+    plateforms to log the {raw}measurements and statistics information when
+    the seccomp filter is enabled. Thanks a lot to Francesco Poli (wintermute)
+    <invernomuto@paranoici.org> for the report. (Closes: #923137)
+    - Add allow-waitpid-in-seccomp-filter.patch. Needed to correctly stop
+    chronyd on some plateforms when the seccomp filter is enabled.
+    - Update the series file accordingly.
+
+  * debian/README.Debian:
+    - Fix information related to the chrony.keys file.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 01 Mar 2019 20:09:12 +0100
+
 chrony (3.4-2) unstable; urgency=medium
 
   * debian/.gitlab-ci.yml:
