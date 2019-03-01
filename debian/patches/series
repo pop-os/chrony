@@ -1,1 +1,2 @@
 allow-_llseek-in-seccomp-filter.patch
+allow-waitpid-in-seccomp-filter.patch
