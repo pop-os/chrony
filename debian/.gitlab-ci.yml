@@ -15,3 +15,6 @@ autopkgtest:
 
 piuparts:
     extends: .test-piuparts
+
+blhc:
+    extends: .test-blhc
