@@ -9,7 +9,7 @@ Chrony for Debian
           for further information)
 
         → chrony.keys (lists keys used for NTP packets authentication, see
-          the “keyfile” directive in the chrony.conf(5) man page)
+          § 4.2.24 in /usr/share/doc/chrony/chrony.txt.gz)
 
  - We also provide /etc/ppp/ip-up.d/chrony and /etc/ppp/ip-down.d/chrony
    to put chronyd online/offline depending on the PPP link status.
@@ -26,4 +26,4 @@ Chrony for Debian
         # sed -i 's/^user/#user/' /etc/chrony/chrony.conf
         # chown -R _chrony:_chrony /var/l{ib,og}/chrony
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 01 Mar 2019 19:02:12 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 16 Jan 2017 18:44:32 +0100
