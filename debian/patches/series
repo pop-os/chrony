@@ -1,3 +1,4 @@
 allow-_llseek-in-seccomp-filter.patch
 allow-waitpid-in-seccomp-filter.patch
 allow-recv-send-in-seccomp-filter.patch
+allow-further-syscalls-in-seccomp-filter.patch
