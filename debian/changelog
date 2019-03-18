@@ -1,3 +1,17 @@
+chrony (3.4-4) unstable; urgency=medium
+
+  * debian/patches/*:
+    - Add allow-further-syscalls-in-seccomp-filter.patch. Supplementing the
+    seccomp filter whitelist with those syscalls is a prerequisite, notably for
+    the arm64 architecture.
+
+  [ Leigh Brown ]
+  * debian/patches/*:
+    - Add allow-recv-send-in-seccomp-filter.patch. Necessary on armel and
+    ppc64el. Other architectures might also be affected. (Closes: #924494)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 18 Mar 2019 19:35:34 +0100
+
 chrony (3.4-3) unstable; urgency=medium
 
   * debian/.gitlab-ci.yml:
