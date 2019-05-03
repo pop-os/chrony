@@ -28,6 +28,8 @@
 #include <local.h>
 #include "test.h"
 
+#ifdef FEAT_NTP
+
 static struct timespec current_time;
 static NTP_Receive_Buffer req_buffer, res_buffer;
 static int req_length, res_length;
@@ -332,10 +334,8 @@ test_unit(void)
   CPS_ParseNTPSourceAdd(source_line, &source);
 
   for (i = 0; i < 1000; i++) {
-    if (random() % 2)
-      source.params.interleaved = 1;
-    if (random() % 2)
-      source.params.authkey = get_random_key_id();
+    source.params.interleaved = random() % 2;
+    source.params.authkey = random() % 2 ? get_random_key_id() : INACTIVE_AUTHKEY;
     source.params.version = random() % 4 + 1;
 
     UTI_ZeroTimespec(&current_time);
@@ -475,3 +475,11 @@ test_unit(void)
   CNF_Finalise();
   HSH_Finalise();
 }
+
+#else
+void
+test_unit(void)
+{
+  TEST_REQUIRE(0);
+}
+#endif
