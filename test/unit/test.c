@@ -22,6 +22,7 @@
 #include <sysincl.h>
 #include <logging.h>
 #include <localp.h>
+#include <util.h>
 
 #include "test.h"
 
@@ -30,6 +31,13 @@ TST_Fail(int line)
 {
   printf("FAIL (on line %d)\n", line);
   exit(1);
+}
+
+void
+TST_Skip(int line)
+{
+  printf("SKIP (on line %d)\n", line);
+  exit(0);
 }
 
 int
