@@ -33,31 +33,6 @@ case "$1" in
             fi
         fi
 
-        # Before version 2.2.1-1, we used to create the chrony.keys file from
-        # the post-installation script and fed it with a random command password.
-        # Since that command password isn’t needed anymore, a simple key file
-        # template has been created which is then copied to its destination by ucf.
-        # The consequence of this move was a prompt presented to the user on
-        # upgrade even if the key file has been unmodified; this is a violation
-        # of Debian policy § 10.7.3! The script below workaround that issue by
-        # deleting the key file when upgrading from chrony < 2.2.1-1 iff a single
-        # key if found in the file and that the key ID correspond to the ID
-        # specified by the commandkey ID found in “chrony.conf” and that the
-        # original key file has the same modes and owners than the new template
-        # key file.
-        # Reference: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=820087
-        if [ -n "$2" ] && dpkg --compare-versions "$2" lt "2.2.1-1"; then
-            commandkey_id=$(awk '$1 ~ /^commandkey$/ { print $2; exit }' /etc/chrony/chrony.conf)
-            key_id=$(awk '{ print $1; exit }' /etc/chrony/chrony.keys)
-            orig_keyfile_perm=$(stat -c "%a%u%g" /etc/chrony/chrony.keys 2> /dev/null)
-            keyfile_tml_perm=$(stat -c "%a%u%g" /usr/share/chrony/chrony.keys 2> /dev/null)
-            if [ "$(grep -c "^[0-9]" /etc/chrony/chrony.keys)" -eq 1 ] &&
-                [ "$commandkey_id" -eq "$key_id" ] 2>/dev/null &&
-                 [ "$orig_keyfile_perm" = "$keyfile_tml_perm" ]; then
-                rm -f /etc/chrony/chrony.keys
-            fi
-        fi
-
         if command -v ucf >/dev/null
         then
             ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
