@@ -127,6 +127,10 @@ Files: hash_nettle.c
 Copyright: 2018, Miroslav Lichvar
 License: GPL-2
 
+Files: test/system/*
+Copyright: 2019, Miroslav Lichvar
+License: GPL-2
+
 Files: md5.*
 Copyright: 1990, RSA Data Security, Inc. All rights reserved.
 License: RSA-MD
