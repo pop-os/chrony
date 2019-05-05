@@ -24,7 +24,6 @@ Architecture: linux-any
 Pre-Depends: ${misc:Pre-Depends}
 Depends: adduser,
          iproute2 [linux-any],
-         lsb-base,
          ucf,
          ${misc:Depends},
          ${shlibs:Depends}
