@@ -1,3 +1,31 @@
+chrony (3.5~pre1-1) experimental; urgency=medium
+
+  * Import upstream version 3.5-pre1:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * debian/chrony.keys:
+    - Fix the comment about the location of the list of supported hash
+    functions and output encoding. These information are now available by
+    consulting the “keyfile” directive in the chrony.conf(5) man page.
+
+  * debian/control:
+    - Drop dependency on lsb-base. Is is required when booting with sysvinit
+    and initscripts, however initscripts already Depends on lsb-base.
+
+  * debian/copyright:
+    - Add an entry for test/system/* files.
+
+  * debian/patches/*:
+    - Drop all patches, they have been applied upstream.
+
+  * debian/postinst:
+    - Drop migration code from pre-stretch.
+
+  * debian/README.Debian:
+    - Fix information related to the chrony.keys file.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 06 May 2019 21:21:56 +0200
+
 chrony (3.4-4) unstable; urgency=medium
 
   * debian/patches/*:
