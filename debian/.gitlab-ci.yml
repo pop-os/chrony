@@ -1,7 +1,7 @@
 include: https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
 
 build:
-    extends: .build-unstable
+    extends: .build-package
 
 reprotest:
     extends: .test-reprotest
