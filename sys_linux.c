@@ -33,15 +33,6 @@
 
 #include <sys/utsname.h>
 
-#if defined(HAVE_SCHED_SETSCHEDULER)
-#  include <sched.h>
-#endif
-
-#if defined(HAVE_MLOCKALL)
-#  include <sys/mman.h>
-#include <sys/resource.h>
-#endif
-
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
 #include <linux/ptp_clock.h>
 #endif
@@ -493,25 +484,27 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getpid),
     SCMP_SYS(getrlimit), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn),
     SCMP_SYS(rt_sigprocmask), SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn),
-    SCMP_SYS(wait4),
+    SCMP_SYS(wait4), SCMP_SYS(waitpid),
     /* Memory */
     SCMP_SYS(brk), SCMP_SYS(madvise), SCMP_SYS(mmap), SCMP_SYS(mmap2),
     SCMP_SYS(mprotect), SCMP_SYS(mremap), SCMP_SYS(munmap), SCMP_SYS(shmdt),
     /* Filesystem */
-    SCMP_SYS(access), SCMP_SYS(chmod), SCMP_SYS(chown), SCMP_SYS(chown32),
+    SCMP_SYS(_llseek), SCMP_SYS(access), SCMP_SYS(chmod), SCMP_SYS(chown),
+    SCMP_SYS(chown32), SCMP_SYS(faccessat), SCMP_SYS(fchmodat), SCMP_SYS(fchownat),
     SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(getdents), SCMP_SYS(getdents64),
-    SCMP_SYS(lseek), SCMP_SYS(rename), SCMP_SYS(stat), SCMP_SYS(stat64),
-    SCMP_SYS(statfs), SCMP_SYS(statfs64), SCMP_SYS(unlink),
+    SCMP_SYS(lseek), SCMP_SYS(newfstatat), SCMP_SYS(rename), SCMP_SYS(renameat),
+    SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs), SCMP_SYS(statfs64),
+    SCMP_SYS(unlink), SCMP_SYS(unlinkat),
     /* Socket */
     SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname), SCMP_SYS(getsockopt),
-    SCMP_SYS(recvfrom), SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg),
-    SCMP_SYS(sendmmsg), SCMP_SYS(sendmsg), SCMP_SYS(sendto),
+    SCMP_SYS(recv), SCMP_SYS(recvfrom), SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg),
+    SCMP_SYS(send), SCMP_SYS(sendmmsg), SCMP_SYS(sendmsg), SCMP_SYS(sendto),
     /* TODO: check socketcall arguments */
     SCMP_SYS(socketcall),
     /* General I/O */
     SCMP_SYS(_newselect), SCMP_SYS(close), SCMP_SYS(open), SCMP_SYS(openat), SCMP_SYS(pipe),
-    SCMP_SYS(poll), SCMP_SYS(read), SCMP_SYS(futex), SCMP_SYS(select),
-    SCMP_SYS(set_robust_list), SCMP_SYS(write),
+    SCMP_SYS(pipe2), SCMP_SYS(poll), SCMP_SYS(ppoll), SCMP_SYS(pselect6), SCMP_SYS(read),
+    SCMP_SYS(futex), SCMP_SYS(select), SCMP_SYS(set_robust_list), SCMP_SYS(write),
     /* Miscellaneous */
     SCMP_SYS(getrandom), SCMP_SYS(sysinfo), SCMP_SYS(uname),
   };
@@ -543,6 +536,9 @@ SYS_Linux_EnableSystemCallFilter(int level)
     PTP_EXTTS_REQUEST, PTP_SYS_OFFSET,
 #ifdef PTP_PIN_SETFUNC
     PTP_PIN_SETFUNC,
+#endif
+#ifdef PTP_SYS_OFFSET_EXTENDED
+    PTP_SYS_OFFSET_EXTENDED,
 #endif
 #ifdef PTP_SYS_OFFSET_PRECISE
     PTP_SYS_OFFSET_PRECISE,
@@ -627,63 +623,6 @@ add_failed:
 
 /* ================================================== */
 
-#if defined(HAVE_SCHED_SETSCHEDULER)
-  /* Install SCHED_FIFO real-time scheduler with specified priority */
-void SYS_Linux_SetScheduler(int SchedPriority)
-{
-  int pmax, pmin;
-  struct sched_param sched;
-
-  if (SchedPriority < 1 || SchedPriority > 99) {
-    LOG_FATAL("Bad scheduler priority: %d", SchedPriority);
-  } else {
-    sched.sched_priority = SchedPriority;
-    pmax = sched_get_priority_max(SCHED_FIFO);
-    pmin = sched_get_priority_min(SCHED_FIFO);
-    if ( SchedPriority > pmax ) {
-      sched.sched_priority = pmax;
-    }
-    else if ( SchedPriority < pmin ) {
-      sched.sched_priority = pmin;
-    }
-    if ( sched_setscheduler(0, SCHED_FIFO, &sched) == -1 ) {
-      LOG(LOGS_ERR, "sched_setscheduler() failed");
-    }
-    else {
-      DEBUG_LOG("Enabled SCHED_FIFO with priority %d",
-          sched.sched_priority);
-    }
-  }
-}
-#endif /* HAVE_SCHED_SETSCHEDULER */
-
-#if defined(HAVE_MLOCKALL)
-/* Lock the process into RAM so that it will never be swapped out */ 
-void SYS_Linux_MemLockAll(int LockAll)
-{
-  struct rlimit rlim;
-  if (LockAll == 1 ) {
-    /* Make sure that we will be able to lock all the memory we need */
-    /* even after dropping privileges.  This does not actually reaerve any memory */
-    rlim.rlim_max = RLIM_INFINITY;
-    rlim.rlim_cur = RLIM_INFINITY;
-    if (setrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
-      LOG(LOGS_ERR, "setrlimit() failed: not locking into RAM");
-    }
-    else {
-      if (mlockall(MCL_CURRENT|MCL_FUTURE) < 0) {
-	LOG(LOGS_ERR, "mlockall() failed");
-      }
-      else {
-	DEBUG_LOG("Successfully locked into RAM");
-      }
-    }
-  }
-}
-#endif /* HAVE_MLOCKALL */
-
-/* ================================================== */
-
 int
 SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
 {
@@ -701,35 +640,17 @@ SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
 #define PHC_READINGS 10
 
 static int
-get_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
-               struct timespec *sys_ts, double *err)
+process_phc_readings(struct timespec ts[][3], int n, double precision,
+                     struct timespec *phc_ts, struct timespec *sys_ts, double *err)
 {
-  struct ptp_sys_offset sys_off;
-  struct timespec ts1, ts2, ts3, phc_tss[PHC_READINGS], sys_tss[PHC_READINGS];
-  double min_delay = 0.0, delays[PHC_READINGS], phc_sum, sys_sum, sys_prec;
-  int i, n;
+  double min_delay = 0.0, delays[PTP_MAX_SAMPLES], phc_sum, sys_sum, sys_prec;
+  int i, combined;
 
-  /* Silence valgrind */
-  memset(&sys_off, 0, sizeof (sys_off));
-
-  sys_off.n_samples = PHC_READINGS;
-
-  if (ioctl(phc_fd, PTP_SYS_OFFSET, &sys_off)) {
-    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET", strerror(errno));
+  if (n > PTP_MAX_SAMPLES)
     return 0;
-  }
 
-  for (i = 0; i < PHC_READINGS; i++) {
-    ts1.tv_sec = sys_off.ts[i * 2].sec;
-    ts1.tv_nsec = sys_off.ts[i * 2].nsec;
-    ts2.tv_sec = sys_off.ts[i * 2 + 1].sec;
-    ts2.tv_nsec = sys_off.ts[i * 2 + 1].nsec;
-    ts3.tv_sec = sys_off.ts[i * 2 + 2].sec;
-    ts3.tv_nsec = sys_off.ts[i * 2 + 2].nsec;
-
-    sys_tss[i] = ts1;
-    phc_tss[i] = ts2;
-    delays[i] = UTI_DiffTimespecsToDouble(&ts3, &ts1);
+  for (i = 0; i < n; i++) {
+    delays[i] = UTI_DiffTimespecsToDouble(&ts[i][2], &ts[i][0]);
 
     if (delays[i] < 0.0) {
       /* Step in the middle of a PHC reading? */
@@ -744,23 +665,92 @@ get_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
   sys_prec = LCL_GetSysPrecisionAsQuantum();
 
   /* Combine best readings */
-  for (i = n = 0, phc_sum = sys_sum = 0.0; i < PHC_READINGS; i++) {
+  for (i = combined = 0, phc_sum = sys_sum = 0.0; i < n; i++) {
     if (delays[i] > min_delay + MAX(sys_prec, precision))
       continue;
 
-    phc_sum += UTI_DiffTimespecsToDouble(&phc_tss[i], &phc_tss[0]);
-    sys_sum += UTI_DiffTimespecsToDouble(&sys_tss[i], &sys_tss[0]) + delays[i] / 2.0;
-    n++;
+    phc_sum += UTI_DiffTimespecsToDouble(&ts[i][1], &ts[0][1]);
+    sys_sum += UTI_DiffTimespecsToDouble(&ts[i][0], &ts[0][0]) + delays[i] / 2.0;
+    combined++;
   }
 
-  assert(n);
+  assert(combined);
 
-  UTI_AddDoubleToTimespec(&phc_tss[0], phc_sum / n, phc_ts);
-  UTI_AddDoubleToTimespec(&sys_tss[0], sys_sum / n, sys_ts);
+  UTI_AddDoubleToTimespec(&ts[0][1], phc_sum / combined, phc_ts);
+  UTI_AddDoubleToTimespec(&ts[0][0], sys_sum / combined, sys_ts);
   *err = MAX(min_delay / 2.0, precision);
 
   return 1;
 }
+
+/* ================================================== */
+
+static int
+get_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
+               struct timespec *sys_ts, double *err)
+{
+  struct timespec ts[PHC_READINGS][3];
+  struct ptp_sys_offset sys_off;
+  int i;
+
+  /* Silence valgrind */
+  memset(&sys_off, 0, sizeof (sys_off));
+
+  sys_off.n_samples = PHC_READINGS;
+
+  if (ioctl(phc_fd, PTP_SYS_OFFSET, &sys_off)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET", strerror(errno));
+    return 0;
+  }
+
+  for (i = 0; i < PHC_READINGS; i++) {
+    ts[i][0].tv_sec = sys_off.ts[i * 2].sec;
+    ts[i][0].tv_nsec = sys_off.ts[i * 2].nsec;
+    ts[i][1].tv_sec = sys_off.ts[i * 2 + 1].sec;
+    ts[i][1].tv_nsec = sys_off.ts[i * 2 + 1].nsec;
+    ts[i][2].tv_sec = sys_off.ts[i * 2 + 2].sec;
+    ts[i][2].tv_nsec = sys_off.ts[i * 2 + 2].nsec;
+  }
+
+  return process_phc_readings(ts, PHC_READINGS, precision, phc_ts, sys_ts, err);
+}
+
+/* ================================================== */
+
+static int
+get_extended_phc_sample(int phc_fd, double precision, struct timespec *phc_ts,
+                        struct timespec *sys_ts, double *err)
+{
+#ifdef PTP_SYS_OFFSET_EXTENDED
+  struct timespec ts[PHC_READINGS][3];
+  struct ptp_sys_offset_extended sys_off;
+  int i;
+
+  /* Silence valgrind */
+  memset(&sys_off, 0, sizeof (sys_off));
+
+  sys_off.n_samples = PHC_READINGS;
+
+  if (ioctl(phc_fd, PTP_SYS_OFFSET_EXTENDED, &sys_off)) {
+    DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET_EXTENDED", strerror(errno));
+    return 0;
+  }
+
+  for (i = 0; i < PHC_READINGS; i++) {
+    ts[i][0].tv_sec = sys_off.ts[i][0].sec;
+    ts[i][0].tv_nsec = sys_off.ts[i][0].nsec;
+    ts[i][1].tv_sec = sys_off.ts[i][1].sec;
+    ts[i][1].tv_nsec = sys_off.ts[i][1].nsec;
+    ts[i][2].tv_sec = sys_off.ts[i][2].sec;
+    ts[i][2].tv_nsec = sys_off.ts[i][2].nsec;
+  }
+
+  return process_phc_readings(ts, PHC_READINGS, precision, phc_ts, sys_ts, err);
+#else
+  return 0;
+#endif
+}
+
 /* ================================================== */
 
 static int
@@ -833,6 +823,10 @@ SYS_Linux_GetPHCSample(int fd, int nocrossts, double precision, int *reading_mod
   if ((*reading_mode == 2 || !*reading_mode) && !nocrossts &&
       get_precise_phc_sample(fd, precision, phc_ts, sys_ts, err)) {
     *reading_mode = 2;
+    return 1;
+  } else if ((*reading_mode == 3 || !*reading_mode) &&
+      get_extended_phc_sample(fd, precision, phc_ts, sys_ts, err)) {
+    *reading_mode = 3;
     return 1;
   } else if ((*reading_mode == 1 || !*reading_mode) &&
       get_phc_sample(fd, precision, phc_ts, sys_ts, err)) {

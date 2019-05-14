@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2018-09-19
+.\"      Date: 2019-05-10
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2018-09-19" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2019-05-10" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -469,13 +469,13 @@ started in the boot sequence after \fBchronyd\fP from reading the clock before i
 has been stepped.
 .RE
 .sp
-\fBrefclock\fP \fIdriver\fP \fIparameter\fP[:\fIoption\fP,...] [\fIoption\fP]...
+\fBrefclock\fP \fIdriver\fP \fIparameter\fP[:\fIoption\fP]... [\fIoption\fP]...
 .RS 4
 The \fBrefclock\fP directive specifies a hardware reference clock to be used as a
 time source. It has two mandatory parameters, a driver name and a
 driver\-specific parameter. The two parameters are followed by zero or more
 refclock options. Some drivers have special options, which can be appended to
-the driver\-specific parameter (separated by the \fB:\fP and \fB,\fP characters).
+the driver\-specific parameter using the \fB:\fP character.
 .sp
 There are four drivers included in \fBchronyd\fP:
 .sp
@@ -626,7 +626,7 @@ Examples:
 .nf
 refclock PHC /dev/ptp0 poll 0 dpoll \-2 offset \-37
 refclock PHC /dev/ptp1:nocrossts poll 3 pps
-refclock PHC /dev/ptp2:extpps,pin=1 width 0.2 poll 2
+refclock PHC /dev/ptp2:extpps:pin=1 width 0.2 poll 2
 .fi
 .if n \{\
 .RE
@@ -924,6 +924,8 @@ The \fBcombinelimit\fP directive limits which sources are included in the combin
 algorithm. Their synchronisation distance has to be shorter than the distance
 of the selected source multiplied by the value of the limit. Also, their
 measured frequencies have to be close to the frequency of the selected source.
+If the selected source was specified with the \fBprefer\fP option, it can be
+combined only with other sources specified with this option.
 .sp
 By default, the limit is 3. Setting the limit to 0 effectively disables the
 source combining algorithm and only the selected source will be used to control
@@ -2159,8 +2161,8 @@ If the \fBrtconutc\fP directive appears, it means the RTC is required to keep UT
 The directive takes no arguments. It is equivalent to specifying the \fB\-u\fP
 switch to the Linux \fBhwclock\fP program.
 .sp
-Note that this setting is overridden when the \fBhwclockfile\fP
-directive is specified.
+Note that this setting is overridden by the \fBhwclockfile\fP file
+and is not relevant for the \fBrtcsync\fP directive.
 .RE
 .sp
 \fBrtcsync\fP
@@ -3461,11 +3463,11 @@ file when the \fBrekey\fP command is issued by \fBchronyc\fP).
 \fBlock_all\fP
 .RS 4
 The \fBlock_all\fP directive will lock chronyd into RAM so that it will never be
-paged out. This mode is only supported on Linux. This directive uses the Linux
-\fBmlockall()\fP system call to prevent \fBchronyd\fP from ever being swapped out. This
-should result in lower and more consistent latency. It should not have
-significant impact on performance as \fBchronyd\(cqs\fP memory usage is modest. The
-\fBmlockall(2)\fP man page has more details.
+paged out. This mode is supported on Linux, FreeBSD, NetBSD, and Solaris.  This
+directive uses the POSIX \fBmlockall()\fP system call to prevent \fBchronyd\fP from
+ever being swapped out. This should result in lower and more consistent
+latency. It should not have significant impact on performance as \fBchronyd\(cqs\fP
+memory usage is modest. The \fBmlockall(2)\fP man page has more details.
 .RE
 .sp
 \fBpidfile\fP \fIfile\fP
@@ -3489,26 +3491,26 @@ pidfile /run/chronyd.pid
 .sp
 \fBsched_priority\fP \fIpriority\fP
 .RS 4
-On Linux, the \fBsched_priority\fP directive will select the SCHED_FIFO real\-time
-scheduler at the specified priority (which must be between 0 and 100). On
-macOS, this option must have either a value of 0 (the default) to disable the
-thread time constraint policy or 1 for the policy to be enabled. Other systems
-do not support this option.
+On Linux, FreeBSD, NetBSD, and Solaris, the \fBsched_priority\fP directive will
+select the SCHED_FIFO real\-time scheduler at the specified priority (which must
+be between 0 and 100). On macOS, this option must have either a value of 0 (the
+default) to disable the thread time constraint policy or 1 for the policy to be
+enabled.
 .sp
-On Linux, this directive uses the \fBsched_setscheduler()\fP system call to
-instruct the kernel to use the SCHED_FIFO first\-in, first\-out real\-time
-scheduling policy for \fBchronyd\fP with the specified priority. This means that
-whenever \fBchronyd\fP is ready to run it will run, interrupting whatever else is
-running unless it is a higher priority real\-time process. This should not
-impact performance as \fBchronyd\fP resource requirements are modest, but it should
-result in lower and more consistent latency since \fBchronyd\fP will not need to
-wait for the scheduler to get around to running it. You should not use this
-unless you really need it. The \fBsched_setscheduler(2)\fP man page has more
-details.
+On systems other than macOS, this directive uses the \fBpthread_setschedparam()\fP
+system call to instruct the kernel to use the SCHED_FIFO first\-in, first\-out
+real\-time scheduling policy for \fBchronyd\fP with the specified priority. This
+means that whenever \fBchronyd\fP is ready to run it will run, interrupting
+whatever else is running unless it is a higher priority real\-time process. This
+should not impact performance as \fBchronyd\fP resource requirements are modest,
+but it should result in lower and more consistent latency since \fBchronyd\fP will
+not need to wait for the scheduler to get around to running it. You should not
+use this unless you really need it. The \fBpthread_setschedparam(3)\fP man page has
+more details.
 .sp
 On macOS, this directive uses the \fBthread_policy_set()\fP kernel call to
-specify real\-time scheduling. As noted for Linux, you should not use this
-directive unless you really need it.
+specify real\-time scheduling. As noted above, you should not use this directive
+unless you really need it.
 .RE
 .sp
 \fBuser\fP \fIuser\fP

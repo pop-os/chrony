@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2016-2018
+ * Copyright (C) Miroslav Lichvar  2016-2019
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -123,7 +123,7 @@ add_interface(CNF_HwTsInterface *conf_iface)
   struct ethtool_ts_info ts_info;
   struct hwtstamp_config ts_config;
   struct ifreq req;
-  int sock_fd, if_index, phc_fd, req_hwts_flags;
+  int sock_fd, if_index, phc_fd, req_hwts_flags, rx_filter;
   unsigned int i;
   struct Interface *iface;
 
@@ -177,40 +177,51 @@ add_interface(CNF_HwTsInterface *conf_iface)
     return 0;
   }
 
-  ts_config.flags = 0;
-  ts_config.tx_type = HWTSTAMP_TX_ON;
-
   switch (conf_iface->rxfilter) {
     case CNF_HWTS_RXFILTER_ANY:
 #ifdef HAVE_LINUX_TIMESTAMPING_RXFILTER_NTP
       if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_NTP_ALL))
-        ts_config.rx_filter = HWTSTAMP_FILTER_NTP_ALL;
+        rx_filter = HWTSTAMP_FILTER_NTP_ALL;
       else
 #endif
       if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_ALL))
-        ts_config.rx_filter = HWTSTAMP_FILTER_ALL;
+        rx_filter = HWTSTAMP_FILTER_ALL;
       else
-        ts_config.rx_filter = HWTSTAMP_FILTER_NONE;
+        rx_filter = HWTSTAMP_FILTER_NONE;
       break;
     case CNF_HWTS_RXFILTER_NONE:
-      ts_config.rx_filter = HWTSTAMP_FILTER_NONE;
+      rx_filter = HWTSTAMP_FILTER_NONE;
       break;
 #ifdef HAVE_LINUX_TIMESTAMPING_RXFILTER_NTP
     case CNF_HWTS_RXFILTER_NTP:
-      ts_config.rx_filter = HWTSTAMP_FILTER_NTP_ALL;
+      rx_filter = HWTSTAMP_FILTER_NTP_ALL;
       break;
 #endif
     default:
-      ts_config.rx_filter = HWTSTAMP_FILTER_ALL;
+      rx_filter = HWTSTAMP_FILTER_ALL;
       break;
   }
 
+  ts_config.flags = 0;
+  ts_config.tx_type = HWTSTAMP_TX_ON;
+  ts_config.rx_filter = rx_filter;
   req.ifr_data = (char *)&ts_config;
 
   if (ioctl(sock_fd, SIOCSHWTSTAMP, &req)) {
     DEBUG_LOG("ioctl(%s) failed : %s", "SIOCSHWTSTAMP", strerror(errno));
-    close(sock_fd);
-    return 0;
+
+    /* Check the current timestamping configuration in case this interface
+       allows only reading of the configuration and it was already configured
+       as requested */
+    req.ifr_data = (char *)&ts_config;
+#ifdef SIOCGHWTSTAMP
+    if (ioctl(sock_fd, SIOCGHWTSTAMP, &req) ||
+        ts_config.tx_type != HWTSTAMP_TX_ON || ts_config.rx_filter != rx_filter)
+#endif
+    {
+      close(sock_fd);
+      return 0;
+    }
   }
 
   close(sock_fd);
@@ -584,7 +595,11 @@ process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
   if (rx_ntp_length && iface->link_speed) {
     if (!l2_length)
       l2_length = (family == IPADDR_INET4 ? iface->l2_udp4_ntp_start :
-                   iface->l2_udp6_ntp_start) + rx_ntp_length + 4;
+                   iface->l2_udp6_ntp_start) + rx_ntp_length;
+
+    /* Include the frame check sequence (FCS) */
+    l2_length += 4;
+
     rx_correction = l2_length / (1.0e6 / 8 * iface->link_speed);
 
     UTI_AddDoubleToTimespec(hw_ts, rx_correction, hw_ts);
@@ -841,7 +856,12 @@ NIO_Linux_RequestTxTimestamp(struct msghdr *msg, int cmsglen, int sock_fd)
   /* Add control message that will enable TX timestamping for this message.
      Don't use CMSG_NXTHDR as the one in glibc is buggy for creating new
      control messages. */
-  cmsg = (struct cmsghdr *)((char *)CMSG_FIRSTHDR(msg) + cmsglen);
+
+  cmsg = CMSG_FIRSTHDR(msg);
+  if (!cmsg || cmsglen + CMSG_SPACE(sizeof (ts_tx_flags)) > msg->msg_controllen)
+    return cmsglen;
+
+  cmsg = (struct cmsghdr *)((char *)cmsg + cmsglen);
   memset(cmsg, 0, CMSG_SPACE(sizeof (ts_tx_flags)));
   cmsglen += CMSG_SPACE(sizeof (ts_tx_flags));
 

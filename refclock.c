@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016-2018
+ * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016-2019
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -325,25 +325,57 @@ RCL_GetDriverParameter(RCL_Instance instance)
   return instance->driver_parameter;
 }
 
+static char *
+get_next_driver_option(RCL_Instance instance, char *option)
+{
+  if (option == NULL)
+    option = instance->driver_parameter;
+
+  option += strlen(option) + 1;
+
+  if (option >= instance->driver_parameter + instance->driver_parameter_length)
+    return NULL;
+
+  return option;
+}
+
+void
+RCL_CheckDriverOptions(RCL_Instance instance, const char **options)
+{
+  char *option;
+  int i, len;
+
+  for (option = get_next_driver_option(instance, NULL);
+       option;
+       option = get_next_driver_option(instance, option)) {
+    for (i = 0; options && options[i]; i++) {
+      len = strlen(options[i]);
+      if (!strncmp(options[i], option, len) &&
+          (option[len] == '=' || option[len] == '\0'))
+        break;
+    }
+
+    if (!options || !options[i])
+      LOG_FATAL("Invalid refclock driver option %s", option);
+  }
+}
+
 char *
 RCL_GetDriverOption(RCL_Instance instance, char *name)
 {
-  char *s, *e;
-  int n;
+  char *option;
+  int len;
 
-  s = instance->driver_parameter;
-  e = s + instance->driver_parameter_length;
-  n = strlen(name);
+  len = strlen(name);
 
-  while (1) {
-    s += strlen(s) + 1;
-    if (s >= e)
-      break;
-    if (!strncmp(name, s, n)) {
-      if (s[n] == '=')
-        return s + n + 1;
-      if (s[n] == '\0')
-        return s + n;
+  for (option = get_next_driver_option(instance, NULL);
+       option;
+       option = get_next_driver_option(instance, option)) {
+    if (!strncmp(name, option, len)) {
+      if (option[len] == '=')
+        return option + len + 1;
+      if (option[len] == '\0')
+        return option + len;
     }
   }
 
