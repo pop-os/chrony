@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2019-05-02
+.\"      Date: 2019-05-10
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2019-05-02" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2019-05-10" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
