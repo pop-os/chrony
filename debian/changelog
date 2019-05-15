@@ -1,3 +1,17 @@
+chrony (3.5-1) experimental; urgency=medium
+
+  * Import upstream version 3.5:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * debian/control:
+    - Ignore net-tools and procps build-dependencies if the profile nocheck is
+    active.
+
+  * debian/rules:
+    - No test suite should be run if nocheck is passed to DEB_BUILD_OPTIONS.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 15 May 2019 18:44:12 +0200
+
 chrony (3.5~pre1-1) experimental; urgency=medium
 
   * Import upstream version 3.5-pre1:
