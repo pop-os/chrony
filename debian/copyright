@@ -81,6 +81,7 @@ Files: configure
 Copyright: 1997-2003, Richard P. Curnow
            2016, Bryan Christianson
            2009, 2012-2018, Miroslav Lichvar
+           2019, Stefan R. Filipek
 License: GPL-2
 
 Files: doc/chrony.conf.adoc
