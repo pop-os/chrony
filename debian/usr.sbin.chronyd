@@ -38,8 +38,7 @@
   # Example gpsd socket is outside /{,var/}run/chrony/
   /{,var/}run/chrony.tty{,*}.sock rw,
   # To sign replies to MS-SNTP clients by the smbd daemon
-  /var/lib/samba/ntp_signd r,
-  /var/lib/samba/ntp_signd/{,*} rw,
+  /var/lib/samba/ntp_signd/socket rw,
 
   # rtc
   /etc/adjtime r,
