@@ -19,7 +19,7 @@ if [ ! -d clknetsim ]; then
 fi
 
 if [ ! -x "clknetsim" ] && [ ! -e "clknetsim.so" ]; then
-    make -C clknetsim
+    make
 fi
 
 ./run -i 20 -m 2
