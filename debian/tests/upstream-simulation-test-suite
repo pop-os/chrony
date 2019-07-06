@@ -22,4 +22,4 @@ if [ ! -x "clknetsim" ] && [ ! -e "clknetsim.so" ]; then
     make
 fi
 
-./run -i 20 -m 2
+cd .. && ./run -i 20 -m 2
