@@ -1,3 +1,41 @@
+chrony (3.5-2) unstable; urgency=medium
+
+  * Merge branch “experimental” into “master”.
+
+  * debian/chrony.dhcp:
+    - Fix shellcheck warnings. Patch imported from Fedora.
+
+  * debian/chrony-helper:
+    - Fix shellcheck warnings. Patch imported from Fedora.
+
+  * debian/clean:
+    - Drop obsolete entries.
+
+  * debian/copyright:
+    - Update copyright years.
+    - Update copyright holder for the configure script.
+
+  * debian/patches/*:
+    - Add update_processing_of_packet_log.patch. This fixes a regression in
+    the simulation tests exhibited by the recent clknetsim changes.
+    (Closes: #931181)
+
+  * debian/rules:
+    - Use dh_missing --fail-missing.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Use a known good clknetsim commit. This should prevent regressions from
+    on-going “clknetsim” development.
+
+  * debian/usr.sbin.chronyd:
+    - Grant access rights only to the ntp_signd socket. (Closes: #928170)
+
+  [ Christian Ehrhardt ]
+  * debian/postrm:
+    - Re-establish systemd-timesyncd on removal. (MR: !1)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 06 Jul 2019 20:33:41 +0200
+
 chrony (3.5-1) experimental; urgency=medium
 
   * Import upstream version 3.5:
