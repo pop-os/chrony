@@ -1,5 +1,5 @@
 Tests: upstream-simulation-test-suite
-Depends: @, git, build-essential, ca-certificates
+Depends: build-essential, ca-certificates, wget
 Restrictions: isolation-container, needs-root, allow-stderr, rw-build-tree, build-needed
 
 Tests: time-sources-from-dhcp-servers
