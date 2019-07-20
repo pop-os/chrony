@@ -1,20 +1,3 @@
-include: https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
-
-build:
-    extends: .build-package
-
-reprotest:
-    extends: .test-reprotest
-
-lintian:
-    extends: .test-lintian
-
-autopkgtest:
-    extends: .test-autopkgtest
-    allow_failure: true
-
-piuparts:
-    extends: .test-piuparts
-
-blhc:
-    extends: .test-blhc
+include:
+    - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
+    - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
