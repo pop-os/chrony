@@ -7,19 +7,20 @@
 set -e
 
 testdir=test/simulation
-clknetsim_dir=$testdir/clknetsim
 clknetsim_ver=156b8e4
 clknetsim_src=https://github.com/mlichvar/clknetsim/archive/${clknetsim_ver}/clknetsim-${clknetsim_ver}.tar.gz
+
+export CLKNETSIM_PATH=$AUTOPKGTEST_TMP
 
 # The simulation tests are only supported on Linux.
 dpkg-architecture -ilinux-any || exit 0
 
 prepare_clknetsim() {
-    wget -q -P $clknetsim_dir $clknetsim_src && tar -xzf $clknetsim_dir/clknetsim-$clknetsim_ver.tar.gz \
-        -C $clknetsim_dir --strip-components=1
+    wget -q -P "$CLKNETSIM_PATH" $clknetsim_src && tar -xzf "$CLKNETSIM_PATH"/clknetsim-$clknetsim_ver.tar.gz \
+        -C "$CLKNETSIM_PATH" --strip-components=1
 
-    if [ ! -x "$clknetsim_dir/clknetsim" ] && [ ! -e "$clknetsim_dir/clknetsim.so" ]; then
-        make -C $clknetsim_dir
+    if [ ! -x "$CLKNETSIM_PATH/clknetsim" ] && [ ! -e "$CLKNETSIM_PATH/clknetsim.so" ]; then
+        make -C "$CLKNETSIM_PATH"
     fi
 }
 
