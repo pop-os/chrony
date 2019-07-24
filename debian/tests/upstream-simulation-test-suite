@@ -8,7 +8,7 @@ set -e
 
 testdir=test/simulation
 clknetsim_ver=156b8e4
-clknetsim_src=https://github.com/mlichvar/clknetsim/archive/${clknetsim_ver}/clknetsim-${clknetsim_ver}.tar.gz
+clknetsim_src=https://github.com/mlichvar/clknetsim/archive/$clknetsim_ver/clknetsim-$clknetsim_ver.tar.gz
 clknetsim_archive=$(basename "$clknetsim_src")
 
 export CLKNETSIM_PATH=$AUTOPKGTEST_TMP
