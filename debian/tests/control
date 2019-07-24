@@ -1,6 +1,6 @@
 Tests: upstream-simulation-test-suite
 Depends: build-essential, ca-certificates, wget
-Restrictions: isolation-container, rw-build-tree, build-needed
+Restrictions: isolation-container, build-needed
 
 Tests: time-sources-from-dhcp-servers
 Depends: @, isc-dhcp-server, isc-dhcp-client, iproute2, kmod
