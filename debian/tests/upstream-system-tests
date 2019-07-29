@@ -1,0 +1,20 @@
+#!/bin/sh
+# Run the upstream system tests in a container. Destructive tests will be run in
+# a VM as they may adjust/step the system clock, block the RTC, etc.
+# In case of failure, test’s logs will be put into the directory specified by
+# the $AUTOPKGTEST_ARTIFACTS environment variable.
+
+set -e
+
+testdir=$PWD/test/system
+logdir="$testdir/tmp/*"
+
+run_test() {
+     cd "$testdir" && ./run "$@"
+}
+
+artifacts() {
+    cp $logdir "$AUTOPKGTEST_ARTIFACTS"
+}
+
+run_test "$@" || artifacts
