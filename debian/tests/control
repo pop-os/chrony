@@ -12,5 +12,5 @@ Restrictions: build-needed, isolation-container, needs-root
 
 Features: test-name=run_destructive_system_tests
 Test-Command: debian/tests/upstream-system-tests -d 1[0-9][0-9]-*
-Depends: @, @builddeps@
+Depends: @, @builddeps@, ethtool
 Restrictions: build-needed, isolation-machine, needs-root
