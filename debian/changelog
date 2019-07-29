@@ -1,3 +1,31 @@
+chrony (3.5-3) unstable; urgency=medium
+
+  * debian/chrony.lintian-overrides:
+    - Override package-supports-alternative-init-but-no-init.d-script. This
+    is a false positive. chrony-dnssrv@.service isn’t a daemon but a oneshot
+    service, not started at boot, whose role is to lookup for _ntp._udp DNS SRV
+    records.
+
+  * debian/control:
+    - Bump standard-version to 4.4.0 (no changes required).
+
+  * debian/.gitlab-ci.yml:
+    - Switch to standard Salsa Pipeline.
+    - Skip the reprotest job for as long as it is run as root due to problems
+    with chrony system tests.
+
+  * debian/tests/*:
+    - Revamp the upstream-simulation-test-suite test.
+    - Adjust dpkg dependencies for upstream-simulation-test-suite.
+    - Adjust restrictions for upstream-simulation-test-suite.
+    - Introduce upstream-system-tests. Add a new set of tests for testing
+    basic chronyd functionality. Destructive tests are run in a virtual
+    machine.
+    - Add ethtool to the list of dependencies needed by
+    run_destructive_system_tests.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 29 Jul 2019 19:32:09 +0200
+
 chrony (3.5-2) unstable; urgency=medium
 
   * Merge branch “experimental” into “master”.
