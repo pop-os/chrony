@@ -14,7 +14,7 @@ clknetsim_archive=$(basename "$clknetsim_src")
 export CLKNETSIM_PATH="$AUTOPKGTEST_TMP"
 
 # The simulation tests are only supported on Linux.
-dpkg-architecture -ilinux-any || exit 0
+dpkg-architecture -ilinux-any || exit 77
 
 prepare_clknetsim() {
     wget -q -P "$CLKNETSIM_PATH" "$clknetsim_src" && tar -xzf "$CLKNETSIM_PATH"/"$clknetsim_archive" \
