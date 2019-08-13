@@ -14,7 +14,7 @@ run_test() {
 }
 
 artifacts() {
-    cp $logdir "$AUTOPKGTEST_ARTIFACTS"
+    cp $logdir "$AUTOPKGTEST_ARTIFACTS" && exit 1
 }
 
 run_test "$@" || artifacts
