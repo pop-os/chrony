@@ -6,6 +6,10 @@ chrony (3.5-3) unstable; urgency=medium
     service, not started at boot, whose role is to lookup for _ntp._udp DNS SRV
     records.
 
+  * debian/chrony.service:
+    - Pull in time-sync.target and order chrony before it as recommended in
+    systemd.special(7).
+
   * debian/control:
     - Bump standard-version to 4.4.0 (no changes required).
 
@@ -23,8 +27,12 @@ chrony (3.5-3) unstable; urgency=medium
     machine.
     - Add ethtool to the list of dependencies needed by
     run_destructive_system_tests.
+    - exit 77 if upstream-simulation-test-suite is run on non-Linux and mark
+    the test as skippable. Thanks to Paul Gevers <elbrus@debian.org> for the
+    suggestion.
+    - Make artifacts() exit 1. Again, thanks to Paul Gevers.
 
- -- Vincent Blut <vincent.debian@free.fr>  Mon, 29 Jul 2019 19:32:09 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 13 Aug 2019 17:57:47 +0200
 
 chrony (3.5-2) unstable; urgency=medium
 
