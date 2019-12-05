@@ -21,7 +21,7 @@ prepare_clknetsim() {
         -C "$CLKNETSIM_PATH" --strip-components=1
 
     if [ ! -x "$CLKNETSIM_PATH/clknetsim" ] && [ ! -e "$CLKNETSIM_PATH/clknetsim.so" ]; then
-        make -C "$CLKNETSIM_PATH"
+        make -C "$CLKNETSIM_PATH" 2>&1
     fi
 }
 
