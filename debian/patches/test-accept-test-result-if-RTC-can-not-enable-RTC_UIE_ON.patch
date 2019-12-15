@@ -1,0 +1,33 @@
+From c4d6f98bed890b4c8fc28d76b2c994f65b6d0eb7 Mon Sep 17 00:00:00 2001
+From: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Date: Thu, 12 Dec 2019 12:06:39 +0100
+Subject: test: accept test result if RTC can't enable RTC_UIE_ON
+
+The test might run on different platforms. If the platform happens
+to have a RTC that does exist but unable to have RTC_UIE_ON set the
+test will fail, while the chrony code is actually good.
+
+Examples of bad clocks are:
+- ppc64el: rtc-generic
+- arm64: rtc-efi
+
+To avoid that extend the log message check on 101-rtc to accept
+that condition as a valid test result as well.
+
+Signed-off-by: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+
+diff --git a/test/system/101-rtc b/test/system/101-rtc
+index fa9a70d..68bce68 100755
+--- a/test/system/101-rtc
++++ b/test/system/101-rtc
+@@ -14,6 +14,6 @@ echo "1 $(date +%s) 0.0 0.0" > "$TEST_DIR/rtcfile"
+ 
+ start_chronyd || test_fail
+ stop_chronyd || test_fail
+-check_chronyd_message_count "\(clock off from RTC\|RTC time before last\)" 1 1 || test_fail
++check_chronyd_message_count "\(clock off from RTC\|RTC time before last\|Could not \(enable\|disable\) RTC interrupt\)" 1 1 || test_fail
+ 
+ test_pass
+-- 
+cgit v0.10.2
+

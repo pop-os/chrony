@@ -1,0 +1,23 @@
+From f5eb7daf2087d52e3a55f9c081ff318588e287e8 Mon Sep 17 00:00:00 2001
+From: Miroslav Lichvar <mlichvar@redhat.com>
+Date: Tue, 10 Dec 2019 17:42:34 +0100
+Subject: rtc: disable interrupts in finalization
+
+Don't leave interrupts enabled if chronyd is stopped when making an RTC
+measurement.
+
+diff --git a/rtc_linux.c b/rtc_linux.c
+index fad95b5..aee768f 100644
+--- a/rtc_linux.c
++++ b/rtc_linux.c
+@@ -566,6 +566,7 @@ RTC_Linux_Finalise(void)
+   /* Remove input file handler */
+   if (fd >= 0) {
+     SCH_RemoveFileHandler(fd);
++    switch_interrupts(0);
+     close(fd);
+ 
+     /* Save the RTC data */
+-- 
+cgit v0.10.2
+
