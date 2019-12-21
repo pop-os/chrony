@@ -8,6 +8,7 @@ Restrictions: isolation-machine, needs-root
 
 Features: test-name=run_system_tests
 Test-Command: debian/tests/upstream-system-tests
+Depends: @builddeps@
 Restrictions: build-needed, isolation-container, needs-root
 
 Features: test-name=run_destructive_system_tests
