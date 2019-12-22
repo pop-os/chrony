@@ -1,3 +1,30 @@
+chrony (3.5-5) unstable; urgency=medium
+
+  * debian/control:
+    - Bump standard-version to 4.4.1 (no change required).
+
+  * debian/install:
+    - Install 50-chrony.list in /usr/lib/systemd/ntp-units.d.
+
+  * debian/ntp-units.d/50-chrony.list:
+    - Allow timedated to interact with chronyd.
+
+  * debian/patches/*:
+    - Cherry-pick upstream commits to better manage RTCs that don't support
+    interrupts. This fixes an issue exhibited when a specific upstream system
+    test is run on the Ubuntu CI. Thank to Christian Ehrhardt for working
+    with Miroslav Lichvar to address this problem.
+
+  * debian/tests/control:
+    - Use @builddeps@ as a test dependency for upstream_system_tests.
+
+  [ Christian Ehrhardt ]
+  * debian/tests/upstream-simulation-test-suite:
+    - Redirect stderr on make call to stdout. On some architectures (e.g. armhf)
+    the clksim tests compile but throw some warnings. (MR: !2)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 22 Dec 2019 17:30:40 +0100
+
 chrony (3.5-4) unstable; urgency=medium
 
   * debian/tests/control:
