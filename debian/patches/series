@@ -1,3 +1,4 @@
+allow-clock_adjtime-in-seccomp-filter.patch
 update_processing_of_packet_log.patch
 rtc-simplify-and-move-switch_interrupts-function.patch
 rtc-do-not-finalize-driver-if-initialization-failed.patch
