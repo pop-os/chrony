@@ -31,8 +31,7 @@ Depends: adduser,
          ${shlibs:Depends}
 Suggests: dnsutils,
           networkd-dispatcher
-Conflicts: ntp,
-           time-daemon
+Conflicts: time-daemon
 Provides: time-daemon
 Replaces: time-daemon
 Description: Versatile implementation of the Network Time Protocol
