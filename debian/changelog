@@ -1,3 +1,37 @@
+chrony (3.5-6) unstable; urgency=medium
+
+  * debian/chrony.service:
+    - Don’t conflict with systemd-timesyncd.service.
+    A few users complain that chronyd does not start at boot. The way the
+    Conflict= directive works internally might cause both systemd-timesyncd
+    and chronyd to be inactive at boot. So by relying solely on the
+    disable-with-time-daemon.conf drop-in file provided by systemd, we should
+    get rid of this malfunction while still preventing these two time daemons
+    from being active at the same time. Kudos notably go to Santiago Vila for
+    the report and providing SSH access to a GCE instance where the issue was
+    reproducible and Michael Biebl for debugging. (Closes: #947936)
+
+  * debian/control:
+    - Bump Standards-Version to 4.5.0 (no changes required).
+    - No need to explicitly conflict with ntp as it now provides time-daemon.
+
+  * debian/copyright:
+    - Update copyright year for debian/*.
+
+  * debian/patches/:
+    - Add allow-clock_adjtime-in-seccomp-filter.patch.
+    glibc 2.31 switched the adjtimex() function to the clock_adjtime
+    system call.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Update clknetsim version. This new version supports glibc >= 2.31 headers.
+    (LP: #1866753)
+
+  * debian/tests/control:
+    - Run the upstream-simulation-test-suite as root.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 10 Mar 2020 19:17:16 +0100
+
 chrony (3.5-5) unstable; urgency=medium
 
   * debian/control:
