@@ -33,12 +33,14 @@
 
 #include "array.h"
 #include "candm.h"
+#include "cmac.h"
 #include "logging.h"
 #include "memory.h"
 #include "nameserv.h"
 #include "getdate.h"
 #include "cmdparse.h"
 #include "pktlength.h"
+#include "socket.h"
 #include "util.h"
 
 #ifdef FEAT_READLINE
@@ -52,16 +54,15 @@
 
 /* ================================================== */
 
-union sockaddr_all {
-  struct sockaddr_in in4;
-#ifdef FEAT_IPV6
-  struct sockaddr_in6 in6;
-#endif
-  struct sockaddr_un un;
-  struct sockaddr sa;
+struct Address {
+  SCK_AddressType type;
+  union {
+    IPSockAddr ip;
+    char *path;
+  } addr;
 };
 
-static ARR_Instance sockaddrs;
+static ARR_Instance server_addresses;
 
 static int sock_fd = -1;
 
@@ -71,13 +72,15 @@ static int on_terminal = 0;
 
 static int no_dns = 0;
 
+static int source_names = 0;
+
 static int csv_mode = 0;
 
 /* ================================================== */
 /* Log a message. This is a minimalistic replacement of the logging.c
    implementation to avoid linking with it and other modules. */
 
-int log_debug_enabled = 0;
+LOG_Severity log_min_severity = LOGS_INFO;
 
 void LOG_Message(LOG_Severity severity,
 #if DEBUG > 0
@@ -86,6 +89,9 @@ void LOG_Message(LOG_Severity severity,
                  const char *format, ...)
 {
   va_list ap;
+
+  if (severity < log_min_severity)
+    return;
 
   va_start(ap, format);
   vfprintf(stderr, format, ap);
@@ -145,15 +151,15 @@ read_line(void)
 /* ================================================== */
 
 static ARR_Instance
-get_sockaddrs(const char *hostnames, int port)
+get_addresses(const char *hostnames, int port)
 {
+  struct Address *addr;
   ARR_Instance addrs;
   char *hostname, *s1, *s2;
   IPAddr ip_addrs[DNS_MAX_ADDRESSES];
-  union sockaddr_all *addr;
   int i;
 
-  addrs = ARR_CreateInstance(sizeof (union sockaddr_all));
+  addrs = ARR_CreateInstance(sizeof (*addr));
   s1 = Strdup(hostnames);
 
   /* Parse the comma-separated list of hostnames */
@@ -164,11 +170,9 @@ get_sockaddrs(const char *hostnames, int port)
 
     /* hostname starting with / is considered a path of Unix domain socket */
     if (hostname[0] == '/') {
-      addr = (union sockaddr_all *)ARR_GetNewElement(addrs);
-      if (snprintf(addr->un.sun_path, sizeof (addr->un.sun_path), "%s", hostname) >=
-          sizeof (addr->un.sun_path))
-        LOG_FATAL("Unix socket path too long");
-      addr->un.sun_family = AF_UNIX;
+      addr = ARR_GetNewElement(addrs);
+      addr->type = SCK_ADDR_UNIX;
+      addr->addr.path = Strdup(hostname);
     } else {
       if (DNS_Name2IPAddress(hostname, ip_addrs, DNS_MAX_ADDRESSES) != DNS_Success) {
         DEBUG_LOG("Could not get IP address for %s", hostname);
@@ -176,8 +180,10 @@ get_sockaddrs(const char *hostnames, int port)
       }
 
       for (i = 0; i < DNS_MAX_ADDRESSES && ip_addrs[i].family != IPADDR_UNSPEC; i++) {
-        addr = (union sockaddr_all *)ARR_GetNewElement(addrs);
-        UTI_IPAndPortToSockaddr(&ip_addrs[i], port, (struct sockaddr *)addr);
+        addr = ARR_GetNewElement(addrs);
+        addr->type = SCK_ADDR_IP;
+        addr->addr.ip.ip_addr = ip_addrs[i];
+        addr->addr.ip.port = port;
         DEBUG_LOG("Resolved %s to %s", hostname, UTI_IPToString(&ip_addrs[i]));
       }
     }
@@ -188,69 +194,59 @@ get_sockaddrs(const char *hostnames, int port)
 }
 
 /* ================================================== */
+
+static void
+free_addresses(ARR_Instance addresses)
+{
+  struct Address *addr;
+  unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(addresses); i++) {
+    addr = ARR_GetElement(addresses, i);
+
+    if (addr->type == SCK_ADDR_UNIX)
+      Free(addr->addr.path);
+  }
+
+  ARR_DestroyInstance(addresses);
+}
+
+/* ================================================== */
 /* Initialise the socket used to talk to the daemon */
 
 static int
-prepare_socket(union sockaddr_all *addr)
+open_socket(struct Address *addr)
 {
-  socklen_t addr_len;
-  char *dir;
+  char *dir, *local_addr;
+  size_t local_addr_len;
 
-  switch (addr->sa.sa_family) {
-    case AF_UNIX:
-      addr_len = sizeof (addr->un);
+  switch (addr->type) {
+    case SCK_ADDR_IP:
+      sock_fd = SCK_OpenUdpSocket(&addr->addr.ip, NULL, 0);
       break;
-    case AF_INET:
-      addr_len = sizeof (addr->in4);
+    case SCK_ADDR_UNIX:
+      /* Construct path of our socket.  Use the same directory as the server
+         socket and include our process ID to allow multiple chronyc instances
+         running at the same time. */
+
+      dir = UTI_PathToDir(addr->addr.path);
+      local_addr_len = strlen(dir) + 50;
+      local_addr = Malloc(local_addr_len);
+
+      snprintf(local_addr, local_addr_len, "%s/chronyc.%d.sock", dir, (int)getpid());
+
+      sock_fd = SCK_OpenUnixDatagramSocket(addr->addr.path, local_addr,
+                                           SCK_FLAG_ALL_PERMISSIONS);
+      Free(dir);
+      Free(local_addr);
+
       break;
-#ifdef FEAT_IPV6
-    case AF_INET6:
-      addr_len = sizeof (addr->in6);
-      break;
-#endif
     default:
       assert(0);
   }
 
-  sock_fd = socket(addr->sa.sa_family, SOCK_DGRAM, 0);
-
-  if (sock_fd < 0) {
-    DEBUG_LOG("Could not create socket : %s", strerror(errno));
+  if (sock_fd < 0)
     return 0;
-  }
-
-  if (addr->sa.sa_family == AF_UNIX) {
-    struct sockaddr_un sa_un;
-
-    /* Construct path of our socket.  Use the same directory as the server
-       socket and include our process ID to allow multiple chronyc instances
-       running at the same time. */
-    dir = UTI_PathToDir(addr->un.sun_path);
-    if (snprintf(sa_un.sun_path, sizeof (sa_un.sun_path),
-                 "%s/chronyc.%d.sock", dir, (int)getpid()) >= sizeof (sa_un.sun_path))
-      LOG_FATAL("Unix socket path too long");
-    Free(dir);
-
-    sa_un.sun_family = AF_UNIX;
-    unlink(sa_un.sun_path);
-
-    /* Bind the socket to the path */
-    if (bind(sock_fd, (struct sockaddr *)&sa_un, sizeof (sa_un)) < 0) {
-      DEBUG_LOG("Could not bind socket : %s", strerror(errno));
-      return 0;
-    }
-
-    /* Allow server without root privileges to send replies to our socket */
-    if (chmod(sa_un.sun_path, 0666) < 0) {
-      DEBUG_LOG("Could not change socket permissions : %s", strerror(errno));
-      return 0;
-    }
-  }
-
-  if (connect(sock_fd, &addr->sa, addr_len) < 0) {
-    DEBUG_LOG("Could not connect socket : %s", strerror(errno));
-    return 0;
-  }
 
   return 1;
 }
@@ -260,20 +256,11 @@ prepare_socket(union sockaddr_all *addr)
 static void
 close_io(void)
 {
-  union sockaddr_all addr;
-  socklen_t addr_len = sizeof (addr);
-
   if (sock_fd < 0)
     return;
 
-  /* Remove our Unix domain socket */
-  if (getsockname(sock_fd, &addr.sa, &addr_len) < 0)
-    LOG_FATAL("getsockname() failed : %s", strerror(errno));
-  if (addr_len <= sizeof (addr) && addr_len > sizeof (addr.sa.sa_family) &&
-      addr.sa.sa_family == AF_UNIX)
-    unlink(addr.un.sun_path);
-
-  close(sock_fd);
+  SCK_RemoveSocket(sock_fd);
+  SCK_CloseSocket(sock_fd);
   sock_fd = -1;
 }
 
@@ -283,7 +270,7 @@ static int
 open_io(void)
 {
   static unsigned int address_index = 0;
-  union sockaddr_all *addr;
+  struct Address *addr;
 
   /* If a socket is already opened, close it and try the next address */
   if (sock_fd >= 0) {
@@ -292,11 +279,10 @@ open_io(void)
   }
 
   /* Find an address for which a socket can be opened and connected */
-  for (; address_index < ARR_GetSize(sockaddrs); address_index++) {
-    addr = (union sockaddr_all *)ARR_GetElement(sockaddrs, address_index);
-    DEBUG_LOG("Opening connection to %s", UTI_SockaddrToString(&addr->sa));
+  for (; address_index < ARR_GetSize(server_addresses); address_index++) {
+    addr = ARR_GetElement(server_addresses, address_index);
 
-    if (prepare_socket(addr))
+    if (open_socket(addr))
       return 1;
 
     close_io();
@@ -334,9 +320,26 @@ bits_to_mask(int bits, int family, IPAddr *mask)
       for (; i < 16; i++)
         mask->addr.in6[i] = 0x0;
       break;
+    case IPADDR_ID:
+      mask->family = IPADDR_UNSPEC;
+      break;
     default:
       assert(0);
   }
+}
+
+/* ================================================== */
+
+static int
+parse_source_address(char *word, IPAddr *address)
+{
+  if (UTI_StringToIdIP(word, address))
+    return 1;
+
+  if (DNS_Name2IPAddress(word, address, 1) == DNS_Success)
+    return 1;
+
+  return 0;
 }
 
 /* ================================================== */
@@ -367,7 +370,7 @@ read_mask_address(char *line, IPAddr *mask, IPAddr *address)
         }
       }
     } else {
-      if (DNS_Name2IPAddress(p, address, 1) == DNS_Success) {
+      if (parse_source_address(p, address)) {
         bits_to_mask(-1, address->family, mask);
         return 1;
       } else {
@@ -447,7 +450,7 @@ read_address_integer(char *line, IPAddr *address, int *value)
     LOG(LOGS_ERR, "Invalid syntax for address value");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
+    if (!parse_source_address(hostname, address)) {
       LOG(LOGS_ERR, "Could not get address for hostname");
       ok = 0;
     } else {
@@ -475,7 +478,7 @@ read_address_double(char *line, IPAddr *address, double *value)
     LOG(LOGS_ERR, "Invalid syntax for address value");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, address, 1) != DNS_Success) {
+    if (!parse_source_address(hostname, address)) {
       LOG(LOGS_ERR, "Could not get address for hostname");
       ok = 0;
     } else {
@@ -1069,20 +1072,39 @@ process_cmd_doffset(CMD_Request *msg, char *line)
 /* ================================================== */
 
 static int
-process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
+process_cmd_add_source(CMD_Request *msg, char *line)
 {
   CPS_NTP_Source data;
   IPAddr ip_addr;
-  int result = 0, status;
-  const char *opt_name;
+  int result = 0, status, type;
+  const char *opt_name, *word;
   
+  msg->command = htons(REQ_ADD_SOURCE);
+
+  word = line;
+  line = CPS_SplitWord(line);
+
+  if (!strcmp(word, "server")) {
+    type = REQ_ADDSRC_SERVER;
+  } else if (!strcmp(word, "peer")) {
+    type = REQ_ADDSRC_PEER;
+  } else if (!strcmp(word, "pool")) {
+    type = REQ_ADDSRC_POOL;
+  } else {
+    LOG(LOGS_ERR, "Invalid syntax for add command");
+    return 0;
+  }
+
   status = CPS_ParseNTPSourceAdd(line, &data);
   switch (status) {
     case 0:
       LOG(LOGS_ERR, "Invalid syntax for add command");
       break;
     default:
-      if (DNS_Name2IPAddress(data.name, &ip_addr, 1) != DNS_Success) {
+      /* Verify that the address is resolvable (chronyc and chronyd are
+         assumed to be running on the same host) */
+      if (strlen(data.name) >= sizeof (msg->data.ntp_source.name) ||
+          DNS_Name2IPAddress(data.name, &ip_addr, 1) != DNS_Success) {
         LOG(LOGS_ERR, "Invalid host/IP address");
         break;
       }
@@ -1093,8 +1115,12 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
         break;
       }
 
+      msg->data.ntp_source.type = htonl(type);
+      if (strlen(data.name) >= sizeof (msg->data.ntp_source.name))
+        assert(0);
+      strncpy((char *)msg->data.ntp_source.name, data.name,
+              sizeof (msg->data.ntp_source.name));
       msg->data.ntp_source.port = htonl((unsigned long) data.port);
-      UTI_IPHostToNetwork(&ip_addr, &msg->data.ntp_source.ip_addr);
       msg->data.ntp_source.minpoll = htonl(data.params.minpoll);
       msg->data.ntp_source.maxpoll = htonl(data.params.maxpoll);
       msg->data.ntp_source.presend_minpoll = htonl(data.params.presend_minpoll);
@@ -1105,6 +1131,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
       msg->data.ntp_source.min_samples = htonl(data.params.min_samples);
       msg->data.ntp_source.max_samples = htonl(data.params.max_samples);
       msg->data.ntp_source.authkey = htonl(data.params.authkey);
+      msg->data.ntp_source.nts_port = htonl(data.params.nts_port);
       msg->data.ntp_source.max_delay = UTI_FloatHostToNetwork(data.params.max_delay);
       msg->data.ntp_source.max_delay_ratio = UTI_FloatHostToNetwork(data.params.max_delay_ratio);
       msg->data.ntp_source.max_delay_dev_ratio =
@@ -1118,6 +1145,7 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
           (data.params.iburst ? REQ_ADDSRC_IBURST : 0) |
           (data.params.interleaved ? REQ_ADDSRC_INTERLEAVED : 0) |
           (data.params.burst ? REQ_ADDSRC_BURST : 0) |
+          (data.params.nts ? REQ_ADDSRC_NTS : 0) |
           (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
@@ -1131,24 +1159,6 @@ process_cmd_add_server_or_peer(CMD_Request *msg, char *line)
   }
 
   return result;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_add_server(CMD_Request *msg, char *line)
-{
-  msg->command = htons(REQ_ADD_SERVER3);
-  return process_cmd_add_server_or_peer(msg, line);
-}
-
-/* ================================================== */
-
-static int
-process_cmd_add_peer(CMD_Request *msg, char *line)
-{
-  msg->command = htons(REQ_ADD_PEER3);
-  return process_cmd_add_server_or_peer(msg, line);
 }
 
 /* ================================================== */
@@ -1168,7 +1178,7 @@ process_cmd_delete(CMD_Request *msg, char *line)
     LOG(LOGS_ERR, "Invalid syntax for address");
     ok = 0;
   } else {
-    if (DNS_Name2IPAddress(hostname, &address, 1) != DNS_Success) {
+    if (!parse_source_address(hostname, &address)) {
       LOG(LOGS_ERR, "Could not get address for hostname");
       ok = 0;
     } else {
@@ -1197,16 +1207,17 @@ give_help(void)
                           "Wait until synchronised in specified limits\0"
     "\0\0"
     "Time sources:\0\0"
-    "sources [-v]\0Display information about current sources\0"
-    "sourcestats [-v]\0Display statistics about collected measurements\0"
+    "sources [-a] [-v]\0Display information about current sources\0"
+    "sourcestats [-a] [-v]\0Display statistics about collected measurements\0"
     "reselect\0Force reselecting synchronisation source\0"
     "reselectdist <dist>\0Modify reselection distance\0"
     "\0\0"
     "NTP sources:\0\0"
     "activity\0Check how many NTP sources are online/offline\0"
     "ntpdata [<address>]\0Display information about last valid measurement\0"
-    "add server <address> [options]\0Add new NTP server\0"
-    "add peer <address> [options]\0Add new NTP peer\0"
+    "add server <name> [options]\0Add new NTP server\0"
+    "add pool <name> [options]\0Add new pool of NTP servers\0"
+    "add peer <name> [options]\0Add new NTP peer\0"
     "delete <address>\0Remove server or peer\0"
     "burst <n-good>/<n-max> [<mask>/<address>]\0Start rapid set of measurements\0"
     "maxdelay <address> <delay>\0Modify maximum valid sample delay\0"
@@ -1221,6 +1232,7 @@ give_help(void)
     "\0according to network configuration\0"
     "polltarget <address> <target>\0Modify poll target\0"
     "refresh\0Refresh IP addresses\0"
+    "sourcename <address>\0Display original name\0"
     "\0\0"
     "Manual time input:\0\0"
     "manual off|on|reset\0Disable/enable/reset settime command\0"
@@ -1257,6 +1269,7 @@ give_help(void)
     "cyclelogs\0Close and re-open log files\0"
     "dump\0Dump all measurements to save files\0"
     "rekey\0Re-read keys from key file\0"
+    "reset\0Drop all measurements\0"
     "shutdown\0Stop daemon\0"
     "\0\0"
     "Client commands:\0\0"
@@ -1303,16 +1316,16 @@ command_name_generator(const char *text, int state)
     "deny", "dns", "dump", "exit", "help", "keygen", "local", "makestep",
     "manual", "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
     "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online", "onoffline",
-    "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist",
+    "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist", "reset",
     "retries", "rtcdata", "serverstats", "settime", "shutdown", "smoothing",
-    "smoothtime", "sources", "sourcestats",
+    "smoothtime", "sourcename", "sources", "sourcestats",
     "timeout", "tracking", "trimrtc", "waitsync", "writertc",
     NULL
   };
-  const char *add_options[] = { "peer", "server", NULL };
+  const char *add_options[] = { "peer", "pool", "server", NULL };
   const char *manual_options[] = { "on", "off", "delete", "list", "reset", NULL };
-  const char *sources_options[] = { "-v", NULL };
-  const char *sourcestats_options[] = { "-v", NULL };
+  const char *sources_options[] = { "-a", "-v", NULL };
+  const char *sourcestats_options[] = { "-a", "-v", NULL };
   static int list_index, len;
 
   names[TAB_COMPLETE_BASE_CMDS] = base_commands;
@@ -1426,12 +1439,8 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
         return 0;
       }
 
-      if (send(sock_fd, (void *)request, command_length, 0) < 0) {
-        DEBUG_LOG("Could not send %d bytes : %s", command_length, strerror(errno));
+      if (SCK_Send(sock_fd, (void *)request, command_length, 0) < 0)
         return 0;
-      }
-
-      DEBUG_LOG("Sent %d bytes", command_length);
     }
 
     UTI_TimevalToTimespec(&tv, &ts_now);
@@ -1467,16 +1476,11 @@ submit_request(CMD_Request *request, CMD_Reply *reply)
       /* Timeout must have elapsed, try a resend? */
       new_attempt = 1;
     } else {
-      recv_status = recv(sock_fd, (void *)reply, sizeof(CMD_Reply), 0);
+      recv_status = SCK_Receive(sock_fd, reply, sizeof (*reply), 0);
       
       if (recv_status < 0) {
-        /* If we get connrefused here, it suggests the sendto is
-           going to a dead port */
-        DEBUG_LOG("Could not receive : %s", strerror(errno));
         new_attempt = 1;
       } else {
-        DEBUG_LOG("Received %d bytes", recv_status);
-        
         read_length = recv_status;
         
         /* Check if the header is valid */
@@ -1606,6 +1610,9 @@ request_reply(CMD_Request *request, CMD_Reply *reply, int requested_reply, int v
         break;
       case STT_INACTIVE:
         printf("519 Client logging is not active in the daemon");
+        break;
+      case STT_INVALIDNAME:
+        printf("521 Invalid name");
         break;
       default:
         printf("520 Got unexpected error from daemon");
@@ -2038,12 +2045,40 @@ print_info_field(const char *format, ...)
 
 /* ================================================== */
 
+static int
+get_source_name(IPAddr *ip_addr, char *buf, int size)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  int i;
+
+  request.command = htons(REQ_NTP_SOURCE_NAME);
+  UTI_IPHostToNetwork(ip_addr, &request.data.ntp_source_name.ip_addr);
+  if (!request_reply(&request, &reply, RPY_NTP_SOURCE_NAME, 0) ||
+      reply.data.ntp_source_name.name[sizeof (reply.data.ntp_source_name.name) - 1] != '\0' ||
+      snprintf(buf, size, "%s", reply.data.ntp_source_name.name) >= size)
+    return 0;
+
+  /* Make sure the name is printable */
+  for (i = 0; i < size && buf[i] != '\0'; i++) {
+    if (!isgraph(buf[i]))
+      return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
 static void
 format_name(char *buf, int size, int trunc_dns, int ref, uint32_t ref_id,
-            IPAddr *ip_addr)
+            int source, IPAddr *ip_addr)
 {
   if (ref) {
     snprintf(buf, size, "%s", UTI_RefidToString(ref_id));
+  } else if (source && source_names) {
+    if (!get_source_name(ip_addr, buf, size))
+      snprintf(buf, size, "?");
   } else if (no_dns || csv_mode) {
     snprintf(buf, size, "%s", UTI_IPToString(ip_addr));
   } else {
@@ -2057,12 +2092,42 @@ format_name(char *buf, int size, int trunc_dns, int ref, uint32_t ref_id,
 
 /* ================================================== */
 
-static int
-check_for_verbose_flag(char *line)
+static void
+parse_sources_options(char *line, int *all, int *verbose)
 {
-  if (!csv_mode && !strcmp(line, "-v"))
-    return 1;
-  return 0;
+  char *opt;
+
+  *all = *verbose = 0;
+
+  while (*line) {
+    opt = line;
+    line = CPS_SplitWord(line);
+    if (!strcmp(opt, "-a"))
+      *all = 1;
+    else if (!strcmp(opt, "-v"))
+      *verbose = !csv_mode;
+  }
+}
+
+/* ================================================== */
+
+static int
+process_cmd_sourcename(char *line)
+{
+  IPAddr ip_addr;
+  char name[256];
+
+  if (!UTI_StringToIP(line, &ip_addr)) {
+    LOG(LOGS_ERR, "Could not read address");
+    return 0;
+  }
+
+  if (!get_source_name(&ip_addr, name, sizeof (name)))
+    return 0;
+
+  print_report("%s\n", name, REPORT_END);
+
+  return 1;
 }
 
 /* ================================================== */
@@ -2074,18 +2139,16 @@ process_cmd_sources(char *line)
   CMD_Reply reply;
   IPAddr ip_addr;
   uint32_t i, mode, n_sources;
-  char name[50], mode_ch, state_ch;
-  int verbose;
+  char name[256], mode_ch, state_ch;
+  int all, verbose;
 
-  /* Check whether to output verbose headers */
-  verbose = check_for_verbose_flag(line);
+  parse_sources_options(line, &all, &verbose);
   
   request.command = htons(REQ_N_SOURCES);
   if (!request_reply(&request, &reply, RPY_N_SOURCES, 0))
     return 0;
 
   n_sources = ntohl(reply.data.n_sources.n_sources);
-  print_info_field("210 Number of sources = %lu\n", (unsigned long)n_sources);
 
   if (verbose) {
     printf("\n");
@@ -2111,9 +2174,12 @@ process_cmd_sources(char *line)
 
     mode = ntohs(reply.data.source_data.mode);
     UTI_IPNetworkToHost(&reply.data.source_data.ip_addr, &ip_addr);
+    if (!all && ip_addr.family == IPADDR_ID)
+      continue;
+
     format_name(name, sizeof (name), 25,
                 mode == RPY_SD_MD_REF && ip_addr.family == IPADDR_INET4,
-                ip_addr.addr.in4, &ip_addr);
+                ip_addr.addr.in4, 1, &ip_addr);
 
     switch (mode) {
       case RPY_SD_MD_CLIENT:
@@ -2180,18 +2246,17 @@ process_cmd_sourcestats(char *line)
   CMD_Request request;
   CMD_Reply reply;
   uint32_t i, n_sources;
-  int verbose = 0;
-  char name[50];
+  int all, verbose;
+  char name[256];
   IPAddr ip_addr;
 
-  verbose = check_for_verbose_flag(line);
+  parse_sources_options(line, &all, &verbose);
 
   request.command = htons(REQ_N_SOURCES);
   if (!request_reply(&request, &reply, RPY_N_SOURCES, 0))
     return 0;
 
   n_sources = ntohl(reply.data.n_sources.n_sources);
-  print_info_field("210 Number of sources = %lu\n", (unsigned long)n_sources);
 
   if (verbose) {
     printf("                             .- Number of sample points in measurement set.\n");
@@ -2216,8 +2281,11 @@ process_cmd_sourcestats(char *line)
       return 0;
 
     UTI_IPNetworkToHost(&reply.data.sourcestats.ip_addr, &ip_addr);
+    if (!all && ip_addr.family == IPADDR_ID)
+      continue;
+
     format_name(name, sizeof (name), 25, ip_addr.family == IPADDR_UNSPEC,
-                ntohl(reply.data.sourcestats.ref_id), &ip_addr);
+                ntohl(reply.data.sourcestats.ref_id), 1, &ip_addr);
 
     print_report("%-25s %3U %3U  %I %+P %P  %+S  %S\n",
                  name,
@@ -2243,7 +2311,7 @@ process_cmd_tracking(char *line)
   CMD_Reply reply;
   IPAddr ip_addr;
   uint32_t ref_id;
-  char name[50];
+  char name[256];
   struct timespec ref_time;
   
   request.command = htons(REQ_TRACKING);
@@ -2254,7 +2322,7 @@ process_cmd_tracking(char *line)
 
   UTI_IPNetworkToHost(&reply.data.tracking.ip_addr, &ip_addr);
   format_name(name, sizeof (name), sizeof (name),
-              ip_addr.family == IPADDR_UNSPEC, ref_id, &ip_addr);
+              ip_addr.family == IPADDR_UNSPEC, ref_id, 1, &ip_addr);
 
   UTI_TimespecNetworkToHost(&reply.data.tracking.ref_time, &ref_time);
 
@@ -2314,7 +2382,7 @@ process_cmd_ntpdata(char *line)
 
   for (i = 0; i < n_sources; i++) {
     if (specified_addr) {
-      if (DNS_Name2IPAddress(line, &remote_addr, 1) != DNS_Success) {
+      if (!parse_source_address(line, &remote_addr)) {
         LOG(LOGS_ERR, "Could not get address for hostname");
         return 0;
       }
@@ -2329,6 +2397,8 @@ process_cmd_ntpdata(char *line)
         continue;
 
       UTI_IPNetworkToHost(&reply.data.source_data.ip_addr, &remote_addr);
+      if (!UTI_IsIPReal(&remote_addr))
+        continue;
     }
 
     request.command = htons(REQ_NTP_DATA);
@@ -2550,7 +2620,7 @@ process_cmd_clients(char *line)
       if (ip.family == IPADDR_UNSPEC)
         continue;
 
-      format_name(name, sizeof (name), 25, 0, 0, &ip);
+      format_name(name, sizeof (name), 25, 0, 0, 0, &ip);
 
       print_report("%-25s  %6U  %5U  %C  %C  %I  %6U  %5U  %C  %I\n",
                    name,
@@ -2766,6 +2836,14 @@ process_cmd_shutdown(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
+static void
+process_cmd_reset(CMD_Request *msg, char *line)
+{
+  msg->command = htons(REQ_RESET);
+}
+
+/* ================================================== */
+
 static int
 process_cmd_waitsync(char *line)
 {
@@ -2881,28 +2959,39 @@ process_cmd_retries(const char *line)
 static int
 process_cmd_keygen(char *line)
 {
-  char hash_name[17];
   unsigned char key[512];
-  unsigned int i, length, id = 1, bits = 160;
+  char type[17];
+  unsigned int i, cmac_length, length, id = 1, bits = 160;
 
 #ifdef FEAT_SECHASH
-  snprintf(hash_name, sizeof (hash_name), "SHA1");
+  snprintf(type, sizeof (type), "SHA1");
 #else
-  snprintf(hash_name, sizeof (hash_name), "MD5");
+  snprintf(type, sizeof (type), "MD5");
 #endif
 
-  if (sscanf(line, "%u %16s %u", &id, hash_name, &bits))
+  if (sscanf(line, "%u %16s %u", &id, type, &bits))
     ;
 
-  length = CLAMP(10, (bits + 7) / 8, sizeof (key));
-  if (HSH_GetHashId(hash_name) < 0) {
-    LOG(LOGS_ERR, "Unknown hash function %s", hash_name);
+#ifdef HAVE_CMAC
+  cmac_length = CMC_GetKeyLength(type);
+#else
+  cmac_length = 0;
+#endif
+
+  if (HSH_GetHashId(type) >= 0) {
+    length = (bits + 7) / 8;
+  } else if (cmac_length > 0) {
+    length = cmac_length;
+  } else {
+    LOG(LOGS_ERR, "Unknown hash function or cipher %s", type);
     return 0;
   }
 
+  length = CLAMP(10, length, sizeof (key));
+
   UTI_GetRandomBytesUrandom(key, length);
 
-  printf("%u %s HEX:", id, hash_name);
+  printf("%u %s HEX:", id, type);
   for (i = 0; i < length; i++)
     printf("%02hhX", key[i]);
   printf("\n");
@@ -2941,10 +3030,8 @@ process_line(char *line)
   } else if (!strcmp(command, "activity")) {
     do_normal_submit = 0;
     ret = process_cmd_activity(line);
-  } else if (!strcmp(command, "add") && !strncmp(line, "peer", 4)) {
-    do_normal_submit = process_cmd_add_peer(&tx_message, CPS_SplitWord(line));
-  } else if (!strcmp(command, "add") && !strncmp(line, "server", 6)) {
-    do_normal_submit = process_cmd_add_server(&tx_message, CPS_SplitWord(line));
+  } else if (!strcmp(command, "add")) {
+    do_normal_submit = process_cmd_add_source(&tx_message, line);
   } else if (!strcmp(command, "allow")) {
     if (!strncmp(line, "all", 3)) {
       do_normal_submit = process_cmd_allowall(&tx_message, CPS_SplitWord(line));
@@ -3051,6 +3138,8 @@ process_line(char *line)
     process_cmd_reselect(&tx_message, line);
   } else if (!strcmp(command, "reselectdist")) {
     do_normal_submit = process_cmd_reselectdist(&tx_message, line);
+  } else if (!strcmp(command, "reset")) {
+    process_cmd_reset(&tx_message, line);
   } else if (!strcmp(command, "retries")) {
     ret = process_cmd_retries(line);
     do_normal_submit = 0;
@@ -3070,6 +3159,9 @@ process_line(char *line)
     ret = process_cmd_smoothing(line);
   } else if (!strcmp(command, "smoothtime")) {
     do_normal_submit = process_cmd_smoothtime(&tx_message, line);
+  } else if (!strcmp(command, "sourcename")) {
+    do_normal_submit = 0;
+    ret = process_cmd_sourcename(line);
   } else if (!strcmp(command, "sources")) {
     do_normal_submit = 0;
     ret = process_cmd_sources(line);
@@ -3159,7 +3251,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2018 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2019 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",
@@ -3171,7 +3263,7 @@ display_gpl(void)
 static void
 print_help(const char *progname)
 {
-      printf("Usage: %s [-h HOST] [-p PORT] [-n] [-c] [-d] [-4|-6] [-m] [COMMAND]\n",
+      printf("Usage: %s [-h HOST] [-p PORT] [-n] [-N] [-c] [-d] [-4|-6] [-m] [COMMAND]\n",
              progname);
 }
 
@@ -3208,7 +3300,7 @@ main(int argc, char **argv)
   optind = 1;
 
   /* Parse short command-line options */
-  while ((opt = getopt(argc, argv, "+46acdf:h:mnp:v")) != -1) {
+  while ((opt = getopt(argc, argv, "+46acdf:h:mnNp:v")) != -1) {
     switch (opt) {
       case '4':
       case '6':
@@ -3222,7 +3314,9 @@ main(int argc, char **argv)
         csv_mode = 1;
         break;
       case 'd':
-        log_debug_enabled = 1;
+#if DEBUG > 0
+        log_min_severity = LOGS_DEBUG;
+#endif
         break;
       case 'h':
         hostnames = optarg;
@@ -3232,6 +3326,9 @@ main(int argc, char **argv)
         break;
       case 'n':
         no_dns = 1;
+        break;
+      case 'N':
+        source_names = 1;
         break;
       case 'p':
         port = atoi(optarg);
@@ -3261,7 +3358,8 @@ main(int argc, char **argv)
 
   UTI_SetQuitSignalsHandler(signal_handler, 0);
 
-  sockaddrs = get_sockaddrs(hostnames, port);
+  SCK_Initialise();
+  server_addresses = get_addresses(hostnames, port);
 
   if (!open_io())
     LOG_FATAL("Could not open connection to daemon");
@@ -3281,8 +3379,8 @@ main(int argc, char **argv)
   }
 
   close_io();
-
-  ARR_DestroyInstance(sockaddrs);
+  free_addresses(server_addresses);
+  SCK_Finalise();
 
   return !ret;
 }

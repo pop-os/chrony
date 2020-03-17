@@ -474,15 +474,15 @@ void check_seccomp_applicability(void)
 /* ================================================== */
 
 void
-SYS_Linux_EnableSystemCallFilter(int level)
+SYS_Linux_EnableSystemCallFilter(int level, SYS_SystemCallContext context)
 {
   const int syscalls[] = {
     /* Clock */
-    SCMP_SYS(adjtimex), SCMP_SYS(clock_gettime), SCMP_SYS(gettimeofday),
-    SCMP_SYS(settimeofday), SCMP_SYS(time),
+    SCMP_SYS(adjtimex), SCMP_SYS(clock_adjtime), SCMP_SYS(clock_gettime),
+    SCMP_SYS(gettimeofday), SCMP_SYS(settimeofday), SCMP_SYS(time),
     /* Process */
     SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getpid),
-    SCMP_SYS(getrlimit), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn),
+    SCMP_SYS(getrlimit), SCMP_SYS(getuid), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn),
     SCMP_SYS(rt_sigprocmask), SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn),
     SCMP_SYS(wait4), SCMP_SYS(waitpid),
     /* Memory */
@@ -493,12 +493,13 @@ SYS_Linux_EnableSystemCallFilter(int level)
     SCMP_SYS(chown32), SCMP_SYS(faccessat), SCMP_SYS(fchmodat), SCMP_SYS(fchownat),
     SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(getdents), SCMP_SYS(getdents64),
     SCMP_SYS(lseek), SCMP_SYS(newfstatat), SCMP_SYS(rename), SCMP_SYS(renameat),
-    SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs), SCMP_SYS(statfs64),
-    SCMP_SYS(unlink), SCMP_SYS(unlinkat),
+    SCMP_SYS(renameat2), SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs),
+    SCMP_SYS(statfs64), SCMP_SYS(unlink), SCMP_SYS(unlinkat),
     /* Socket */
-    SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname), SCMP_SYS(getsockopt),
-    SCMP_SYS(recv), SCMP_SYS(recvfrom), SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg),
-    SCMP_SYS(send), SCMP_SYS(sendmmsg), SCMP_SYS(sendmsg), SCMP_SYS(sendto),
+    SCMP_SYS(accept), SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname),
+    SCMP_SYS(getsockopt), SCMP_SYS(recv), SCMP_SYS(recvfrom),
+    SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg), SCMP_SYS(send), SCMP_SYS(sendmmsg),
+    SCMP_SYS(sendmsg), SCMP_SYS(sendto), SCMP_SYS(shutdown),
     /* TODO: check socketcall arguments */
     SCMP_SYS(socketcall),
     /* General I/O */
@@ -528,7 +529,7 @@ SYS_Linux_EnableSystemCallFilter(int level)
 #endif
   };
 
-  const static int fcntls[] = { F_GETFD, F_SETFD, F_SETFL };
+  const static int fcntls[] = { F_GETFD, F_SETFD, F_GETFL, F_SETFL };
 
   const static unsigned long ioctls[] = {
     FIONREAD, TCGETS,
@@ -558,14 +559,16 @@ SYS_Linux_EnableSystemCallFilter(int level)
   scmp_filter_ctx *ctx;
   int i;
 
-  /* Check if the chronyd configuration is supported */
-  check_seccomp_applicability();
+  if (context == SYS_MAIN_PROCESS) {
+    /* Check if the chronyd configuration is supported */
+    check_seccomp_applicability();
 
-  /* Start the helper process, which will run without any seccomp filter.  It
-     will be used for getaddrinfo(), for which it's difficult to maintain a
-     list of required system calls (with glibc it depends on what NSS modules
-     are installed and enabled on the system). */
-  PRV_StartHelper();
+    /* Start the helper process, which will run without any seccomp filter.  It
+       will be used for getaddrinfo(), for which it's difficult to maintain a
+       list of required system calls (with glibc it depends on what NSS modules
+       are installed and enabled on the system). */
+    PRV_StartHelper();
+  }
 
   ctx = seccomp_init(level > 0 ? SCMP_ACT_KILL : SCMP_ACT_TRAP);
   if (ctx == NULL)
@@ -577,42 +580,44 @@ SYS_Linux_EnableSystemCallFilter(int level)
       goto add_failed;
   }
 
-  /* Allow sockets to be created only in selected domains */
-  for (i = 0; i < sizeof (socket_domains) / sizeof (*socket_domains); i++) {
-    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
-                         SCMP_A0(SCMP_CMP_EQ, socket_domains[i])) < 0)
-      goto add_failed;
-  }
+  if (context == SYS_MAIN_PROCESS) {
+    /* Allow opening sockets in selected domains */
+    for (i = 0; i < sizeof (socket_domains) / sizeof (*socket_domains); i++) {
+      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
+                           SCMP_A0(SCMP_CMP_EQ, socket_domains[i])) < 0)
+        goto add_failed;
+    }
 
-  /* Allow setting only selected sockets options */
-  for (i = 0; i < sizeof (socket_options) / sizeof (*socket_options); i++) {
-    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 3,
-                         SCMP_A1(SCMP_CMP_EQ, socket_options[i][0]),
-                         SCMP_A2(SCMP_CMP_EQ, socket_options[i][1]),
-                         SCMP_A4(SCMP_CMP_LE, sizeof (int))) < 0)
-      goto add_failed;
-  }
+    /* Allow selected socket options */
+    for (i = 0; i < sizeof (socket_options) / sizeof (*socket_options); i++) {
+      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 3,
+                           SCMP_A1(SCMP_CMP_EQ, socket_options[i][0]),
+                           SCMP_A2(SCMP_CMP_EQ, socket_options[i][1]),
+                           SCMP_A4(SCMP_CMP_LE, sizeof (int))) < 0)
+        goto add_failed;
+    }
 
-  /* Allow only selected fcntl calls */
-  for (i = 0; i < sizeof (fcntls) / sizeof (*fcntls); i++) {
-    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fcntl), 1,
-                         SCMP_A1(SCMP_CMP_EQ, fcntls[i])) < 0 ||
-        seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fcntl64), 1,
-                         SCMP_A1(SCMP_CMP_EQ, fcntls[i])) < 0)
-      goto add_failed;
-  }
+    /* Allow selected fcntl calls */
+    for (i = 0; i < sizeof (fcntls) / sizeof (*fcntls); i++) {
+      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fcntl), 1,
+                           SCMP_A1(SCMP_CMP_EQ, fcntls[i])) < 0 ||
+          seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fcntl64), 1,
+                           SCMP_A1(SCMP_CMP_EQ, fcntls[i])) < 0)
+        goto add_failed;
+    }
 
-  /* Allow only selected ioctls */
-  for (i = 0; i < sizeof (ioctls) / sizeof (*ioctls); i++) {
-    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(ioctl), 1,
-                         SCMP_A1(SCMP_CMP_EQ, ioctls[i])) < 0)
-      goto add_failed;
+    /* Allow selected ioctls */
+    for (i = 0; i < sizeof (ioctls) / sizeof (*ioctls); i++) {
+      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(ioctl), 1,
+                           SCMP_A1(SCMP_CMP_EQ, ioctls[i])) < 0)
+        goto add_failed;
+    }
   }
 
   if (seccomp_load(ctx) < 0)
     LOG_FATAL("Failed to load seccomp rules");
 
-  LOG(LOGS_INFO, "Loaded seccomp filter");
+  LOG(context == SYS_MAIN_PROCESS ? LOGS_INFO : LOGS_DEBUG, "Loaded seccomp filter");
   seccomp_release(ctx);
   return;
 

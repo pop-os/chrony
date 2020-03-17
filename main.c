@@ -38,6 +38,10 @@
 #include "ntp_signd.h"
 #include "ntp_sources.h"
 #include "ntp_core.h"
+#include "nts_ke_client.h"
+#include "nts_ke_server.h"
+#include "nts_ntp_server.h"
+#include "socket.h"
 #include "sources.h"
 #include "sourcestats.h"
 #include "reference.h"
@@ -90,8 +94,8 @@ delete_pidfile(void)
   if (!pidfile[0])
     return;
 
-  /* Don't care if this fails, there's not a lot we can do */
-  unlink(pidfile);
+  if (!UTI_RemoveFile(NULL, pidfile, NULL))
+    ;
 }
 
 /* ================================================== */
@@ -112,12 +116,16 @@ MAI_CleanupAndExit(void)
   TMC_Finalise();
   MNL_Finalise();
   CLG_Finalise();
+  NKC_Finalise();
+  NKS_Finalise();
+  NNS_Finalise();
   NSD_Finalise();
   NSR_Finalise();
   SST_Finalise();
   NCR_Finalise();
   NIO_Finalise();
   CAM_Finalise();
+  SCK_Finalise();
   KEY_Finalise();
   RCL_Finalise();
   SRC_Finalise();
@@ -253,7 +261,10 @@ check_pidfile(void)
   FILE *in;
   int pid, count;
   
-  in = fopen(pidfile, "r");
+  if (!pidfile[0])
+    return;
+
+  in = UTI_OpenFile(NULL, pidfile, NULL, 'r', 0);
   if (!in)
     return;
 
@@ -281,13 +292,9 @@ write_pidfile(void)
   if (!pidfile[0])
     return;
 
-  out = fopen(pidfile, "w");
-  if (!out) {
-    LOG_FATAL("Could not open %s : %s", pidfile, strerror(errno));
-  } else {
-    fprintf(out, "%d\n", (int)getpid());
-    fclose(out);
-  }
+  out = UTI_OpenFile(NULL, pidfile, NULL, 'W', 0644);
+  fprintf(out, "%d\n", (int)getpid());
+  fclose(out);
 }
 
 /* ================================================== */
@@ -404,9 +411,9 @@ int main
   char *user = NULL, *log_file = NULL;
   struct passwd *pw;
   int opt, debug = 0, nofork = 0, address_family = IPADDR_UNSPEC;
-  int do_init_rtc = 0, restarted = 0, client_only = 0, timeout = 0;
+  int do_init_rtc = 0, restarted = 0, client_only = 0, timeout = -1;
   int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
-  int clock_control = 1, system_log = 1;
+  int clock_control = 1, system_log = 1, log_severity = LOGS_INFO;
   int config_args = 0;
 
   do_platform_checks();
@@ -427,7 +434,7 @@ int main
   optind = 1;
 
   /* Parse short command-line options */
-  while ((opt = getopt(argc, argv, "46df:F:hl:mnP:qQrRst:u:vx")) != -1) {
+  while ((opt = getopt(argc, argv, "46df:F:hl:L:mnP:qQrRst:u:vx")) != -1) {
     switch (opt) {
       case '4':
       case '6':
@@ -446,6 +453,9 @@ int main
         break;
       case 'l':
         log_file = optarg;
+        break;
+      case 'L':
+        log_severity = parse_int_arg(optarg);
         break;
       case 'm':
         lock_memory = 1;
@@ -510,7 +520,7 @@ int main
     LOG_OpenSystemLog();
   }
   
-  LOG_SetDebugLevel(debug);
+  LOG_SetMinSeverity(debug >= 2 ? LOGS_DEBUG : log_severity);
   
   LOG(LOGS_INFO, "chronyd version %s starting (%s)", CHRONY_VERSION, CHRONYD_FEATURES);
 
@@ -551,6 +561,7 @@ int main
   SRC_Initialise();
   RCL_Initialise();
   KEY_Initialise();
+  SCK_Initialise();
 
   /* Open privileged ports before dropping root */
   CAM_Initialise(address_family);
@@ -578,6 +589,9 @@ int main
   SST_Initialise();
   NSR_Initialise();
   NSD_Initialise();
+  NNS_Initialise();
+  NKS_Initialise(scfilter_level);
+  NKC_Initialise();
   CLG_Initialise();
   MNL_Initialise();
   TMC_Initialise();
@@ -591,7 +605,7 @@ int main
   CAM_OpenUnixSocket();
 
   if (scfilter_level)
-    SYS_EnableSystemCallFilter(scfilter_level);
+    SYS_EnableSystemCallFilter(scfilter_level, SYS_MAIN_PROCESS);
 
   if (ref_mode == REF_ModeNormal && CNF_GetInitSources() > 0) {
     ref_mode = REF_ModeInitStepSlew;
@@ -600,7 +614,7 @@ int main
   REF_SetModeEndHandler(reference_mode_end);
   REF_SetMode(ref_mode);
 
-  if (timeout > 0)
+  if (timeout >= 0)
     SCH_AddTimeoutByDelay(timeout, quit_timeout, NULL);
 
   if (do_init_rtc) {

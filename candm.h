@@ -101,7 +101,10 @@
 #define REQ_ADD_PEER3 61
 #define REQ_SHUTDOWN 62
 #define REQ_ONOFFLINE 63
-#define N_REQUEST_TYPES 64
+#define REQ_ADD_SOURCE 64
+#define REQ_NTP_SOURCE_NAME 65
+#define REQ_RESET 66
+#define N_REQUEST_TYPES 67
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -245,6 +248,11 @@ typedef struct {
   int32_t EOR;
 } REQ_Ac_Check;
 
+/* Source types in NTP source requests */
+#define REQ_ADDSRC_SERVER 1
+#define REQ_ADDSRC_PEER 2
+#define REQ_ADDSRC_POOL 3
+
 /* Flags used in NTP source requests */
 #define REQ_ADDSRC_ONLINE 0x1
 #define REQ_ADDSRC_AUTOOFFLINE 0x2
@@ -255,9 +263,11 @@ typedef struct {
 #define REQ_ADDSRC_REQUIRE 0x40
 #define REQ_ADDSRC_INTERLEAVED 0x80
 #define REQ_ADDSRC_BURST 0x100
+#define REQ_ADDSRC_NTS 0x200
 
 typedef struct {
-  IPAddr ip_addr;
+  uint32_t type;
+  int8_t name[256];
   uint32_t port;
   int32_t minpoll;
   int32_t maxpoll;
@@ -269,6 +279,7 @@ typedef struct {
   int32_t min_samples;
   int32_t max_samples;
   uint32_t authkey;
+  uint32_t nts_port;
   Float max_delay;
   Float max_delay_ratio;
   Float max_delay_dev_ratio;
@@ -334,6 +345,11 @@ typedef struct {
   IPAddr ip_addr;
   int32_t EOR;
 } REQ_NTPData;
+
+typedef struct {
+  IPAddr ip_addr;
+  int32_t EOR;
+} REQ_NTPSourceName;
 
 /* ================================================== */
 
@@ -437,6 +453,7 @@ typedef struct {
     REQ_ReselectDistance reselect_distance;
     REQ_SmoothTime smoothtime;
     REQ_NTPData ntp_data;
+    REQ_NTPData ntp_source_name;
   } data; /* Command specific parameters */
 
   /* Padding used to prevent traffic amplification.  It only defines the
@@ -473,7 +490,8 @@ typedef struct {
 #define RPY_NTP_DATA 16
 #define RPY_MANUAL_TIMESTAMP2 17
 #define RPY_MANUAL_LIST2 18
-#define N_REPLY_TYPES 19
+#define RPY_NTP_SOURCE_NAME 19
+#define N_REPLY_TYPES 20
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -497,6 +515,7 @@ typedef struct {
 #define STT_INVALIDAF 17
 #define STT_BADPKTVERSION 18
 #define STT_BADPKTLENGTH 19
+#define STT_INVALIDNAME 21
 
 typedef struct {
   int32_t EOR;
@@ -689,6 +708,11 @@ typedef struct {
 } RPY_NTPData;
 
 typedef struct {
+  int8_t name[256];
+  int32_t EOR;
+} RPY_NTPSourceName;
+
+typedef struct {
   uint8_t version;
   uint8_t pkt_type;
   uint8_t res1;
@@ -717,6 +741,7 @@ typedef struct {
     RPY_Activity activity;
     RPY_Smoothing smoothing;
     RPY_NTPData ntp_data;
+    RPY_NTPSourceName ntp_source_name;
   } data; /* Reply specific parameters */
 
 } CMD_Reply;

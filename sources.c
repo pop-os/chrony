@@ -54,7 +54,6 @@ static int initialised = 0;
 /* ================================================== */
 /* Structure used to hold info for selecting between sources */
 struct SelectInfo {
-  NTP_Leap leap;
   int stratum;
   int select_ok;
   double std_dev;
@@ -126,6 +125,12 @@ struct SRC_Instance_Record {
   double sel_score;
 
   struct SelectInfo sel_info;
+
+  /* Latest leap status */
+  NTP_Leap leap;
+
+  /* Flag indicating the source has a leap second vote */
+  int leap_vote;
 };
 
 /* ================================================== */
@@ -249,6 +254,7 @@ SRC_Instance SRC_CreateNewInstance(uint32_t ref_id, SRC_Type type, int sel_optio
   result->index = n_sources;
   result->type = type;
   result->sel_options = sel_options;
+  result->active = 0;
 
   SRC_SetRefid(result, ref_id, addr);
   SRC_ResetInstance(result);
@@ -291,13 +297,14 @@ void SRC_DestroyInstance(SRC_Instance instance)
 void
 SRC_ResetInstance(SRC_Instance instance)
 {
-  instance->active = 0;
   instance->updates = 0;
   instance->reachability = 0;
   instance->reachability_size = 0;
   instance->distant = 0;
   instance->status = SRC_BAD_STATS;
   instance->sel_score = 1.0;
+  instance->leap = LEAP_Unsynchronised;
+  instance->leap_vote = 0;
 
   SST_ResetInstance(instance->stats);
 }
@@ -319,6 +326,48 @@ SRC_GetSourcestats(SRC_Instance instance)
 {
   assert(initialised);
   return instance->stats;
+}
+
+/* ================================================== */
+
+static NTP_Leap
+get_leap_status(void)
+{
+  int i, leap_votes, leap_ins, leap_del;
+
+  /* Accept a leap second if more than half of the sources with a vote agree */
+
+  for (i = leap_ins = leap_del = leap_votes = 0; i < n_sources; i++) {
+    if (!sources[i]->leap_vote)
+      continue;
+
+    leap_votes++;
+    if (sources[i]->leap == LEAP_InsertSecond)
+      leap_ins++;
+    else if (sources[i]->leap == LEAP_DeleteSecond)
+      leap_del++;
+  }
+
+  if (leap_ins > leap_votes / 2)
+    return LEAP_InsertSecond;
+  else if (leap_del > leap_votes / 2)
+    return LEAP_DeleteSecond;
+  else
+    return LEAP_Normal;
+}
+
+/* ================================================== */
+
+void
+SRC_SetLeapStatus(SRC_Instance inst, NTP_Leap leap)
+{
+  if (REF_IsLeapSecondClose())
+    return;
+
+  inst->leap = leap;
+
+  if (inst->leap_vote)
+    REF_UpdateLeapStatus(get_leap_status());
 }
 
 /* ================================================== */
@@ -595,7 +644,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
   int n_badstats_sources, max_sel_reach, max_sel_reach_size, max_badstat_reach;
   int depth, best_depth, trust_depth, best_trust_depth;
   int combined, stratum, min_stratum, max_score_index;
-  int orphan_stratum, orphan_source, leap_votes, leap_ins, leap_del;
+  int orphan_stratum, orphan_source;
   double src_offset, src_offset_sd, src_frequency, src_frequency_sd, src_skew;
   double src_root_delay, src_root_dispersion;
   double best_lo, best_hi, distance, sel_src_distance, max_score;
@@ -642,7 +691,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
 
     si = &sources[i]->sel_info;
-    SST_GetSelectionData(sources[i]->stats, &now, &si->stratum, &si->leap,
+    SST_GetSelectionData(sources[i]->stats, &now, &si->stratum,
                          &si->lo_limit, &si->hi_limit, &si->root_distance,
                          &si->std_dev, &first_sample_ago,
                          &si->last_sample_ago, &si->select_ok);
@@ -678,6 +727,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
 
     sources[i]->status = SRC_OK; /* For now */
+    sources[i]->leap_vote = 0;
 
     if (sources[i]->reachability && max_reach_sample_ago < first_sample_ago)
       max_reach_sample_ago = first_sample_ago;
@@ -914,25 +964,14 @@ SRC_SelectSource(SRC_Instance updated_inst)
     return;
   }
 
-  /* Accept leap second status if more than half of selectable (and trusted
-     if there are any) sources agree */
-  for (i = leap_ins = leap_del = leap_votes = 0; i < n_sel_sources; i++) {
+  /* Enable the selectable sources (and trusted if there are any) to
+     vote on leap seconds */
+  for (i = 0; i < n_sel_sources; i++) {
     index = sel_sources[i];
     if (best_trust_depth && !(sources[index]->sel_options & SRC_SELECT_TRUST))
       continue;
-    leap_votes++;
-    if (sources[index]->sel_info.leap == LEAP_InsertSecond)
-      leap_ins++;
-    else if (sources[index]->sel_info.leap == LEAP_DeleteSecond)
-      leap_del++;
+    sources[index]->leap_vote = 1;
   }
-
-  if (leap_ins > leap_votes / 2)
-    leap_status = LEAP_InsertSecond;
-  else if (leap_del > leap_votes / 2)
-    leap_status = LEAP_DeleteSecond;
-  else
-    leap_status = LEAP_Normal;
 
   /* If there are any sources with prefer option, reduce the list again
      only to the preferred sources */
@@ -1065,6 +1104,8 @@ SRC_SelectSource(SRC_Instance updated_inst)
   for (i = 0; i < n_sources; i++)
     sources[i]->updates = 0;
 
+  leap_status = get_leap_status();
+
   /* Now just use the statistics of the selected source combined with
      the other selectable sources for trimming the local clock */
 
@@ -1128,7 +1169,7 @@ slew_sources(struct timespec *raw, struct timespec *cooked, double dfreq,
   }
 
   if (change_type == LCL_ChangeUnknownStep) {
-    /* After resetting no source is selectable, set reference unsynchronised */
+    /* Update selection status */
     SRC_SelectSource(NULL);
   }
 }
@@ -1150,10 +1191,9 @@ add_dispersion(double dispersion, void *anything)
 /* ================================================== */
 
 static
-FILE *open_dumpfile(SRC_Instance inst, const char *mode)
+FILE *open_dumpfile(SRC_Instance inst, char mode)
 {
-  FILE *f;
-  char filename[1024], *dumpdir;
+  char filename[64], *dumpdir;
 
   dumpdir = CNF_GetDumpDir();
   if (dumpdir[0] == '\0') {
@@ -1162,22 +1202,14 @@ FILE *open_dumpfile(SRC_Instance inst, const char *mode)
   }
 
   /* Include IP address in the name for NTP sources, or reference ID in hex */
-  if ((inst->type == SRC_NTP &&
-       snprintf(filename, sizeof (filename), "%s/%s.dat", dumpdir,
-                source_to_string(inst)) >= sizeof (filename)) ||
-      (inst->type != SRC_NTP &&
-       snprintf(filename, sizeof (filename), "%s/refid:%08"PRIx32".dat",
-                dumpdir, inst->ref_id) >= sizeof (filename))) {
-    LOG(LOGS_WARN, "dumpdir too long");
+  if (inst->type == SRC_NTP && UTI_IsIPReal(inst->ip_addr))
+    snprintf(filename, sizeof (filename), "%s", source_to_string(inst));
+  else if (inst->type == SRC_REFCLOCK)
+    snprintf(filename, sizeof (filename), "refid:%08"PRIx32, inst->ref_id);
+  else
     return NULL;
-  }
 
-  f = fopen(filename, mode);
-  if (!f && mode[0] != 'r')
-    LOG(LOGS_WARN, "Could not open dump file for %s",
-        source_to_string(inst));
-
-  return f;
+  return UTI_OpenFile(dumpdir, filename, ".dat", mode, 0644);
 }
 
 /* ================================================== */
@@ -1190,7 +1222,7 @@ SRC_DumpSources(void)
   int i;
 
   for (i = 0; i < n_sources; i++) {
-    out = open_dumpfile(sources[i], "w");
+    out = open_dumpfile(sources[i], 'w');
     if (!out)
       continue;
     SST_SaveToFile(sources[i]->stats, out);
@@ -1207,7 +1239,7 @@ SRC_ReloadSources(void)
   int i;
 
   for (i = 0; i < n_sources; i++) {
-    in = open_dumpfile(sources[i], "r");
+    in = open_dumpfile(sources[i], 'r');
     if (!in)
       continue;
     if (!SST_LoadFromFile(sources[i]->stats, in))
@@ -1225,7 +1257,7 @@ SRC_ReloadSources(void)
 void
 SRC_RemoveDumpFiles(void)
 {
-  char pattern[1024], name[64], *dumpdir, *s;
+  char pattern[PATH_MAX], name[64], *dumpdir, *s;
   IPAddr ip_addr;
   glob_t gl;
   size_t i;
@@ -1252,11 +1284,22 @@ SRC_RemoveDumpFiles(void)
     if (strncmp(name, "refid:", 6) && !UTI_StringToIP(name, &ip_addr))
       continue;
 
-    DEBUG_LOG("Removing %s", gl.gl_pathv[i]);
-    unlink(gl.gl_pathv[i]);
+    if (!UTI_RemoveFile(NULL, gl.gl_pathv[i], NULL))
+      ;
   }
 
   globfree(&gl);
+}
+
+/* ================================================== */
+
+void
+SRC_ResetSources(void)
+{
+  int i;
+
+  for (i = 0; i < n_sources; i++)
+    SRC_ResetInstance(sources[i]);
 }
 
 /* ================================================== */

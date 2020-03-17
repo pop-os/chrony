@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016-2018
+ * Copyright (C) Miroslav Lichvar  2009-2011, 2013-2014, 2016-2019
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -350,7 +350,7 @@ RCL_CheckDriverOptions(RCL_Instance instance, const char **options)
        option = get_next_driver_option(instance, option)) {
     for (i = 0; options && options[i]; i++) {
       len = strlen(options[i]);
-      if (!strncmp(options[i], option, strlen(options[i])) &&
+      if (!strncmp(options[i], option, len) &&
           (option[len] == '=' || option[len] == '\0'))
         break;
     }
@@ -415,7 +415,6 @@ accumulate_sample(RCL_Instance instance, struct timespec *sample_time, double of
   sample.root_delay = instance->delay;
   sample.peer_dispersion = dispersion;
   sample.root_dispersion = dispersion;
-  sample.leap = instance->leap_status;
 
   /* Handle special case when PPS is used with the local reference */
   if (instance->pps_active && instance->lock_ref == -1)
@@ -704,6 +703,7 @@ poll_timeout(void *arg)
 
     if (SPF_GetFilteredSample(inst->filter, &sample)) {
       SRC_UpdateReachability(inst->source, 1);
+      SRC_SetLeapStatus(inst->source, inst->leap_status);
       SRC_AccumulateSample(inst->source, &sample);
       SRC_SelectSource(inst->source);
 

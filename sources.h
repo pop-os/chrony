@@ -79,8 +79,10 @@ extern void SRC_SetRefid(SRC_Instance instance, uint32_t ref_id, IPAddr *addr);
 /* Function to get access to the sourcestats instance */
 extern SST_Stats SRC_GetSourcestats(SRC_Instance instance);
 
-/* This function is called by one of the source drivers when it has
-   a new sample that is to be accumulated */
+/* Function to set the current leap status according to the source */
+extern void SRC_SetLeapStatus(SRC_Instance instance, NTP_Leap leap);
+
+/* Function to accumulate a new sample from the source */
 extern void SRC_AccumulateSample(SRC_Instance instance, NTP_Sample *sample);
 
 /* This routine sets the source as receiving reachability updates */
@@ -113,6 +115,8 @@ extern void SRC_SetReselectDistance(double distance);
 extern void SRC_DumpSources(void);
 extern void SRC_ReloadSources(void);
 extern void SRC_RemoveDumpFiles(void);
+
+extern void SRC_ResetSources(void);
 
 extern int SRC_IsSyncPeer(SRC_Instance inst);
 extern int SRC_IsReachable(SRC_Instance inst);

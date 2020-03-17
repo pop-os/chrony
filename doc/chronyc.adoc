@@ -78,11 +78,18 @@ With this option hostnames will be resolved only to IPv6 addresses.
 This option disables resolving of IP addresses to hostnames, e.g. to avoid slow
 DNS lookups. Long addresses will not be truncated to fit into the column.
 
+*-N*::
+This option enables printing of the original names of NTP sources that were
+specified in the configuration file, or *chronyc* commands, and are internally
+used by *chronyd*. Without the *-n* and *-N* option, the names of NTP sources
+are obtained from reverse DNS lookups and can be different from the original
+names.
+
 *-c*::
 This option enables printing of reports in a comma-separated values (CSV)
-format. IP addresses will not be resolved to hostnames, time will be printed as
-number of seconds since the epoch and values in seconds will not be converted
-to other units.
+format. Reverse DNS lookups will be disabled, time will be printed as number of
+seconds since the epoch, and values in seconds will not be converted to other
+units.
 
 *-d*::
 This option enables printing of debugging messages if *chronyc* was compiled
@@ -284,15 +291,18 @@ milliseconds.
 
 === Time sources
 
-[[sources]]*sources* [*-v*]::
+[[sources]]*sources* [*-a*] [*-v*]::
 This command displays information about the current time sources that *chronyd*
 is accessing.
 +
-The optional argument *-v* can be specified, meaning _verbose_. In this case,
+If the *-a* option is specified, all sources are displayed, including those that
+do not have a known address yet. Such sources have an identifier in the format
+_ID#XXXXXXXXXX_, which can be used in other commands expecting a source address.
++
+The *-v* option enables a verbose output. In this case,
 extra caption lines are shown as a reminder of the meanings of the columns.
 +
 ----
-210 Number of sources = 3
 MS Name/IP address         Stratum Poll Reach LastRx Last sample
 ===============================================================================
 #* GPS0                          0   4   377    11   -479ns[ -621ns] +/-  134ns
@@ -353,18 +363,21 @@ since. The number following the _+/-_ indicator shows the margin of error in
 the measurement. Positive offsets indicate that the local clock is ahead of
 the source.
 
-[[sourcestats]]*sourcestats* [*-v*]::
+[[sourcestats]]*sourcestats* [*-a*] [*-v*]::
 The *sourcestats* command displays information about the drift rate and offset
 estimation process for each of the sources currently being examined by
 *chronyd*.
 +
-The optional argument *-v* can be specified, meaning _verbose_. In this case,
+If the *-a* option is specified, all sources are displayed, including those that
+do not have a known address yet. Such sources have an identifier in the format
+_ID#XXXXXXXXXX_, which can be used in other commands expecting a source address.
++
+The *-v* option enables a verbose output. In this case,
 extra caption lines are shown as a reminder of the meanings of the columns.
 +
 An example report is:
 +
 ----
-210 Number of sources = 1
 Name/IP Address            NP  NR  Span  Frequency  Freq Skew  Offset  Std Dev
 ===============================================================================
 foo.example.net            11   5   46m     -0.001      0.045      1us    25us
@@ -442,8 +455,9 @@ not visible in the *sources* and *sourcestats* reports.
 
 [[ntpdata]]*ntpdata* [_address_]::
 The *ntpdata* command displays the last valid measurement and other
-NTP-specific information about the specified NTP source, or all NTP sources if
-no address was specified. An example of the output is shown below.
+NTP-specific information about the specified NTP source, or all NTP sources
+(with a known address) if no address was specified. An example of the output is
+shown below.
 +
 ----
 Remote address  : 203.0.113.15 (CB00710F)
@@ -526,15 +540,13 @@ The number of all packets received from the source.
 *Total valid RX*:::
 The number of valid packets received from the source.
 
-[[add_peer]]*add peer* _address_ [_option_]...::
+[[add_peer]]*add peer* _name_ [_option_]...::
 The *add peer* command allows a new NTP peer to be added whilst
 *chronyd* is running.
 +
 Following the words *add peer*, the syntax of the following
-parameters and options is similar to that for the
+parameters and options is identical to that for the
 <<chrony.conf.adoc#peer,*peer*>> directive in the configuration file.
-The following peer options can be set in the command: *port*, *minpoll*,
-*maxpoll*, *presend*, *maxdelayratio*, *maxdelay*, *key*.
 +
 An example of using this command is shown below.
 +
@@ -542,15 +554,27 @@ An example of using this command is shown below.
 add peer foo.example.net minpoll 6 maxpoll 10 key 25
 ----
 
-[[add_server]]*add server* _address_ [_option_]...::
+[[add_pool]]*add pool* _name_ [_option_]...::
+The *add pool* command allows a pool of NTP servers to be added whilst
+*chronyd* is running.
++
+Following the words *add pool*, the syntax of the following parameters and
+options is identical to that for the <<chrony.conf.adoc#pool,*pool*>>
+directive in the configuration file.
++
+An example of using this command is shown below:
++
+----
+add pool foo.example.net maxsources 3 iburst
+----
+
+[[add_server]]*add server* _name_ [_option_]...::
 The *add server* command allows a new NTP server to be added whilst
 *chronyd* is running.
 +
 Following the words *add server*, the syntax of the following parameters and
-options is similar to that for the <<chrony.conf.adoc#server,*server*>>
+options is identical to that for the <<chrony.conf.adoc#server,*server*>>
 directive in the configuration file.
-The following server options can be set in the command: *port*, *minpoll*,
-*maxpoll*, *presend*, *maxdelayratio*, *maxdelay*, *key*.
 +
 An example of using this command is shown below:
 +
@@ -688,7 +712,8 @@ the loaded periods. The *offline* and *online* commands can be used to achieve
 this.
 +
 There are four forms of the *offline* command. The first form is a wildcard,
-meaning all sources. The second form allows an IP address mask and a masked
+meaning all sources (including sources that do not have a known address yet).
+The second form allows an IP address mask and a masked
 address to be specified. The third form uses CIDR notation. The fourth form
 uses an IP address or a hostname. These forms are illustrated below.
 +
@@ -725,10 +750,11 @@ The syntax is identical to that of the <<offline,*offline*>> command.
 
 [[onoffline]]
 *onoffline*::
-The *onoffline* command tells *chronyd* to switch all sources to the online or
+The *onoffline* command tells *chronyd* to switch all sources that have a known
+address to the online or
 offline status according to the current network configuration. A source is
-considered online if it is possible to send requests to it, i.e. a route to the
-network is present.
+considered online if it is possible to send requests to it, i.e. a network
+route to the source is present.
 
 [[polltarget]]*polltarget* _address_ _polltarget_::
 The *polltarget* command is used to modify the poll target for one of the
@@ -743,6 +769,15 @@ the machine in a different network.
 Sources that stop responding will be replaced with newly resolved addresses
 automatically after 8 polling intervals, but this command can still be useful
 to replace them immediately and not wait until they are marked as unreachable.
+
+[[sourcename]]*sourcename* _address_::
+The *sourcename* command prints the original hostname or address that was
+specified for an NTP source in the configuration file, or the *add* command.
+This command is an alternative to the *-N* option, which can be useful in
+scripts.
++
+Note that different NTP sources can share the same name, e.g. servers from a
+pool.
 
 === Manual time input
 
@@ -1136,7 +1171,14 @@ running.
 The *rekey* command causes *chronyd* to re-read the key file specified in the
 configuration file by the <<chrony.conf.adoc#keyfile,*keyfile*>> directive.
 
-[[rekey]]*shutdown*::
+[[reset]]*reset*::
+The *reset* command causes *chronyd* to drop all measurements and switch to the
+unsynchronised state. This command can help *chronyd* with recovery when the
+measurements are known to be no longer valid or accurate, e.g. due to moving
+the computer to a different network, or resuming the computer from a low-power
+state (which resets the system clock).
+
+[[shutdown]]*shutdown*::
 The *shutdown* command causes *chronyd* to exit. This is equivalent to sending
 the process the SIGTERM signal.
 
@@ -1188,10 +1230,10 @@ generated from the _/dev/urandom_ device and it is printed to standard output.
 +
 The command has three optional arguments. The first argument is the key number
 (by default 1), which will be specified with the *key* option of the *server*
-or *peer* directives in the configuration file. The second argument is the hash
-function (by default SHA1 or MD5 if SHA1 is not available) and the third
-argument is the number of bits the key should have, between 80 and 4096 bits
-(by default 160 bits).
+or *peer* directives in the configuration file. The second argument is the name
+of the hash function or cipher (by default SHA1, or MD5 if SHA1 is not
+available). The third argument is the length of the key in bits if a hash
+function was selected, between 80 and 4096 bits (by default 160 bits).
 +
 An example is:
 +

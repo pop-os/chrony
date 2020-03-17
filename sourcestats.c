@@ -54,6 +54,9 @@
 /* The minimum standard deviation */
 #define MIN_STDDEV 1.0e-9
 
+/* The worst case bound on an unknown standard deviation of the offset */
+#define WORST_CASE_STDDEV_BOUND 4.0
+
 /* The asymmetry of network jitter when all jitter is in one direction */
 #define MAX_ASYMMETRY 0.5
 
@@ -177,9 +180,6 @@ struct SST_Stats_Record {
 
   /* The stratum from the last accumulated sample */
   int stratum;
-
-  /* The leap status from the last accumulated sample */
-  NTP_Leap leap;
 };
 
 /* ================================================== */
@@ -249,13 +249,12 @@ SST_ResetInstance(SST_Stats inst)
   inst->estimated_frequency_sd = WORST_CASE_FREQ_BOUND;
   inst->skew = WORST_CASE_FREQ_BOUND;
   inst->estimated_offset = 0.0;
-  inst->estimated_offset_sd = 86400.0; /* Assume it's at least within a day! */
+  inst->estimated_offset_sd = WORST_CASE_STDDEV_BOUND;
   UTI_ZeroTimespec(&inst->offset_time);
-  inst->std_dev = 4.0;
+  inst->std_dev = WORST_CASE_STDDEV_BOUND;
   inst->nruns = 0;
   inst->asymmetry_run = 0;
   inst->asymmetry = 0.0;
-  inst->leap = LEAP_Unsynchronised;
 }
 
 /* ================================================== */
@@ -323,7 +322,6 @@ SST_AccumulateSample(SST_Stats inst, NTP_Sample *sample)
   inst->root_delays[m] = sample->root_delay;
   inst->root_dispersions[m] = sample->root_dispersion;
   inst->stratum = sample->stratum;
-  inst->leap = sample->leap;
  
   if (inst->peer_delays[n] < inst->fixed_min_delay)
     inst->peer_delays[n] = 2.0 * inst->fixed_min_delay - inst->peer_delays[n];
@@ -603,9 +601,20 @@ SST_DoNewRegression(SST_Stats inst)
     times_back_start = inst->runs_samples + best_start;
     prune_register(inst, best_start);
   } else {
-    inst->estimated_frequency = 0.0;
     inst->estimated_frequency_sd = WORST_CASE_FREQ_BOUND;
     inst->skew = WORST_CASE_FREQ_BOUND;
+    inst->estimated_offset_sd = WORST_CASE_STDDEV_BOUND;
+    inst->std_dev = WORST_CASE_STDDEV_BOUND;
+    inst->nruns = 0;
+
+    if (inst->n_samples > 0) {
+      inst->estimated_offset = inst->offsets[inst->last_sample];
+      inst->offset_time = inst->sample_times[inst->last_sample];
+    } else {
+      inst->estimated_offset = 0.0;
+      UTI_ZeroTimespec(&inst->offset_time);
+    }
+
     times_back_start = 0;
   }
 
@@ -641,7 +650,7 @@ SST_GetFrequencyRange(SST_Stats inst,
 
 void
 SST_GetSelectionData(SST_Stats inst, struct timespec *now,
-                     int *stratum, NTP_Leap *leap,
+                     int *stratum,
                      double *offset_lo_limit,
                      double *offset_hi_limit,
                      double *root_distance,
@@ -662,7 +671,6 @@ SST_GetSelectionData(SST_Stats inst, struct timespec *now,
   j = get_buf_index(inst, inst->best_single_sample);
 
   *stratum = inst->stratum;
-  *leap = inst->leap;
   *std_dev = inst->std_dev;
 
   sample_elapsed = fabs(UTI_DiffTimespecsToDouble(now, &inst->sample_times[i]));
@@ -693,6 +701,13 @@ SST_GetSelectionData(SST_Stats inst, struct timespec *now,
   *last_sample_ago = UTI_DiffTimespecsToDouble(now, &inst->sample_times[i]);
 
   *select_ok = inst->regression_ok;
+
+  /* If maxsamples is too small to have a successful regression, enable the
+     selection as a special case for a fast update/print-once reference mode */
+  if (!*select_ok && inst->n_samples < 3 && inst->n_samples == inst->max_samples) {
+    *std_dev = CNF_GetMaxJitter();
+    *select_ok = 1;
+  }
 
   DEBUG_LOG("n=%d off=%f dist=%f sd=%f first_ago=%f last_ago=%f selok=%d",
             inst->n_samples, offset, *root_distance, *std_dev,
@@ -993,31 +1008,24 @@ SST_DoSourcestatsReport(SST_Stats inst, RPT_SourcestatsReport *report, struct ti
 {
   double dspan;
   double elapsed, sample_elapsed;
-  int li, lj, bi, bj;
+  int bi, bj;
 
   report->n_samples = inst->n_samples;
   report->n_runs = inst->nruns;
 
-  if (inst->n_samples > 1) {
-    li = get_runsbuf_index(inst, inst->n_samples - 1);
-    lj = get_buf_index(inst, inst->n_samples - 1);
-    dspan = UTI_DiffTimespecsToDouble(&inst->sample_times[li],
-        &inst->sample_times[get_runsbuf_index(inst, 0)]);
-    report->span_seconds = (unsigned long) (dspan + 0.5);
+  if (inst->n_samples > 0) {
+    bi = get_runsbuf_index(inst, inst->best_single_sample);
+    bj = get_buf_index(inst, inst->best_single_sample);
 
-    if (inst->n_samples > 3) {
-      elapsed = UTI_DiffTimespecsToDouble(now, &inst->offset_time);
-      bi = get_runsbuf_index(inst, inst->best_single_sample);
-      bj = get_buf_index(inst, inst->best_single_sample);
-      sample_elapsed = UTI_DiffTimespecsToDouble(now, &inst->sample_times[bi]);
-      report->est_offset = inst->estimated_offset + elapsed * inst->estimated_frequency;
-      report->est_offset_err = (inst->estimated_offset_sd +
-                 sample_elapsed * inst->skew +
-                 (0.5*inst->root_delays[bj] + inst->root_dispersions[bj]));
-    } else {
-      report->est_offset = inst->offsets[li];
-      report->est_offset_err = 0.5*inst->root_delays[lj] + inst->root_dispersions[lj];
-    }
+    dspan = UTI_DiffTimespecsToDouble(&inst->sample_times[inst->last_sample],
+                                      &inst->sample_times[get_runsbuf_index(inst, 0)]);
+    elapsed = UTI_DiffTimespecsToDouble(now, &inst->offset_time);
+    sample_elapsed = UTI_DiffTimespecsToDouble(now, &inst->sample_times[bi]);
+
+    report->span_seconds = round(dspan);
+    report->est_offset = inst->estimated_offset + elapsed * inst->estimated_frequency;
+    report->est_offset_err = inst->estimated_offset_sd + sample_elapsed * inst->skew +
+                             (0.5 * inst->root_delays[bj] + inst->root_dispersions[bj]);
   } else {
     report->span_seconds = 0;
     report->est_offset = 0;
