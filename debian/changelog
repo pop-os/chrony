@@ -1,3 +1,34 @@
+chrony (3.5-7) unstable; urgency=medium
+
+  * debian/chrony.maintscript:
+    - Remove the /etc/NetworkManager/dispatcher.d/20-chrony conffile.
+
+  * debian/control:
+    - Support seccomp facility on riscv64. It should be noted that the system
+    call filter will stay disabled by default on this architecture until
+    Linux >= 5.5 hits unstable.
+    - Bump libseccomp-dev build-dep to 2.4.3-1~ to provide seccomp facility on
+    riscv64.
+    - Break network-manager (<< 1.20.0-1~). Prior to this version,
+    NetworkManager would not look for dispatcher scripts into
+    /usr/lib/NetworkManager/dispatcher.d/.
+
+  * debian/dirs:
+    - Create the usr/lib/NetworkManager/dispatcher.d subdirectories.
+
+  * debian/links:
+    - Change the location of the NetworkManager dispatcher script.
+
+  * debian/patches/:
+    - Add allow-renameat2-in-seccomp-filter.patch. Required as the riscv64
+    architecture does not support the rename() and renameat() system calls.
+
+  * debian/rules:
+    - Move the NetworkManager dispatcher script in
+     /usr/lib/NetworkManager/dispatcher.d/.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Tue, 17 Mar 2020 15:21:53 +0100
+
 chrony (3.5-6) unstable; urgency=medium
 
   * debian/chrony.service:
