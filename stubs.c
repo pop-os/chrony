@@ -28,6 +28,7 @@
 #include "config.h"
 
 #include "clientlog.h"
+#include "cmac.h"
 #include "cmdmon.h"
 #include "keys.h"
 #include "logging.h"
@@ -39,6 +40,10 @@
 #include "ntp_io.h"
 #include "ntp_sources.h"
 #include "ntp_signd.h"
+#include "nts_ke_client.h"
+#include "nts_ke_server.h"
+#include "nts_ntp_client.h"
+#include "nts_ntp_server.h"
 #include "privops.h"
 #include "refclock.h"
 #include "sched.h"
@@ -194,9 +199,10 @@ NSR_AddSource(NTP_Remote_Address *remote_addr, NTP_Source_Type type, SourceParam
   return NSR_TooManySources;
 }
 
-void
+NSR_Status
 NSR_AddSourceByName(char *name, int port, int pool, NTP_Source_Type type, SourceParameters *params)
 {
+  return NSR_TooManySources;
 }
 
 NSR_Status
@@ -218,6 +224,12 @@ NSR_HandleBadSource(IPAddr *address)
 void
 NSR_RefreshAddresses(void)
 {
+}
+
+char *
+NSR_GetName(IPAddr *address)
+{
+  return NULL;
 }
 
 void
@@ -404,9 +416,123 @@ NSD_GetAuthDelay(uint32_t key_id)
 }
 
 int
-NSD_SignAndSendPacket(uint32_t key_id, NTP_Packet *packet, NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr, int length)
+NSD_SignAndSendPacket(uint32_t key_id, NTP_Packet *packet, NTP_PacketInfo *info,
+                      NTP_Remote_Address *remote_addr, NTP_Local_Address *local_addr)
 {
   return 0;
 }
 
 #endif /* !FEAT_SIGND */
+
+#ifndef HAVE_CMAC
+
+unsigned int
+CMC_GetKeyLength(const char *cipher)
+{
+  return 0;
+}
+
+CMC_Instance
+CMC_CreateInstance(const char *cipher, const unsigned char *key, unsigned int length)
+{
+  return NULL;
+}
+
+unsigned int
+CMC_Hash(CMC_Instance inst, const unsigned char *in, unsigned int in_len,
+         unsigned char *out, unsigned int out_len)
+{
+  return 0;
+}
+
+void
+CMC_DestroyInstance(CMC_Instance inst)
+{
+}
+
+#endif /* !HAVE_CMAC */
+
+#ifndef FEAT_NTS
+
+void
+NNS_Initialise(void)
+{
+}
+
+void
+NNS_Finalise(void)
+{
+}
+
+int
+NNS_CheckRequestAuth(NTP_Packet *packet, NTP_PacketInfo *info, uint32_t *kod)
+{
+  *kod = 0;
+  return 0;
+}
+
+int
+NNS_GenerateResponseAuth(NTP_Packet *request, NTP_PacketInfo *req_info,
+                         NTP_Packet *response, NTP_PacketInfo *res_info,
+                         uint32_t kod)
+{
+  return 0;
+}
+
+NNC_Instance
+NNC_CreateInstance(IPSockAddr *nts_address, const char *name, const IPSockAddr *ntp_address)
+{
+  return NULL;
+}
+
+void
+NNC_DestroyInstance(NNC_Instance inst)
+{
+}
+
+int
+NNC_PrepareForAuth(NNC_Instance inst)
+{
+  return 1;
+}
+
+int
+NNC_GenerateRequestAuth(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info)
+{
+  DEBUG_LOG("NTS support disabled");
+  return 0;
+}
+
+int
+NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info)
+{
+  DEBUG_LOG("NTS support disabled");
+  return 0;
+}
+
+void
+NNC_ChangeAddress(NNC_Instance inst, IPAddr *address)
+{
+}
+
+void
+NKC_Initialise(void)
+{
+}
+
+void
+NKC_Finalise(void)
+{
+}
+
+void
+NKS_Initialise(int scfilter_level)
+{
+}
+
+void
+NKS_Finalise(void)
+{
+}
+
+#endif /* !FEAT_NTS */

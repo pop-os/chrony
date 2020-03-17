@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2019-05-10
+.\"      Date: 2020-03-16
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2019-05-10" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2020-03-16" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -76,12 +76,21 @@ This option disables resolving of IP addresses to hostnames, e.g. to avoid slow
 DNS lookups. Long addresses will not be truncated to fit into the column.
 .RE
 .sp
+\fB\-N\fP
+.RS 4
+This option enables printing of the original names of NTP sources that were
+specified in the configuration file, or \fBchronyc\fP commands, and are internally
+used by \fBchronyd\fP. Without the \fB\-n\fP and \fB\-N\fP option, the names of NTP sources
+are obtained from reverse DNS lookups and can be different from the original
+names.
+.RE
+.sp
 \fB\-c\fP
 .RS 4
 This option enables printing of reports in a comma\-separated values (CSV)
-format. IP addresses will not be resolved to hostnames, time will be printed as
-number of seconds since the epoch and values in seconds will not be converted
-to other units.
+format. Reverse DNS lookups will be disabled, time will be printed as number of
+seconds since the epoch, and values in seconds will not be converted to other
+units.
 .RE
 .sp
 \fB\-d\fP
@@ -364,19 +373,22 @@ milliseconds.
 .RE
 .SS "Time sources"
 .sp
-\fBsources\fP [\fB\-v\fP]
+\fBsources\fP [\fB\-a\fP] [\fB\-v\fP]
 .RS 4
 This command displays information about the current time sources that \fBchronyd\fP
 is accessing.
 .sp
-The optional argument \fB\-v\fP can be specified, meaning \fIverbose\fP. In this case,
+If the \fB\-a\fP option is specified, all sources are displayed, including those that
+do not have a known address yet. Such sources have an identifier in the format
+\fIID#XXXXXXXXXX\fP, which can be used in other commands expecting a source address.
+.sp
+The \fB\-v\fP option enables a verbose output. In this case,
 extra caption lines are shown as a reminder of the meanings of the columns.
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-210 Number of sources = 3
 MS Name/IP address         Stratum Poll Reach LastRx Last sample
 ===============================================================================
 #* GPS0                          0   4   377    11   \-479ns[ \-621ns] +/\-  134ns
@@ -524,13 +536,17 @@ the source.
 .RE
 .RE
 .sp
-\fBsourcestats\fP [\fB\-v\fP]
+\fBsourcestats\fP [\fB\-a\fP] [\fB\-v\fP]
 .RS 4
 The \fBsourcestats\fP command displays information about the drift rate and offset
 estimation process for each of the sources currently being examined by
 \fBchronyd\fP.
 .sp
-The optional argument \fB\-v\fP can be specified, meaning \fIverbose\fP. In this case,
+If the \fB\-a\fP option is specified, all sources are displayed, including those that
+do not have a known address yet. Such sources have an identifier in the format
+\fIID#XXXXXXXXXX\fP, which can be used in other commands expecting a source address.
+.sp
+The \fB\-v\fP option enables a verbose output. In this case,
 extra caption lines are shown as a reminder of the meanings of the columns.
 .sp
 An example report is:
@@ -539,7 +555,6 @@ An example report is:
 .RS 4
 .\}
 .nf
-210 Number of sources = 1
 Name/IP Address            NP  NR  Span  Frequency  Freq Skew  Offset  Std Dev
 ===============================================================================
 foo.example.net            11   5   46m     \-0.001      0.045      1us    25us
@@ -664,8 +679,9 @@ not visible in the \fBsources\fP and \fBsourcestats\fP reports.
 \fBntpdata\fP [\fIaddress\fP]
 .RS 4
 The \fBntpdata\fP command displays the last valid measurement and other
-NTP\-specific information about the specified NTP source, or all NTP sources if
-no address was specified. An example of the output is shown below.
+NTP\-specific information about the specified NTP source, or all NTP sources
+(with a known address) if no address was specified. An example of the output is
+shown below.
 .sp
 .if n \{\
 .RS 4
@@ -788,16 +804,14 @@ The number of valid packets received from the source.
 .RE
 .RE
 .sp
-\fBadd peer\fP \fIaddress\fP [\fIoption\fP]...
+\fBadd peer\fP \fIname\fP [\fIoption\fP]...
 .RS 4
 The \fBadd peer\fP command allows a new NTP peer to be added whilst
 \fBchronyd\fP is running.
 .sp
 Following the words \fBadd peer\fP, the syntax of the following
-parameters and options is similar to that for the
+parameters and options is identical to that for the
 \fBpeer\fP directive in the configuration file.
-The following peer options can be set in the command: \fBport\fP, \fBminpoll\fP,
-\fBmaxpoll\fP, \fBpresend\fP, \fBmaxdelayratio\fP, \fBmaxdelay\fP, \fBkey\fP.
 .sp
 An example of using this command is shown below.
 .sp
@@ -812,16 +826,36 @@ add peer foo.example.net minpoll 6 maxpoll 10 key 25
 .\}
 .RE
 .sp
-\fBadd server\fP \fIaddress\fP [\fIoption\fP]...
+\fBadd pool\fP \fIname\fP [\fIoption\fP]...
+.RS 4
+The \fBadd pool\fP command allows a pool of NTP servers to be added whilst
+\fBchronyd\fP is running.
+.sp
+Following the words \fBadd pool\fP, the syntax of the following parameters and
+options is identical to that for the \fBpool\fP
+directive in the configuration file.
+.sp
+An example of using this command is shown below:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+add pool foo.example.net maxsources 3 iburst
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.sp
+\fBadd server\fP \fIname\fP [\fIoption\fP]...
 .RS 4
 The \fBadd server\fP command allows a new NTP server to be added whilst
 \fBchronyd\fP is running.
 .sp
 Following the words \fBadd server\fP, the syntax of the following parameters and
-options is similar to that for the \fBserver\fP
+options is identical to that for the \fBserver\fP
 directive in the configuration file.
-The following server options can be set in the command: \fBport\fP, \fBminpoll\fP,
-\fBmaxpoll\fP, \fBpresend\fP, \fBmaxdelayratio\fP, \fBmaxdelay\fP, \fBkey\fP.
 .sp
 An example of using this command is shown below:
 .sp
@@ -1015,7 +1049,8 @@ the loaded periods. The \fBoffline\fP and \fBonline\fP commands can be used to a
 this.
 .sp
 There are four forms of the \fBoffline\fP command. The first form is a wildcard,
-meaning all sources. The second form allows an IP address mask and a masked
+meaning all sources (including sources that do not have a known address yet).
+The second form allows an IP address mask and a masked
 address to be specified. The third form uses CIDR notation. The fourth form
 uses an IP address or a hostname. These forms are illustrated below.
 .sp
@@ -1064,10 +1099,11 @@ The syntax is identical to that of the \fBoffline\fP command.
 .sp
 \fBonoffline\fP
 .RS 4
-The \fBonoffline\fP command tells \fBchronyd\fP to switch all sources to the online or
+The \fBonoffline\fP command tells \fBchronyd\fP to switch all sources that have a known
+address to the online or
 offline status according to the current network configuration. A source is
-considered online if it is possible to send requests to it, i.e. a route to the
-network is present.
+considered online if it is possible to send requests to it, i.e. a network
+route to the source is present.
 .RE
 .sp
 \fBpolltarget\fP \fIaddress\fP \fIpolltarget\fP
@@ -1086,6 +1122,17 @@ the machine in a different network.
 Sources that stop responding will be replaced with newly resolved addresses
 automatically after 8 polling intervals, but this command can still be useful
 to replace them immediately and not wait until they are marked as unreachable.
+.RE
+.sp
+\fBsourcename\fP \fIaddress\fP
+.RS 4
+The \fBsourcename\fP command prints the original hostname or address that was
+specified for an NTP source in the configuration file, or the \fBadd\fP command.
+This command is an alternative to the \fB\-N\fP option, which can be useful in
+scripts.
+.sp
+Note that different NTP sources can share the same name, e.g. servers from a
+pool.
 .RE
 .SS "Manual time input"
 .sp
@@ -1797,6 +1844,15 @@ The \fBrekey\fP command causes \fBchronyd\fP to re\-read the key file specified 
 configuration file by the \fBkeyfile\fP directive.
 .RE
 .sp
+\fBreset\fP
+.RS 4
+The \fBreset\fP command causes \fBchronyd\fP to drop all measurements and switch to the
+unsynchronised state. This command can help \fBchronyd\fP with recovery when the
+measurements are known to be no longer valid or accurate, e.g. due to moving
+the computer to a different network, or resuming the computer from a low\-power
+state (which resets the system clock).
+.RE
+.sp
 \fBshutdown\fP
 .RS 4
 The \fBshutdown\fP command causes \fBchronyd\fP to exit. This is equivalent to sending
@@ -1871,10 +1927,10 @@ generated from the \fI/dev/urandom\fP device and it is printed to standard outpu
 .sp
 The command has three optional arguments. The first argument is the key number
 (by default 1), which will be specified with the \fBkey\fP option of the \fBserver\fP
-or \fBpeer\fP directives in the configuration file. The second argument is the hash
-function (by default SHA1 or MD5 if SHA1 is not available) and the third
-argument is the number of bits the key should have, between 80 and 4096 bits
-(by default 160 bits).
+or \fBpeer\fP directives in the configuration file. The second argument is the name
+of the hash function or cipher (by default SHA1, or MD5 if SHA1 is not
+available). The third argument is the length of the key in bits if a hash
+function was selected, between 80 and 4096 bits (by default 160 bits).
 .sp
 An example is:
 .sp

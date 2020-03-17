@@ -65,6 +65,12 @@ static ARR_Instance file_handlers;
 static struct timespec last_select_ts, last_select_ts_raw;
 static double last_select_ts_err;
 
+#define TS_MONO_PRECISION_NS 10000000U
+
+/* Monotonic low-precision timestamp measuring interval since the start */
+static double last_select_ts_mono;
+static uint32_t last_select_ts_mono_ns;
+
 /* ================================================== */
 
 /* Variables to handler the timer queue */
@@ -136,6 +142,8 @@ SCH_Initialise(void)
 
   LCL_ReadRawTime(&last_select_ts_raw);
   last_select_ts = last_select_ts_raw;
+  last_select_ts_mono = 0.0;
+  last_select_ts_mono_ns = 0;
 
   initialised = 1;
 }
@@ -146,6 +154,8 @@ SCH_Initialise(void)
 void
 SCH_Finalise(void) {
   ARR_DestroyInstance(file_handlers);
+
+  LCL_RemoveParameterChangeHandler(handle_slew, NULL);
 
   initialised = 0;
 }
@@ -243,6 +253,14 @@ SCH_GetLastEventTime(struct timespec *cooked, double *err, struct timespec *raw)
   }
   if (raw)
     *raw = last_select_ts_raw;
+}
+
+/* ================================================== */
+
+double
+SCH_GetLastEventMonoTime(void)
+{
+  return last_select_ts_mono;
 }
 
 /* ================================================== */
@@ -470,6 +488,20 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
 
   /* Catch calls with invalid non-zero ID */
   assert(0);
+}
+
+/* ================================================== */
+
+void
+SCH_Reset(void)
+{
+  while (n_timer_queue_entries > 0)
+    SCH_RemoveTimeout(timer_queue.next->id);
+
+  while (one_highest_fd > 0) {
+    close(one_highest_fd - 1);
+    SCH_RemoveFileHandler(one_highest_fd - 1);
+  }
 }
 
 /* ================================================== */
@@ -706,6 +738,31 @@ check_current_time(struct timespec *prev_raw, struct timespec *raw, int timeout,
 
 /* ================================================== */
 
+static void
+update_monotonic_time(struct timespec *now, struct timespec *before)
+{
+  struct timespec diff;
+
+  /* Avoid frequent floating-point operations and handle small
+     increments to a large value */
+
+  UTI_DiffTimespecs(&diff, now, before);
+  if (diff.tv_sec == 0) {
+    last_select_ts_mono_ns += diff.tv_nsec;
+  } else {
+    last_select_ts_mono += fabs(UTI_TimespecToDouble(&diff) +
+                                last_select_ts_mono_ns / 1.0e9);
+    last_select_ts_mono_ns = 0;
+  }
+
+  if (last_select_ts_mono_ns > TS_MONO_PRECISION_NS) {
+    last_select_ts_mono += last_select_ts_mono_ns / 1.0e9;
+    last_select_ts_mono_ns = 0;
+  }
+}
+
+/* ================================================== */
+
 void
 SCH_MainLoop(void)
 {
@@ -761,6 +818,8 @@ SCH_MainLoop(void)
       /* Cook the time again after handling the step */
       LCL_CookTime(&now, &cooked, &err);
     }
+
+    update_monotonic_time(&cooked, &last_select_ts);
 
     last_select_ts_raw = now;
     last_select_ts = cooked;

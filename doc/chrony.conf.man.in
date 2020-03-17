@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2019-05-10
+.\"      Date: 2020-03-16
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2019-05-10" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2020-03-16" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -102,7 +102,7 @@ interval in order to allow a burst with two requests.
 .RS 4
 The NTP protocol supports a message authentication code (MAC) to prevent
 computers having their system time upset by rogue packets being sent to them.
-The MAC is generated as a function of a password specified in the key file,
+The MAC is generated as a function of a key specified in the key file,
 which is specified by the \fBkeyfile\fP directive.
 .sp
 The \fBkey\fP option specifies which key (with an ID in the range 1 through 2^32\-1)
@@ -113,6 +113,15 @@ otherwise no relationship between the computers will be possible.
 If the server is running \fBntpd\fP and the output size of the hash function used
 by the key is longer than 160 bits (e.g. SHA256), the \fBversion\fP option needs to
 be set to 4 for compatibility.
+.RE
+.sp
+\fBnts\fP
+.RS 4
+This option enables authentication using the Network Time Security (NTS)
+mechanism. Unlike with the \fBkey\fP option, the server and client do not need to
+share a key in a key file. NTS has a Key Establishment (NTS\-KE) protocol using
+the Transport Layer Security (TLS) protocol to get the keys and cookies
+required by NTS for authentication of NTP packets.
 .RE
 .sp
 \fBmaxdelay\fP \fIdelay\fP
@@ -248,14 +257,13 @@ synchronisation only if they agree with the trusted and required source.
 .sp
 \fBxleave\fP
 .RS 4
-This option enables an interleaved mode which allows the server or the peer to
+This option enables an interleaved mode which enables the server to
 send transmit timestamps captured after the actual transmission (e.g. when the
-server or the peer is running \fBchronyd\fP with software (kernel) or hardware
+server is running \fBchronyd\fP with software (kernel) or hardware
 timestamping). This can significantly improve the accuracy of the measurements.
 .sp
 The interleaved mode is compatible with servers that support only the basic
-mode, but peers must both support and have enabled the interleaved mode,
-otherwise the synchronisation will work only in one direction. Note that even
+mode. Note that even
 servers that support the interleaved mode might respond in the basic mode as
 the interleaved mode requires the servers to keep some state for each client
 and the state might be dropped when there are too many clients (e.g.
@@ -281,6 +289,12 @@ intervals. The default is 8 and a useful range is from 6 to 60.
 This option allows the UDP port on which the server understands NTP requests to
 be specified. For normal servers this option should not be required (the
 default is 123, the standard NTP port).
+.RE
+.sp
+\fBntsport\fP \fIport\fP
+.RS 4
+This option specifies the TCP port on which the server is listening for NTS\-KE
+connections when the \fBnts\fP option is enabled. The default is 11443.
 .RE
 .sp
 \fBpresend\fP \fIpoll\fP
@@ -312,8 +326,8 @@ when the polling interval is 512 seconds or more, an extra NTP client packet
 will be sent to the server a short time (2 seconds) before making the actual
 measurement.
 .sp
-The \fBpresend\fP option cannot be used in the \fBpeer\fP directive. If it is used
-with the \fBxleave\fP option, \fBchronyd\fP will send two extra packets instead of one.
+If the \fBpresend\fP option is used together with the \fBxleave\fP option, \fBchronyd\fP
+will send two extra packets instead of one.
 .RE
 .sp
 \fBminstratum\fP \fIstratum\fP
@@ -347,16 +361,22 @@ which might change over time.
 .sp
 All options valid in the \fBserver\fP directive can be used in this
 directive too. There is one option specific to the \fBpool\fP directive:
-\fBmaxsources\fP sets the maximum number of sources that can be used from the pool,
-the default value is 4.
 .sp
-On start, when the pool name is resolved, \fBchronyd\fP will add up to 16 sources,
-one for each resolved address. When the number of sources from which at least
-one valid reply was received reaches the number specified by the \fBmaxsources\fP
-option, the other sources will be removed. When a pool source is unreachable,
+\fBmaxsources\fP \fIsources\fP
+.RS 4
+This option sets the desired number of sources to be used from the pool.
+\fBchronyd\fP will repeatedly try to resolve the name until it gets this number of
+sources responding to requests. The default value is 4 and the maximum value is
+16.
+.RE
+.RE
+.sp
+
+.RS 4
+When an NTP source is unreachable,
 marked as a falseticker, or has a distance larger than the limit set by the
 \fBmaxdistance\fP directive, \fBchronyd\fP will try to replace the
-source with a newly resolved address from the pool.
+source with a newly resolved address of the name.
 .sp
 An example of the \fBpool\fP directive is
 .sp
@@ -381,6 +401,12 @@ is mainly useful when the NTP implementation of the peer (e.g. \fBntpd\fP) suppo
 ephemeral symmetric associations and does not need to be configured with an
 address of this host. \fBchronyd\fP does not support ephemeral associations.
 .sp
+The following options of the \fBserver\fP directive do not work in the \fBpeer\fP
+directive: \fBiburst\fP, \fBburst\fP, \fBnts\fP, \fBpresend\fP.
+.sp
+When using the \fBxleave\fP option, both peers must support and have enabled the
+interleaved mode, otherwise the synchronisation will work in one direction
+only.
 When a key is specified by the \fBkey\fP option to enable authentication, both
 peers must use the same key and the same key number.
 .sp
@@ -895,6 +921,10 @@ The \fBmaxsamples\fP directive sets the default maximum number of samples that
 individual sources in the \fBserver\fP and \fBrefclock\fP
 directives. The default value is 0, which disables the configurable limit. The
 useful range is 4 to 64.
+.sp
+As a special case, setting \fBmaxsamples\fP to 1 disables frequency tracking in
+order to make the sources immediately selectable with only one sample. This can
+be useful when \fBchronyd\fP is started with the \fB\-q\fP or \fB\-Q\fP option.
 .RE
 .sp
 \fBminsamples\fP \fIsamples\fP
@@ -910,6 +940,26 @@ changes in the frequency and offset of the clock. The offsets in the
 \fBtracking\fP and
 \fBsourcestats\fP reports (and the \fItracking.log\fP and
 \fIstatistics.log\fP files) may be smaller than the actual offsets.
+.RE
+.sp
+\fBntsrefresh\fP \fIinterval\fP
+.RS 4
+This directive specifies the maximum interval between NTS\-KE handshakes (in
+seconds) in order to refresh the keys authenticating NTP packets. The default
+value is 2419200 (4 weeks).
+.RE
+.sp
+\fBntstrustedcerts\fP \fIfile\fP
+.RS 4
+This directive specifies a file containing certificates (in the PEM format) of
+trusted certificate authorities (CA) that should be used to verify certificates
+of NTS servers in addition to the system\(cqs default trusted CAs (if the
+\fBnosystemcert\fP directive is not present).
+.RE
+.sp
+\fBnosystemcert\fP
+.RS 4
+This directive disables the system\(cqs default trusted CAs.
 .RE
 .SS "Source selection"
 .sp
@@ -1763,6 +1813,57 @@ ntpsigndsocket /var/lib/samba/ntp_signd
 .if n \{\
 .RE
 .\}
+.RE
+.sp
+\fBntsport\fP \fIport\fP
+.RS 4
+This directive specifies the TCP port on which \fBchronyd\fP will provide the NTS
+Key Establishment (NTS\-KE) service. The default port is 11443.
+.sp
+The port will be open only when a certificate and key is specified by the
+\fBntsservercert\fP and \fBntsserverkey\fP directives.
+.RE
+.sp
+\fBntsservercert\fP \fIfile\fP
+.RS 4
+This directive specifies a file containing a certificate in the PEM format
+for \fBchronyd\fP to operate as an NTS server.
+.RE
+.sp
+\fBntsserverkey\fP \fIfile\fP
+.RS 4
+This directive specifies a file containing a private key in the PEM format
+for \fBchronyd\fP to operate as an NTS server.
+.RE
+.sp
+\fBntsprocesses\fP \fIprocesses\fP
+.RS 4
+This directive specifies how many helper processes will \fBchronyd\fP operating
+as an NTS server start for handling client NTS\-KE requests in order to improve
+performance with multi\-core CPUs and multithreading. If set to 0, no helper
+process will be started and all NTS\-KE requests will be handled by the main
+\fBchronyd\fP process. The default value is 1.
+.RE
+.sp
+\fBmaxntsconnections\fP \fIconnections\fP
+.RS 4
+This directive specifies the maximum number of concurrent NTS\-KE connections
+per process that the NTS server will accept. The default value is 100.
+.RE
+.sp
+\fBntscachedir\fP \fIdirectory\fP
+.RS 4
+This directive specifies a directory to save the keys which the NTS server uses
+to encrypt NTS cookies in order to prevent a storm of NTS\-KE handshakes when
+the server is restarted. By default, the server does not save the keys.
+.RE
+.sp
+\fBntsrotate\fP \fIinterval\fP
+.RS 4
+This directive specifies the rotation interval (in seconds) of the server key
+which encrypts cookies. The server keeps up to 3 previous keys to give the
+clients enough time to get cookies encrypted by the latest key. The default
+interval is 604800 (1 week).
 .RE
 .sp
 \fBport\fP \fIport\fP
@@ -3397,8 +3498,10 @@ include @SYSCONFDIR@/chrony.d/*.conf
 .sp
 \fBkeyfile\fP \fIfile\fP
 .RS 4
-This directive is used to specify the location of the file containing ID\-key
-pairs for authentication of NTP packets.
+This directive is used to specify the location of the file containing symmetric
+keys which are shared between NTP servers and clients, or peers, in order to
+authenticate NTP packets with a message authentication code (MAC) using a
+cryptographic hash function or cipher.
 .sp
 The format of the directive is shown in the example below:
 .sp
@@ -3422,34 +3525,44 @@ format of the file is shown below:
 10 tulip
 11 hyacinth
 20 MD5 ASCII:crocus
-25 SHA1 HEX:1dc764e0791b11fa67efc7ecbc4b0d73f68a070c
+25 SHA1 HEX:933F62BE1D604E68A81B557F18CFA200483F5B70
+30 AES128 HEX:7EA62AE64D190114D46D5A082F948EC1
+31 AES256 HEX:37DDCBC67BB902BCB8E995977FAB4D2B5642F5B32EBCEEE421921D97E5CBFE39
  ...
 .fi
 .if n \{\
 .RE
 .\}
 .sp
-Each line consists of an ID, name of an authentication hash function (optional),
-and a password. The ID can be any unsigned integer in the range 1 through
-2^32\-1. The default hash function is \fBMD5\fP, which is always supported.
+Each line consists of an ID, optional type, and key.
 .sp
+The ID can be any positive integer in the range 1 through 2^32\-1.
+.sp
+The type is a name of a cryptographic hash function or cipher which is used to
+generate and verify the MAC. The default type is \fBMD5\fP, which is always
+supported.
 If \fBchronyd\fP was built with enabled support for hashing using a crypto library
 (nettle, nss, or libtomcrypt), the following functions are available: \fBMD5\fP,
 \fBSHA1\fP, \fBSHA256\fP, \fBSHA384\fP, \fBSHA512\fP. Depending on which library and version is
-\fBchronyd\fP using, some or all of the following functions may also be available:
-\fBSHA3\-224\fP, \fBSHA3\-256\fP, \fBSHA3\-384\fP, \fBSHA3\-512\fP, \fBRMD128\fP, \fBRMD160\fP, \fBRMD256\fP,
-\fBRMD320\fP, \fBTIGER\fP, \fBWHIRLPOOL\fP.
+\fBchronyd\fP using, some of the following hash functions and ciphers may
+also be available:
+\fBSHA3\-224\fP, \fBSHA3\-256\fP, \fBSHA3\-384\fP, \fBSHA3\-512\fP, \fBTIGER\fP, \fBWHIRLPOOL\fP, \fBAES128\fP,
+\fBAES256\fP.
 .sp
-The password can be specified as a string of characters not containing white
+The key can be specified as a string of ASCII characters not containing white
 space with an optional \fBASCII:\fP prefix, or as a hexadecimal number with the
 \fBHEX:\fP prefix. The maximum length of the line is 2047 characters.
+If the type is a cipher, the length of the key must match the cipher (i.e. 128
+bits for AES128 and 256 bits for AES256).
 .sp
-The password is used with the hash function to generate and verify a message
-authentication code (MAC) in NTP packets. It is recommended to use SHA1, or
-stronger, hash function with random passwords specified in the hexadecimal
-format that have at least 128 bits. \fBchronyd\fP will log a warning to
-syslog on start if a source is specified in the configuration file with a key
-that has password shorter than 80 bits.
+It is recommended to use randomly generated keys, specified in the hexadecimal
+format, which are at least 128 bits long (i.e. they have at least 32 characters
+after the \fBHEX:\fP prefix). \fBchronyd\fP will log a warning to syslog on start if a
+source is specified in the configuration file with a key shorter than 80 bits.
+.sp
+The recommended key types are AES ciphers and SHA3 hash functions. MD5 should
+be avoided unless no other type is supported on the server and client, or
+peers.
 .sp
 The \fBkeygen\fP command of \fBchronyc\fP can be used to
 generate random keys for the key file. By default, it generates 160\-bit MD5 or
@@ -3705,7 +3818,7 @@ actually connected to the Internet.
 .SS "Isolated networks"
 .sp
 This section shows how to configure \fBchronyd\fP for computers that never have
-network conectivity to any computer which ultimately derives its time from a
+network connectivity to any computer which ultimately derives its time from a
 reference clock.
 .sp
 In this situation, one computer is selected to be the master timeserver. The

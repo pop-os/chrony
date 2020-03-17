@@ -250,6 +250,16 @@ command line. For example:
 
 # chronyd -q 'pool pool.ntp.org iburst'
 
+The command above would normally take about 5 seconds if the servers were well
+synchronised and responding to all requests. If not synchronised or responding,
+it would take about 10 seconds for chronyd to give up and exit with a non-zero
+status. A faster configuration is possible. A single server can be used instead
+of four servers, the number of measurements can be reduced with the maxsamples
+option, and a timeout can be specified with the -t option. The following
+command would take only up to about 1 second.
+
+# chronyd -q -t 1 'server pool.ntp.org iburst maxsamples 1'
+
 2.8. Can chronyd be configured to control the clock like ntpd?
 
 It is not possible to perfectly emulate ntpd, but there are some options that
@@ -548,4 +558,4 @@ needs to be made to work as a service.
 We have no plans to do this. Anyone is welcome to pick this work up and
 contribute it back to the project.
 
-Last updated 2019-05-10 12:22:57 CEST
+Last updated 2020-03-16 13:16:14 CET

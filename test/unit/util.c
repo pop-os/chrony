@@ -1,3 +1,23 @@
+/*
+ **********************************************************************
+ * Copyright (C) Miroslav Lichvar  2017-2018
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ * 
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * 
+ **********************************************************************
+ */
+
 #include <util.c>
 #include "test.h"
 
@@ -6,7 +26,6 @@ void test_unit(void) {
   NTP_int32 ntp32_ts;
   struct timespec ts, ts2;
   struct timeval tv;
-  struct sockaddr_un sun;
   double x, y, nan, inf;
   Timespec tspec;
   Float f;
@@ -14,6 +33,8 @@ void test_unit(void) {
   char buf[16], *s;
   uid_t uid;
   gid_t gid;
+  struct stat st;
+  FILE *file;
 
   for (i = -31; i < 31; i++) {
     x = pow(2.0, i);
@@ -79,11 +100,19 @@ void test_unit(void) {
   ntp_ts.hi = htonl(JAN_1970);
   ntp_ts.lo = 0xffffffff;
   UTI_Ntp64ToTimespec(&ntp_ts, &ts);
+#if defined(HAVE_LONG_TIME_T) && NTP_ERA_SPLIT > 0
+  TEST_CHECK(ts.tv_sec == 0x100000000LL * (1 + (NTP_ERA_SPLIT - 1) / 0x100000000LL));
+#else
   TEST_CHECK(ts.tv_sec == 0);
+#endif
   TEST_CHECK(ts.tv_nsec == 999999999);
 
   UTI_AddDoubleToTimespec(&ts, 1e-9, &ts);
+#if defined(HAVE_LONG_TIME_T) && NTP_ERA_SPLIT > 0
+  TEST_CHECK(ts.tv_sec == 1 + 0x100000000LL * (1 + (NTP_ERA_SPLIT - 1) / 0x100000000LL));
+#else
   TEST_CHECK(ts.tv_sec == 1);
+#endif
   TEST_CHECK(ts.tv_nsec == 0);
 
   ntp_fuzz.hi = 0;
@@ -209,20 +238,6 @@ void test_unit(void) {
   }
   TEST_CHECK(c > 46000 && c < 48000);
 
-  for (i = 1; i < 2 * BUFFER_LENGTH; i++) {
-    sun.sun_family = AF_UNIX;
-    for (j = 0; j + 1 < i && j + 1 < sizeof (sun.sun_path); j++)
-      sun.sun_path[j] = 'A' + j % 26;
-    sun.sun_path[j] = '\0';
-    s = UTI_SockaddrToString((struct sockaddr *)&sun);
-    if (i <= BUFFER_LENGTH) {
-      TEST_CHECK(!strcmp(s, sun.sun_path));
-    } else {
-      TEST_CHECK(!strncmp(s, sun.sun_path, BUFFER_LENGTH - 2));
-      TEST_CHECK(s[BUFFER_LENGTH - 2] == '>');
-    }
-  }
-
   s = UTI_PathToDir("/aaa/bbb/ccc/ddd");
   TEST_CHECK(!strcmp(s, "/aaa/bbb/ccc"));
   Free(s);
@@ -264,4 +279,58 @@ void test_unit(void) {
   TEST_CHECK(!UTI_CheckDirPermissions("testdir", 0700, uid + 1, gid));
   TEST_CHECK(!UTI_CheckDirPermissions("testdir", 0700, uid, gid + 1));
   TST_ResumeLogging();
+
+  umask(0);
+
+  unlink("testfile");
+  file = UTI_OpenFile(NULL, "testfile", NULL, 'r', 0);
+  TEST_CHECK(!file);
+  TEST_CHECK(stat("testfile", &st) < 0);
+
+  file = UTI_OpenFile(NULL, "testfile", NULL, 'w', 0644);
+  TEST_CHECK(file);
+  TEST_CHECK(stat("testfile", &st) == 0);
+  TEST_CHECK((st.st_mode & 0777) == 0644);
+  fclose(file);
+
+  file = UTI_OpenFile(".", "test", "file", 'W', 0640);
+  TEST_CHECK(file);
+  TEST_CHECK(stat("testfile", &st) == 0);
+  TEST_CHECK((st.st_mode & 0777) == 0640);
+  fclose(file);
+
+  file = UTI_OpenFile(NULL, "test", "file", 'r', 0);
+  TEST_CHECK(file);
+  fclose(file);
+
+  TEST_CHECK(UTI_RenameTempFile(NULL, "testfil", "e", NULL));
+  TEST_CHECK(stat("testfil", &st) == 0);
+  file = UTI_OpenFile(NULL, "testfil", NULL, 'R', 0);
+  TEST_CHECK(file);
+  fclose(file);
+
+  TEST_CHECK(UTI_RenameTempFile(NULL, "test", "fil", "file"));
+  TEST_CHECK(stat("testfile", &st) == 0);
+  file = UTI_OpenFile(NULL, "testfile", NULL, 'R', 0);
+  TEST_CHECK(file);
+  fclose(file);
+
+  TEST_CHECK(UTI_RemoveFile(NULL, "testfile", NULL));
+  TEST_CHECK(stat("testfile", &st) < 0);
+  TEST_CHECK(!UTI_RemoveFile(NULL, "testfile", NULL));
+
+  assert(sizeof (buf) >= 16);
+  TEST_CHECK(UTI_HexToBytes("", buf, sizeof (buf)) == 0);
+  TEST_CHECK(UTI_HexToBytes("0", buf, sizeof (buf)) == 0);
+  TEST_CHECK(UTI_HexToBytes("00123456789ABCDEF", buf, sizeof (buf)) == 0);
+  TEST_CHECK(UTI_HexToBytes("00123456789ABCDEF0", buf, 8) == 0);
+  TEST_CHECK(UTI_HexToBytes("00123456789ABCDEF0", buf, sizeof (buf)) == 9);
+  TEST_CHECK(memcmp(buf, "\x00\x12\x34\x56\x78\x9A\xBC\xDE\xF0", 9) == 0);
+  memcpy(buf, "AB123456780001", 15);
+  TEST_CHECK(UTI_HexToBytes(buf, buf, sizeof (buf)) == 7);
+  TEST_CHECK(memcmp(buf, "\xAB\x12\x34\x56\x78\x00\x01", 7) == 0);
+
+  TEST_CHECK(UTI_BytesToHex("\xAB\x12\x34\x56\x78\x00\x01", 7, buf, 14) == 0);
+  TEST_CHECK(UTI_BytesToHex("\xAB\x12\x34\x56\x78\x00\x01", 7, buf, 15) == 1);
+  TEST_CHECK(strcmp(buf, "AB123456780001") == 0);
 }

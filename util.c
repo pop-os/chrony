@@ -311,6 +311,9 @@ UTI_IPToString(IPAddr *addr)
                  (unsigned int)(ip6[2 * a] << 8 | ip6[2 * a + 1]));
 #endif
       break;
+    case IPADDR_ID:
+      snprintf(result, BUFFER_LENGTH, "ID#%010"PRIu32, addr->addr.id);
+      break;
     default:
       snprintf(result, BUFFER_LENGTH, "[UNKNOWN]");
   }
@@ -357,6 +360,34 @@ UTI_StringToIP(const char *addr, IPAddr *ip)
 
 /* ================================================== */
 
+int
+UTI_StringToIdIP(const char *addr, IPAddr *ip)
+{
+  if (sscanf(addr, "ID#%"SCNu32, &ip->addr.id) == 1) {
+    ip->family = IPADDR_ID;
+    ip->_pad = 0;
+    return 1;
+  }
+
+  return 0;
+}
+
+/* ================================================== */
+
+int
+UTI_IsIPReal(IPAddr *ip)
+{
+  switch (ip->family) {
+    case IPADDR_INET4:
+    case IPADDR_INET6:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/* ================================================== */
+
 uint32_t
 UTI_IPToRefid(IPAddr *ip)
 {
@@ -399,6 +430,10 @@ UTI_IPToHash(IPAddr *ip)
       addr = ip->addr.in6;
       len = sizeof (ip->addr.in6);
       break;
+    case IPADDR_ID:
+      addr = (unsigned char *)&ip->addr.id;
+      len = sizeof (ip->addr.id);
+      break;
     default:
       return 0;
   }
@@ -431,6 +466,9 @@ UTI_IPHostToNetwork(IPAddr *src, IPAddr *dest)
     case IPADDR_INET6:
       memcpy(dest->addr.in6, src->addr.in6, sizeof (dest->addr.in6));
       break;
+    case IPADDR_ID:
+      dest->addr.id = htonl(src->addr.id);
+      break;
     default:
       dest->family = htons(IPADDR_UNSPEC);
   }
@@ -450,6 +488,9 @@ UTI_IPNetworkToHost(IPAddr *src, IPAddr *dest)
       break;
     case IPADDR_INET6:
       memcpy(dest->addr.in6, src->addr.in6, sizeof (dest->addr.in6));
+      break;
+    case IPADDR_ID:
+      dest->addr.id = ntohl(src->addr.id);
       break;
     default:
       dest->family = IPADDR_UNSPEC;
@@ -486,120 +527,25 @@ UTI_CompareIPs(IPAddr *a, IPAddr *b, IPAddr *mask)
           d = a->addr.in6[i] - b->addr.in6[i];
       }
       return d;
+    case IPADDR_ID:
+      return a->addr.id - b->addr.id;
   }
   return 0;
 }
 
 /* ================================================== */
 
-void
-UTI_SockaddrToIPAndPort(struct sockaddr *sa, IPAddr *ip, unsigned short *port)
+char *
+UTI_IPSockAddrToString(IPSockAddr *sa)
 {
-  switch (sa->sa_family) {
-    case AF_INET:
-      ip->family = IPADDR_INET4;
-      ip->addr.in4 = ntohl(((struct sockaddr_in *)sa)->sin_addr.s_addr);
-      *port = ntohs(((struct sockaddr_in *)sa)->sin_port);
-      break;
-#ifdef FEAT_IPV6
-    case AF_INET6:
-      ip->family = IPADDR_INET6;
-      memcpy(ip->addr.in6, ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
-             sizeof (ip->addr.in6));
-      *port = ntohs(((struct sockaddr_in6 *)sa)->sin6_port);
-      break;
-#endif
-    default:
-      ip->family = IPADDR_UNSPEC;
-      *port = 0;
-  }
-}
-
-/* ================================================== */
-
-int
-UTI_IPAndPortToSockaddr(IPAddr *ip, unsigned short port, struct sockaddr *sa)
-{
-  switch (ip->family) {
-    case IPADDR_INET4:
-      memset(sa, 0, sizeof (struct sockaddr_in));
-      sa->sa_family = AF_INET;
-      ((struct sockaddr_in *)sa)->sin_addr.s_addr = htonl(ip->addr.in4);
-      ((struct sockaddr_in *)sa)->sin_port = htons(port);
-#ifdef SIN6_LEN
-      ((struct sockaddr_in *)sa)->sin_len = sizeof (struct sockaddr_in);
-#endif
-      return sizeof (struct sockaddr_in);
-#ifdef FEAT_IPV6
-    case IPADDR_INET6:
-      memset(sa, 0, sizeof (struct sockaddr_in6));
-      sa->sa_family = AF_INET6;
-      memcpy(((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr, ip->addr.in6,
-             sizeof (ip->addr.in6));
-      ((struct sockaddr_in6 *)sa)->sin6_port = htons(port);
-#ifdef SIN6_LEN
-      ((struct sockaddr_in6 *)sa)->sin6_len = sizeof (struct sockaddr_in6);
-#endif
-      return sizeof (struct sockaddr_in6);
-#endif
-    default:
-      memset(sa, 0, sizeof (struct sockaddr));
-      sa->sa_family = AF_UNSPEC;
-      return 0;
-  }
-}
-
-/* ================================================== */
-
-char *UTI_SockaddrToString(struct sockaddr *sa)
-{
-  unsigned short port;
-  IPAddr ip;
-  char *result, *sun_path;
+  char *result;
 
   result = NEXT_BUFFER;
-
-  switch (sa->sa_family) {
-    case AF_INET:
-#ifdef AF_INET6
-    case AF_INET6:
-#endif
-      UTI_SockaddrToIPAndPort(sa, &ip, &port);
-      snprintf(result, BUFFER_LENGTH, "%s:%hu", UTI_IPToString(&ip), port);
-      break;
-    case AF_UNIX:
-      sun_path = ((struct sockaddr_un *)sa)->sun_path;
-      snprintf(result, BUFFER_LENGTH, "%.*s", BUFFER_LENGTH - 1, sun_path);
-      /* Indicate truncated path */
-      if (strlen(sun_path) >= BUFFER_LENGTH)
-        result[BUFFER_LENGTH - 2] = '>';
-      break;
-    default:
-      snprintf(result, BUFFER_LENGTH, "[UNKNOWN]");
-  }
+  snprintf(result, BUFFER_LENGTH,
+           sa->ip_addr.family != IPADDR_INET6 ? "%s:%hu" : "[%s]:%hu",
+           UTI_IPToString(&sa->ip_addr), sa->port);
 
   return result;
-}
-
-/* ================================================== */
-
-const char *
-UTI_SockaddrFamilyToString(int family)
-{
-  switch (family) {
-    case AF_INET:
-      return "IPv4";
-#ifdef AF_INET6
-    case AF_INET6:
-      return "IPv6";
-#endif
-    case AF_UNIX:
-      return "Unix";
-    case AF_UNSPEC:
-      return "UNSPEC";
-    default:
-      return "?";
-  }
 }
 
 /* ================================================== */
@@ -985,12 +931,19 @@ UTI_FdSetCloexec(int fd)
   int flags;
 
   flags = fcntl(fd, F_GETFD);
-  if (flags != -1) {
-    flags |= FD_CLOEXEC;
-    return !fcntl(fd, F_SETFD, flags);
+  if (flags == -1) {
+    DEBUG_LOG("fcntl() failed : %s", strerror(errno));
+    return 0;
   }
 
-  return 0;
+  flags |= FD_CLOEXEC;
+
+  if (fcntl(fd, F_SETFD, flags) < 0) {
+    DEBUG_LOG("fcntl() failed : %s", strerror(errno));
+    return 0;
+  }
+
+  return 1;
 }
 
 /* ================================================== */
@@ -1179,6 +1132,158 @@ UTI_CheckDirPermissions(const char *path, mode_t perm, uid_t uid, gid_t gid)
 
 /* ================================================== */
 
+static int
+join_path(const char *basedir, const char *name, const char *suffix,
+          char *buffer, size_t length, LOG_Severity severity)
+{
+  const char *sep;
+
+  if (!basedir) {
+    basedir = "";
+    sep = "";
+  } else {
+    sep = "/";
+  }
+
+  if (!suffix)
+    suffix = "";
+
+  if (snprintf(buffer, length, "%s%s%s%s", basedir, sep, name, suffix) >= length) {
+    LOG(severity, "File path %s%s%s%s too long", basedir, sep, name, suffix);
+    return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+FILE *
+UTI_OpenFile(const char *basedir, const char *name, const char *suffix,
+             char mode, mode_t perm)
+{
+  const char *file_mode;
+  char path[PATH_MAX];
+  LOG_Severity severity;
+  int fd, flags;
+  FILE *file;
+
+  severity = mode >= 'A' && mode <= 'Z' ? LOGS_FATAL : LOGS_ERR;
+
+  if (!join_path(basedir, name, suffix, path, sizeof (path), severity))
+    return NULL;
+
+  switch (mode) {
+    case 'r':
+    case 'R':
+      flags = O_RDONLY;
+      file_mode = "r";
+      if (severity != LOGS_FATAL)
+        severity = LOGS_DEBUG;
+      break;
+    case 'w':
+    case 'W':
+      flags = O_WRONLY | O_CREAT | O_EXCL;
+      file_mode = "w";
+      break;
+    case 'a':
+    case 'A':
+      flags = O_WRONLY | O_CREAT | O_APPEND;
+      file_mode = "a";
+      break;
+    default:
+      assert(0);
+      return NULL;
+  }
+
+try_again:
+  fd = open(path, flags, perm);
+  if (fd < 0) {
+    if (errno == EEXIST) {
+      if (unlink(path) < 0) {
+        LOG(severity, "Could not remove %s : %s", path, strerror(errno));
+        return NULL;
+      }
+      DEBUG_LOG("Removed %s", path);
+      goto try_again;
+    }
+    LOG(severity, "Could not open %s : %s", path, strerror(errno));
+    return NULL;
+  }
+
+  UTI_FdSetCloexec(fd);
+
+  file = fdopen(fd, file_mode);
+  if (!file) {
+    LOG(severity, "Could not open %s : %s", path, strerror(errno));
+    close(fd);
+    return NULL;
+  }
+
+  DEBUG_LOG("Opened %s fd=%d mode=%c", path, fd, mode);
+
+  return file;
+}
+
+/* ================================================== */
+
+int
+UTI_RenameTempFile(const char *basedir, const char *name,
+                   const char *old_suffix, const char *new_suffix)
+{
+  char old_path[PATH_MAX], new_path[PATH_MAX];
+
+  if (!join_path(basedir, name, old_suffix, old_path, sizeof (old_path), LOGS_ERR))
+    return 0;
+
+  if (!join_path(basedir, name, new_suffix, new_path, sizeof (new_path), LOGS_ERR))
+    goto error;
+
+  if (rename(old_path, new_path) < 0) {
+    LOG(LOGS_ERR, "Could not replace %s with %s : %s", new_path, old_path, strerror(errno));
+    goto error;
+  }
+
+  DEBUG_LOG("Renamed %s to %s", old_path, new_path);
+
+  return 1;
+
+error:
+  if (unlink(old_path) < 0)
+    LOG(LOGS_ERR, "Could not remove %s : %s", old_path, strerror(errno));
+
+  return 0;
+}
+
+/* ================================================== */
+
+int
+UTI_RemoveFile(const char *basedir, const char *name, const char *suffix)
+{
+  char path[PATH_MAX];
+  struct stat buf;
+
+  if (!join_path(basedir, name, suffix, path, sizeof (path), LOGS_ERR))
+    return 0;
+
+  /* Avoid logging an error message if the file is not accessible */
+  if (stat(path, &buf) < 0) {
+    DEBUG_LOG("Could not remove %s : %s", path, strerror(errno));
+    return 0;
+  }
+
+  if (unlink(path) < 0) {
+    LOG(LOGS_ERR, "Could not remove %s : %s", path, strerror(errno));
+    return 0;
+  }
+
+  DEBUG_LOG("Removed %s", path);
+
+  return 1;
+}
+
+/* ================================================== */
+
 void
 UTI_DropRoot(uid_t uid, gid_t gid)
 {
@@ -1207,9 +1312,7 @@ UTI_GetRandomBytesUrandom(void *buf, unsigned int len)
   static FILE *f = NULL;
 
   if (!f)
-    f = fopen(DEV_URANDOM, "r");
-  if (!f)
-    LOG_FATAL("Can't open %s : %s", DEV_URANDOM, strerror(errno));
+    f = UTI_OpenFile(NULL, DEV_URANDOM, NULL, 'R', 0);
   if (fread(buf, 1, len, f) != len)
     LOG_FATAL("Can't read from %s", DEV_URANDOM);
 }
@@ -1257,4 +1360,43 @@ UTI_GetRandomBytes(void *buf, unsigned int len)
 #else
   UTI_GetRandomBytesUrandom(buf, len);
 #endif
+}
+
+/* ================================================== */
+
+int
+UTI_BytesToHex(const void *buf, unsigned int buf_len, char *hex, unsigned int hex_len)
+{
+  unsigned int i, l;
+
+  for (i = l = 0; i < buf_len; i++, l += 2) {
+    if (l + 2 >= hex_len ||
+        snprintf(hex + l, hex_len - l, "%02hhX", ((const char *)buf)[i]) != 2)
+      return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+unsigned int
+UTI_HexToBytes(const char *hex, void *buf, unsigned int len)
+{
+  char *p, byte[3];
+  unsigned int i;
+
+  for (i = 0; i < len && *hex != '\0'; i++) {
+    byte[0] = *hex++;
+    if (*hex == '\0')
+      return 0;
+    byte[1] = *hex++;
+    byte[2] = '\0';
+    ((char *)buf)[i] = strtol(byte, &p, 16);
+
+    if (p != byte + 2)
+      return 0;
+  }
+
+  return *hex == '\0' ? i : 0;
 }
