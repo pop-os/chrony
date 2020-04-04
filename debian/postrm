@@ -7,15 +7,6 @@ set -e
 
 # targets: purge|remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear
 
-restore_timesyncd() {
-    # on next reboot it would start, but that would leave time
-    # unsynchronized until then. So as the Conflicts in the service file kill
-    # systemd-timesyncd re-establish it if it is enabled
-    if [ -d /run/systemd/system ]; then
-        deb-systemd-invoke start systemd-timesyncd || true
-    fi
-}
-
 case "$1" in
     purge)
         rm -f /var/lib/chrony/*
@@ -39,16 +30,9 @@ case "$1" in
         then
             deluser --quiet --system _chrony > /dev/null 2>&1 || true
         fi
-
-        restore_timesyncd
-    ;;
-
-    remove)
-        restore_timesyncd
     ;;
 
     upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
-
     ;;
 
     *)
