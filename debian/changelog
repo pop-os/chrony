@@ -1,3 +1,16 @@
+chrony (3.5-8) unstable; urgency=medium
+
+  * debian/postrm:
+    - Stop starting systemd-timesyncd in postrm. This is no longer relevant
+    since systemd-timesyncd is a standalone package declaring
+    Conflicts/Replaces/Provides: time-daemon. (Closes: #955773)
+
+  [ Christian Ehrhardt ]
+  * debian/tests/upstream-system-tests:
+    - Stop chrony/systemd-timesynd before running these tests. (LP: #1870144)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 05 Apr 2020 17:44:31 +0200
+
 chrony (3.5-7) unstable; urgency=medium
 
   * debian/chrony.maintscript:
