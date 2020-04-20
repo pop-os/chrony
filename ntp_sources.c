@@ -381,7 +381,7 @@ change_source_address(NTP_Remote_Address *old_addr, NTP_Remote_Address *new_addr
   name = record->name;
   severity = UTI_IsIPReal(&old_addr->ip_addr) ? LOGS_INFO : LOGS_DEBUG;
 
-  if (slot1 != slot2) {
+  if (found == 0) {
     /* The hash table must be rebuilt for the changed address */
     rehash_records();
 
@@ -1297,6 +1297,18 @@ NSR_GetActivityReport(RPT_ActivityReport *report)
   }
 }
 
-
 /* ================================================== */
 
+void
+NSR_DumpAuthData(void)
+{
+  SourceRecord *record;
+  int i;
+
+  for (i = 0; i < ARR_GetSize(records); i++) {
+    record = get_record(i);
+    if (!record->remote_addr)
+      continue;
+    NCR_DumpAuthData(record->data);
+  }
+}

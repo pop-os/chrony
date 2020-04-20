@@ -50,8 +50,10 @@
 
 #define KEY_ID_INDEX_BITS 2
 #define MAX_SERVER_KEYS (1U << KEY_ID_INDEX_BITS)
+#define FUTURE_KEYS 1
 
-#define MIN_KEY_ROTATE_INTERVAL 1.0
+#define DUMP_FILENAME "ntskeys"
+#define DUMP_IDENTIFIER "NKS0\n"
 
 #define INVALID_SOCK_FD (-7)
 
@@ -78,6 +80,8 @@ typedef struct {
 
 static ServerKey server_keys[MAX_SERVER_KEYS];
 static int current_server_key;
+static double last_server_key_ts;
+static int key_rotation_interval;
 
 static int server_sock_fd4;
 static int server_sock_fd6;
@@ -113,7 +117,7 @@ handle_client(int sock_fd, IPSockAddr *addr)
     instp = ARR_GetElement(sessions, i);
     if (!*instp) {
       /* NULL handler arg will be replaced with the session instance */
-      inst = NKSN_CreateInstance(1, UTI_IPSockAddrToString(addr), handle_message, NULL);
+      inst = NKSN_CreateInstance(1, NULL, handle_message, NULL);
       *instp = inst;
       break;
     } else if (NKSN_IsStopped(*instp)) {
@@ -128,7 +132,8 @@ handle_client(int sock_fd, IPSockAddr *addr)
     return 0;
   }
 
-  if (!NKSN_StartSession(inst, sock_fd, server_credentials, SERVER_TIMEOUT))
+  if (!NKSN_StartSession(inst, sock_fd, UTI_IPSockAddrToString(addr),
+                         server_credentials, SERVER_TIMEOUT))
     return 0;
 
   return 1;
@@ -139,28 +144,29 @@ handle_client(int sock_fd, IPSockAddr *addr)
 static void
 handle_helper_request(int fd, int event, void *arg)
 {
-  SCK_Message message;
+  SCK_Message *message;
   HelperRequest *req;
   IPSockAddr client_addr;
   int sock_fd;
 
-  if (!SCK_ReceiveMessage(fd, &message, SCK_FLAG_MSG_DESCRIPTOR))
+  message = SCK_ReceiveMessage(fd, SCK_FLAG_MSG_DESCRIPTOR);
+  if (!message)
     return;
 
-  sock_fd = message.descriptor;
+  sock_fd = message->descriptor;
   if (sock_fd < 0) {
     /* Message with no descriptor is a shutdown command */
     SCH_QuitProgram();
     return;
   }
 
-  if (message.length != sizeof (HelperRequest)) {
+  if (message->length != sizeof (HelperRequest)) {
     DEBUG_LOG("Unexpected message length");
     SCK_CloseSocket(sock_fd);
     return;
   }
 
-  req = message.data;
+  req = message->data;
 
   /* Extract the server key and client address from the request */
   server_keys[current_server_key].id = ntohl(req->key_id);
@@ -291,8 +297,9 @@ helper_signal(int x)
 static int
 prepare_response(NKSN_Instance session, int error, int next_protocol, int aead_algorithm)
 {
+  NKE_Context context;
   NKE_Cookie cookie;
-  NKE_Key c2s, s2c;
+  char *ntp_server;
   uint16_t datum;
   int i;
 
@@ -319,19 +326,20 @@ prepare_response(NKSN_Instance session, int error, int next_protocol, int aead_a
         return 0;
     }
 
-    /* This should be configurable */
-    if (0) {
-      const char server[] = "::1";
-      if (!NKSN_AddRecord(session, 1, NKE_RECORD_NTPV4_SERVER_NEGOTIATION, server,
-                          sizeof (server) - 1))
+    ntp_server = CNF_GetNtsNtpServer();
+    if (ntp_server) {
+      if (!NKSN_AddRecord(session, 1, NKE_RECORD_NTPV4_SERVER_NEGOTIATION,
+                          ntp_server, strlen(ntp_server)))
         return 0;
     }
 
-    if (!NKSN_GetKeys(session, aead_algorithm, &c2s, &s2c))
+    context.algorithm = aead_algorithm;
+
+    if (!NKSN_GetKeys(session, aead_algorithm, &context.c2s, &context.s2c))
       return 0;
 
     for (i = 0; i < NKE_MAX_COOKIES; i++) {
-      if (!NKS_GenerateCookie(&c2s, &s2c, &cookie))
+      if (!NKS_GenerateCookie(&context, &cookie))
         return 0;
       if (!NKSN_AddRecord(session, 0, NKE_RECORD_COOKIE, cookie.cookie, cookie.length))
         return 0;
@@ -434,6 +442,8 @@ generate_key(int index)
   server_keys[index].id |= index;
 
   DEBUG_LOG("Generated server key %"PRIX32, server_keys[index].id);
+
+  last_server_key_ts = SCH_GetLastEventMonoTime();
 }
 
 /* ================================================== */
@@ -441,77 +451,96 @@ generate_key(int index)
 static void
 save_keys(void)
 {
-  char hex_key[SIV_MAX_KEY_LENGTH * 2 + 1];
+  char buf[SIV_MAX_KEY_LENGTH * 2 + 1], *dump_dir;
   int i, index, key_length;
-  char *cachedir;
+  double last_key_age;
   FILE *f;
 
-  cachedir = CNF_GetNtsCacheDir();
-  if (!cachedir)
+  /* Don't save the keys if rotation is disabled to enable an external
+     management of the keys (e.g. share them with another server) */
+  if (key_rotation_interval == 0)
     return;
 
-  f = UTI_OpenFile(cachedir, "ntskeys", ".tmp", 'w', 0600);
+  dump_dir = CNF_GetNtsDumpDir();
+  if (!dump_dir)
+    return;
+
+  f = UTI_OpenFile(dump_dir, DUMP_FILENAME, ".tmp", 'w', 0600);
   if (!f)
     return;
 
   key_length = SIV_GetKeyLength(SERVER_COOKIE_SIV);
+  last_key_age = SCH_GetLastEventMonoTime() - last_server_key_ts;
+
+  if (fprintf(f, "%s%d %.1f\n", DUMP_IDENTIFIER, SERVER_COOKIE_SIV, last_key_age) < 0)
+    goto error;
 
   for (i = 0; i < MAX_SERVER_KEYS; i++) {
-    index = (current_server_key + i + 1) % MAX_SERVER_KEYS;
+    index = (current_server_key + i + 1 + FUTURE_KEYS) % MAX_SERVER_KEYS;
 
     if (key_length > sizeof (server_keys[index].key) ||
-        !UTI_BytesToHex(server_keys[index].key, key_length, hex_key, sizeof (hex_key))) {
-      assert(0);
-      break;
-    }
-
-    fprintf(f, "%08"PRIX32" %s\n", server_keys[index].id, hex_key);
+        !UTI_BytesToHex(server_keys[index].key, key_length, buf, sizeof (buf)) ||
+        fprintf(f, "%08"PRIX32" %s\n", server_keys[index].id, buf) < 0)
+      goto error;
   }
 
   fclose(f);
 
-  if (!UTI_RenameTempFile(cachedir, "ntskeys", ".tmp", NULL))
+  if (!UTI_RenameTempFile(dump_dir, DUMP_FILENAME, ".tmp", NULL)) {
+    if (!UTI_RemoveFile(dump_dir, DUMP_FILENAME, ".tmp"))
+      ;
+  }
+
+  return;
+
+error:
+  DEBUG_LOG("Could not %s server keys", "save");
+  fclose(f);
+
+  if (!UTI_RemoveFile(dump_dir, DUMP_FILENAME, NULL))
     ;
 }
 
 /* ================================================== */
 
+#define MAX_WORDS 2
+
 static void
 load_keys(void)
 {
-  int i, index, line_length, key_length, n;
-  char *cachedir, line[1024];
+  char *dump_dir, line[1024], *words[MAX_WORDS];
+  int i, index, key_length, algorithm;
+  double key_age;
   FILE *f;
   uint32_t id;
 
-  cachedir = CNF_GetNtsCacheDir();
-  if (!cachedir)
+  dump_dir = CNF_GetNtsDumpDir();
+  if (!dump_dir)
     return;
 
-  f = UTI_OpenFile(cachedir, "ntskeys", NULL, 'r', 0);
+  f = UTI_OpenFile(dump_dir, DUMP_FILENAME, NULL, 'r', 0);
   if (!f)
     return;
 
+  if (!fgets(line, sizeof (line), f) || strcmp(line, DUMP_IDENTIFIER) != 0 ||
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 2 ||
+        sscanf(words[0], "%d", &algorithm) != 1 || algorithm != SERVER_COOKIE_SIV ||
+        sscanf(words[1], "%lf", &key_age) != 1)
+    goto error;
+
   key_length = SIV_GetKeyLength(SERVER_COOKIE_SIV);
+  last_server_key_ts = SCH_GetLastEventMonoTime() - MAX(key_age, 0.0);
 
-  for (i = 0; i < MAX_SERVER_KEYS; i++) {
-    if (!fgets(line, sizeof (line), f))
-      break;
-
-    line_length = strlen(line);
-    if (line_length < 10)
-      break;
-    /* Drop '\n' */
-    line[line_length - 1] = '\0';
-
-    if (sscanf(line, "%"PRIX32"%n", &id, &n) != 1 || line[n] != ' ')
-      break;
+  for (i = 0; i < MAX_SERVER_KEYS && fgets(line, sizeof (line), f); i++) {
+    if (UTI_SplitString(line, words, MAX_WORDS) != 2 ||
+        sscanf(words[0], "%"PRIX32, &id) != 1)
+      goto error;
 
     index = id % MAX_SERVER_KEYS;
 
-    if (UTI_HexToBytes(line + n + 1, server_keys[index].key,
+    if (UTI_HexToBytes(words[1], server_keys[index].key,
                        sizeof (server_keys[index].key)) != key_length)
-      break;
+      goto error;
 
     server_keys[index].id = id;
     if (!SIV_SetKey(server_keys[index].siv, server_keys[index].key, key_length))
@@ -519,9 +548,15 @@ load_keys(void)
 
     DEBUG_LOG("Loaded key %"PRIX32, id);
 
-    current_server_key = index;
+    current_server_key = (index + MAX_SERVER_KEYS - FUTURE_KEYS) % MAX_SERVER_KEYS;
   }
 
+  fclose(f);
+
+  return;
+
+error:
+  DEBUG_LOG("Could not %s server keys", "load");
   fclose(f);
 }
 
@@ -531,11 +566,10 @@ static void
 key_timeout(void *arg)
 {
   current_server_key = (current_server_key + 1) % MAX_SERVER_KEYS;
-  generate_key(current_server_key);
+  generate_key((current_server_key + FUTURE_KEYS) % MAX_SERVER_KEYS);
   save_keys();
 
-  SCH_AddTimeoutByDelay(MAX(CNF_GetNtsRotate(), MIN_KEY_ROTATE_INTERVAL),
-                        key_timeout, NULL);
+  SCH_AddTimeoutByDelay(key_rotation_interval, key_timeout, NULL);
 }
 
 /* ================================================== */
@@ -582,6 +616,7 @@ NKS_Initialise(int scfilter_level)
 {
   char *cert, *key;
   int i, processes;
+  double key_delay;
 
   server_sock_fd4 = INVALID_SOCK_FD;
   server_sock_fd6 = INVALID_SOCK_FD;
@@ -615,7 +650,12 @@ NKS_Initialise(int scfilter_level)
 
   load_keys();
 
-  key_timeout(NULL);
+  key_rotation_interval = MAX(CNF_GetNtsRotate(), 0);
+
+  if (key_rotation_interval > 0) {
+    key_delay = key_rotation_interval - (SCH_GetLastEventMonoTime() - last_server_key_ts);
+    SCH_AddTimeoutByDelay(MAX(key_delay, 0.0), key_timeout, NULL);
+  }
 
   processes = CNF_GetNtsServerProcesses();
 
@@ -623,6 +663,8 @@ NKS_Initialise(int scfilter_level)
     int sock_fd1, sock_fd2;
 
     sock_fd1 = SCK_OpenUnixSocketPair(0, &sock_fd2);
+    if (sock_fd1 < 0)
+      LOG_FATAL("Could not open socket pair");
 
     for (i = 0; i < processes; i++)
       start_helper(i + 1, scfilter_level, sock_fd1, sock_fd2);
@@ -674,10 +716,31 @@ NKS_Finalise(void)
 
 /* ================================================== */
 
+void
+NKS_DumpKeys(void)
+{
+  save_keys();
+}
+
+/* ================================================== */
+
+void
+NKS_ReloadKeys(void)
+{
+  /* Don't load the keys if they are expected to be generated by this server
+     instance (i.e. they are already loaded) to not delay the next rotation */
+  if (key_rotation_interval > 0)
+    return;
+
+  load_keys();
+}
+
+/* ================================================== */
+
 /* A server cookie consists of key ID, nonce, and encrypted C2S+S2C keys */
 
 int
-NKS_GenerateCookie(NKE_Key *c2s, NKE_Key *s2c, NKE_Cookie *cookie)
+NKS_GenerateCookie(NKE_Context *context, NKE_Cookie *cookie)
 {
   unsigned char plaintext[2 * NKE_MAX_KEY_LENGTH], *ciphertext;
   int plaintext_length, tag_length;
@@ -689,8 +752,14 @@ NKS_GenerateCookie(NKE_Key *c2s, NKE_Key *s2c, NKE_Cookie *cookie)
     return 0;
   }
 
-  if (c2s->length < 0 || c2s->length > NKE_MAX_KEY_LENGTH ||
-      s2c->length < 0 || s2c->length > NKE_MAX_KEY_LENGTH) {
+  /* The algorithm is hardcoded for now */
+  if (context->algorithm != AEAD_AES_SIV_CMAC_256) {
+    DEBUG_LOG("Unexpected SIV algorithm");
+    return 0;
+  }
+
+  if (context->c2s.length < 0 || context->c2s.length > NKE_MAX_KEY_LENGTH ||
+      context->s2c.length < 0 || context->s2c.length > NKE_MAX_KEY_LENGTH) {
     DEBUG_LOG("Invalid key length");
     return 0;
   }
@@ -699,14 +768,13 @@ NKS_GenerateCookie(NKE_Key *c2s, NKE_Key *s2c, NKE_Cookie *cookie)
 
   header = (ServerCookieHeader *)cookie->cookie;
 
-  /* Keep the fields in the host byte order */
-  header->key_id = key->id;
+  header->key_id = htonl(key->id);
   UTI_GetRandomBytes(header->nonce, sizeof (header->nonce));
 
-  plaintext_length = c2s->length + s2c->length;
+  plaintext_length = context->c2s.length + context->s2c.length;
   assert(plaintext_length <= sizeof (plaintext));
-  memcpy(plaintext, c2s->key, c2s->length);
-  memcpy(plaintext + c2s->length, s2c->key, s2c->length);
+  memcpy(plaintext, context->c2s.key, context->c2s.length);
+  memcpy(plaintext + context->c2s.length, context->s2c.key, context->s2c.length);
 
   tag_length = SIV_GetTagLength(key->siv);
   cookie->length = sizeof (*header) + plaintext_length + tag_length;
@@ -727,12 +795,13 @@ NKS_GenerateCookie(NKE_Key *c2s, NKE_Key *s2c, NKE_Cookie *cookie)
 /* ================================================== */
 
 int
-NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Key *c2s, NKE_Key *s2c)
+NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Context *context)
 {
   unsigned char plaintext[2 * NKE_MAX_KEY_LENGTH], *ciphertext;
   int ciphertext_length, plaintext_length, tag_length;
   ServerCookieHeader *header;
   ServerKey *key;
+  uint32_t key_id;
 
   if (!initialised) {
     DEBUG_LOG("NTS server disabled");
@@ -748,9 +817,10 @@ NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Key *c2s, NKE_Key *s2c)
   ciphertext = cookie->cookie + sizeof (*header);
   ciphertext_length = cookie->length - sizeof (*header);
 
-  key = &server_keys[header->key_id % MAX_SERVER_KEYS];
-  if (header->key_id != key->id) {
-    DEBUG_LOG("Unknown key %"PRIX32, header->key_id);
+  key_id = ntohl(header->key_id);
+  key = &server_keys[key_id % MAX_SERVER_KEYS];
+  if (key_id != key->id) {
+    DEBUG_LOG("Unknown key %"PRIX32, key_id);
     return 0;
   }
 
@@ -774,12 +844,14 @@ NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Key *c2s, NKE_Key *s2c)
     return 0;
   }
 
-  c2s->length = plaintext_length / 2;
-  s2c->length = plaintext_length / 2;
-  assert(c2s->length <= sizeof (c2s->key));
+  context->algorithm = AEAD_AES_SIV_CMAC_256;
 
-  memcpy(c2s->key, plaintext, c2s->length);
-  memcpy(s2c->key, plaintext + c2s->length, s2c->length);
+  context->c2s.length = plaintext_length / 2;
+  context->s2c.length = plaintext_length / 2;
+  assert(context->c2s.length <= sizeof (context->c2s.key));
+
+  memcpy(context->c2s.key, plaintext, context->c2s.length);
+  memcpy(context->s2c.key, plaintext + context->c2s.length, context->s2c.length);
 
   return 1;
 }

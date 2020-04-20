@@ -361,7 +361,7 @@ get_leap_status(void)
 void
 SRC_SetLeapStatus(SRC_Instance inst, NTP_Leap leap)
 {
-  if (REF_IsLeapSecondClose())
+  if (REF_IsLeapSecondClose(NULL, 0.0))
     return;
 
   inst->leap = leap;
@@ -390,7 +390,7 @@ SRC_AccumulateSample(SRC_Instance inst, NTP_Sample *sample)
             source_to_string(inst), UTI_TimespecToString(&sample->time), -sample->offset,
             sample->root_delay, sample->root_dispersion, sample->stratum);
 
-  if (REF_IsLeapSecondClose()) {
+  if (REF_IsLeapSecondClose(&sample->time, sample->offset)) {
     LOG(LOGS_INFO, "Dropping sample around leap second");
     return;
   }
@@ -483,7 +483,7 @@ SRC_ResetReachability(SRC_Instance inst)
 /* ================================================== */
 
 static void
-log_selection_message(char *format, char *arg)
+log_selection_message(const char *format, const char *arg)
 {
   if (REF_GetMode() != REF_ModeNormal)
     return;
@@ -1197,7 +1197,6 @@ FILE *open_dumpfile(SRC_Instance inst, char mode)
 
   dumpdir = CNF_GetDumpDir();
   if (dumpdir[0] == '\0') {
-    LOG(LOGS_WARN, "dumpdir not specified");
     return NULL;
   }
 
