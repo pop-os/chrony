@@ -49,8 +49,7 @@ struct NKC_Instance_Record {
   int got_response;
   int resolving_name;
 
-  SIV_Algorithm siv_algorithm;
-  NKE_Key c2s, s2c;
+  NKE_Context context;
   NKE_Cookie cookies[NKE_MAX_COOKIES];
   int num_cookies;
   char server_name[NKE_MAX_RECORD_BODY_LENGTH + 1];
@@ -156,7 +155,7 @@ process_response(NKC_Instance inst)
           break;
         }
         aead_algorithm = AEAD_AES_SIV_CMAC_256;
-        inst->siv_algorithm = aead_algorithm;
+        inst->context.algorithm = aead_algorithm;
         break;
       case NKE_RECORD_ERROR:
         if (length == 2)
@@ -237,7 +236,8 @@ handle_message(void *arg)
     return 0;
   }
 
-  if (!NKSN_GetKeys(inst->session, inst->siv_algorithm, &inst->c2s, &inst->s2c))
+  if (!NKSN_GetKeys(inst->session, inst->context.algorithm,
+                    &inst->context.c2s, &inst->context.s2c))
     return 0;
 
   if (inst->server_name[0] != '\0') {
@@ -318,6 +318,7 @@ int
 NKC_Start(NKC_Instance inst)
 {
   IPSockAddr local_addr;
+  char label[512];
   int sock_fd;
 
   assert(!NKC_IsActive(inst));
@@ -338,8 +339,13 @@ NKC_Start(NKC_Instance inst)
   if (sock_fd < 0)
     return 0;
 
+  /* Make a label containing both the address and name of the server */
+  if (snprintf(label, sizeof (label), "%s (%s)",
+               UTI_IPSockAddrToString(&inst->address), inst->name) >= sizeof (label))
+    ;
+
   /* Start a NTS-KE session */
-  if (!NKSN_StartSession(inst->session, sock_fd, client_credentials, CLIENT_TIMEOUT)) {
+  if (!NKSN_StartSession(inst->session, sock_fd, label, client_credentials, CLIENT_TIMEOUT)) {
     SCK_CloseSocket(sock_fd);
     return 0;
   }
@@ -365,8 +371,7 @@ NKC_IsActive(NKC_Instance inst)
 /* ================================================== */
 
 int
-NKC_GetNtsData(NKC_Instance inst,
-               SIV_Algorithm *siv_algorithm, NKE_Key *c2s, NKE_Key *s2c,
+NKC_GetNtsData(NKC_Instance inst, NKE_Context *context,
                NKE_Cookie *cookies, int *num_cookies, int max_cookies,
                IPSockAddr *ntp_address)
 {
@@ -375,9 +380,7 @@ NKC_GetNtsData(NKC_Instance inst,
   if (!inst->got_response || inst->resolving_name)
     return 0;
 
-  *siv_algorithm = inst->siv_algorithm;
-  *c2s = inst->c2s;
-  *s2c = inst->s2c;
+  *context = inst->context;
 
   for (i = 0; i < inst->num_cookies && i < max_cookies; i++)
     cookies[i] = inst->cookies[i];
@@ -386,4 +389,12 @@ NKC_GetNtsData(NKC_Instance inst,
   *ntp_address = inst->ntp_address;
 
   return i;
+}
+
+/* ================================================== */
+
+int
+NKC_GetRetryFactor(NKC_Instance inst)
+{
+  return NKSN_GetRetryFactor(inst->session);
 }

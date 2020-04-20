@@ -44,6 +44,7 @@
 #include "reference.h"
 #include "manual.h"
 #include "memory.h"
+#include "nts_ke_server.h"
 #include "local.h"
 #include "addrfilt.h"
 #include "conf.h"
@@ -309,6 +310,8 @@ static void
 handle_dump(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   SRC_DumpSources();
+  NSR_DumpAuthData();
+  NKS_DumpKeys();
 }
 
 /* ================================================== */
@@ -617,6 +620,7 @@ static void
 handle_rekey(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   KEY_Reload();
+  NKS_ReloadKeys();
 }
 
 /* ================================================== */
@@ -1237,7 +1241,7 @@ handle_reset(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 read_from_cmd_socket(int sock_fd, int event, void *anything)
 {
-  SCK_Message sck_message;
+  SCK_Message *sck_message;
   CMD_Request rx_message;
   CMD_Reply tx_message;
   IPAddr loopback_addr, remote_ip;
@@ -1246,26 +1250,27 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
   unsigned short rx_command;
   struct timespec now, cooked_now;
 
-  if (!SCK_ReceiveMessage(sock_fd, &sck_message, 0))
+  sck_message = SCK_ReceiveMessage(sock_fd, 0);
+  if (!sck_message)
     return;
 
-  read_length = sck_message.length;
+  read_length = sck_message->length;
 
   /* Get current time cheaply */
   SCH_GetLastEventTime(&cooked_now, NULL, &now);
 
   /* Check if it's from localhost (127.0.0.1, ::1, or Unix domain),
      or an authorised address */
-  switch (sck_message.addr_type) {
+  switch (sck_message->addr_type) {
     case SCK_ADDR_IP:
       assert(sock_fd == sock_fd4 || sock_fd == sock_fd6);
-      remote_ip = sck_message.remote_addr.ip.ip_addr;
+      remote_ip = sck_message->remote_addr.ip.ip_addr;
       SCK_GetLoopbackIPAddress(remote_ip.family, &loopback_addr);
       localhost = UTI_CompareIPs(&remote_ip, &loopback_addr, NULL) == 0;
 
       if (!localhost && !ADF_IsAllowed(access_auth_table, &remote_ip)) {
         DEBUG_LOG("Unauthorised host %s",
-                  UTI_IPSockAddrToString(&sck_message.remote_addr.ip));
+                  UTI_IPSockAddrToString(&sck_message->remote_addr.ip));
         return;
       }
 
@@ -1291,7 +1296,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
     return;
   }
 
-  memcpy(&rx_message, sck_message.data, read_length);
+  memcpy(&rx_message, sck_message->data, read_length);
 
   if (rx_message.pkt_type != PKT_TYPE_CMD_REQUEST ||
       rx_message.res1 != 0 ||
@@ -1313,8 +1318,8 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
   rx_command = ntohs(rx_message.command);
 
   memset(&tx_message, 0, sizeof (tx_message));
-  sck_message.data = &tx_message;
-  sck_message.length = 0;
+  sck_message->data = &tx_message;
+  sck_message->length = 0;
 
   tx_message.version = PROTO_VERSION_NUMBER;
   tx_message.pkt_type = PKT_TYPE_CMD_REPLY;
@@ -1329,7 +1334,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
 
     if (rx_message.version >= PROTO_VERSION_MISMATCH_COMPAT_SERVER) {
       tx_message.status = htons(STT_BADPKTVERSION);
-      transmit_reply(sock_fd, &sck_message);
+      transmit_reply(sock_fd, sck_message);
     }
     return;
   }
@@ -1339,7 +1344,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
     DEBUG_LOG("Command packet has invalid command %d", rx_command);
 
     tx_message.status = htons(STT_INVALID);
-    transmit_reply(sock_fd, &sck_message);
+    transmit_reply(sock_fd, sck_message);
     return;
   }
 
@@ -1348,7 +1353,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
               expected_length);
 
     tx_message.status = htons(STT_BADPKTLENGTH);
-    transmit_reply(sock_fd, &sck_message);
+    transmit_reply(sock_fd, sck_message);
     return;
   }
 
@@ -1629,7 +1634,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
     static int do_it=1;
 
     if (do_it) {
-      transmit_reply(sock_fd, &sck_message);
+      transmit_reply(sock_fd, sck_message);
     }
 
 #if 0

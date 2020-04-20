@@ -45,15 +45,15 @@ extern void *NKSN_CreateCertCredentials(char *cert, char *key, char *trusted_cer
 extern void NKSN_DestroyCertCredentials(void *credentials);
 
 /* Create an instance */
-extern NKSN_Instance NKSN_CreateInstance(int server_mode, const char *name,
+extern NKSN_Instance NKSN_CreateInstance(int server_mode, const char *server_name,
                                          NKSN_MessageHandler handler, void *handler_arg);
 
 /* Destroy an instance */
 extern void NKSN_DestroyInstance(NKSN_Instance inst);
 
 /* Start a new NTS-KE session */
-extern int NKSN_StartSession(NKSN_Instance inst, int sock_fd, void *credentials,
-                             double timeout);
+extern int NKSN_StartSession(NKSN_Instance inst, int sock_fd, const char *label,
+                             void *credentials, double timeout);
 
 /* Begin an NTS-KE message.  A request should be made right after starting
    the session and response should be made in the message handler. */
@@ -79,5 +79,9 @@ extern int NKSN_IsStopped(NKSN_Instance inst);
 
 /* Stop the session */
 extern void NKSN_StopSession(NKSN_Instance inst);
+
+/* Get a factor to calculate retry interval (in log2 seconds)
+   based on the session state or how it was terminated */
+extern int NKSN_GetRetryFactor(NKSN_Instance inst);
 
 #endif

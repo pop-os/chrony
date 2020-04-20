@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2020-03-16
+.\"      Date: 2020-04-20
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2020-03-16" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2020-04-20" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -44,7 +44,8 @@ running under a non\-root user), it will try to connect to 127.0.0.1 and then
 .sp
 Only the following monitoring commands, which do not affect the behaviour of
 \fBchronyd\fP, are allowed from the network: \fBactivity\fP, \fBmanual list\fP,
-\fBrtcdata\fP, \fBsmoothing\fP, \fBsources\fP, \fBsourcestats\fP, \fBtracking\fP, \fBwaitsync\fP. The
+\fBrtcdata\fP, \fBsmoothing\fP, \fBsourcename\fP, \fBsources\fP, \fBsourcestats\fP, \fBtracking\fP,
+\fBwaitsync\fP. The
 set of hosts from which \fBchronyd\fP will accept these commands can be configured
 with the \fBcmdallow\fP directive in the \fBchronyd\fP\(cqs
 configuration file or the \fBcmdallow\fP command in \fBchronyc\fP. By
@@ -1833,15 +1834,20 @@ purged. An example of how to do this is shown below.
 The \fBdump\fP command causes \fBchronyd\fP to write its current history of
 measurements for each of its sources to dump files in the directory specified
 in the configuration file by the \fBdumpdir\fP
+directive and also write server NTS keys and client NTS cookies to the
+directory specified by the \fBntsdumpdir\fP
 directive. Note that \fBchronyd\fP does this automatically when it exits. This
-command is mainly useful for inspection of the history whilst \fBchronyd\fP is
-running.
+command is mainly useful for inspection whilst \fBchronyd\fP is running.
 .RE
 .sp
 \fBrekey\fP
 .RS 4
 The \fBrekey\fP command causes \fBchronyd\fP to re\-read the key file specified in the
-configuration file by the \fBkeyfile\fP directive.
+configuration file by the \fBkeyfile\fP directive. It
+also re\-reads the server NTS keys if
+\fBntsdumpdir\fP is specified and
+automatic rotation is disabled in the
+configuration file.
 .RE
 .sp
 \fBreset\fP

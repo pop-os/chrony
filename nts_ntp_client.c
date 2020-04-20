@@ -44,18 +44,22 @@
 #include "util.h"
 
 #define MAX_TOTAL_COOKIE_LENGTH (8 * 108)
-#define MIN_NKE_RETRY_INTERVAL 1000
+
+#define DUMP_IDENTIFIER "NNC0\n"
 
 struct NNC_Instance_Record {
   const IPSockAddr *ntp_address;
   IPSockAddr nts_address;
   char *name;
-  SIV_Instance siv_c2s;
-  SIV_Instance siv_s2c;
   NKC_Instance nke;
+  SIV_Instance siv;
 
-  double last_nke_attempt;
+  int load_attempt;
+  int nke_attempts;
+  double next_nke_attempt;
   double last_nke_success;
+
+  NKE_Context context;
   NKE_Cookie cookies[NTS_MAX_COOKIES];
   int num_cookies;
   int cookie_index;
@@ -67,11 +71,20 @@ struct NNC_Instance_Record {
 
 /* ================================================== */
 
+static void save_cookies(NNC_Instance inst);
+static void load_cookies(NNC_Instance inst);
+
+/* ================================================== */
+
 static void
 reset_instance(NNC_Instance inst)
 {
-  inst->last_nke_attempt = -MIN_NKE_RETRY_INTERVAL;
+  inst->load_attempt = 0;
+  inst->nke_attempts = 0;
+  inst->next_nke_attempt = 0.0;
   inst->last_nke_success = 0.0;
+
+  memset(&inst->context, 0, sizeof (inst->context));
   inst->num_cookies = 0;
   inst->cookie_index = 0;
   inst->nak_response = 0;
@@ -92,8 +105,7 @@ NNC_CreateInstance(IPSockAddr *nts_address, const char *name, const IPSockAddr *
   inst->ntp_address = ntp_address;
   inst->nts_address = *nts_address;
   inst->name = name ? Strdup(name) : NULL;
-  inst->siv_c2s = NULL;
-  inst->siv_s2c = NULL;
+  inst->siv = NULL;
   inst->nke = NULL;
 
   reset_instance(inst);
@@ -106,12 +118,12 @@ NNC_CreateInstance(IPSockAddr *nts_address, const char *name, const IPSockAddr *
 void
 NNC_DestroyInstance(NNC_Instance inst)
 {
+  save_cookies(inst);
+
   if (inst->nke)
     NKC_DestroyInstance(inst->nke);
-  if (inst->siv_c2s)
-    SIV_DestroyInstance(inst->siv_c2s);
-  if (inst->siv_s2c)
-    SIV_DestroyInstance(inst->siv_s2c);
+  if (inst->siv)
+    SIV_DestroyInstance(inst->siv);
 
   Free(inst->name);
   Free(inst);
@@ -120,7 +132,7 @@ NNC_DestroyInstance(NNC_Instance inst)
 /* ================================================== */
 
 static int
-is_nke_needed(NNC_Instance inst)
+check_cookies(NNC_Instance inst)
 {
   /* Force NKE if a NAK was received since last valid auth */
   if (inst->nak_response && !inst->ok_response && inst->num_cookies > 0) {
@@ -133,7 +145,7 @@ is_nke_needed(NNC_Instance inst)
       SCH_GetLastEventMonoTime() - inst->last_nke_success > CNF_GetNtsRefresh())
     inst->num_cookies = 0;
 
-  return inst->num_cookies == 0;
+  return inst->num_cookies > 0;
 }
 
 /* ================================================== */
@@ -167,22 +179,36 @@ set_ntp_address(NNC_Instance inst, NTP_Remote_Address *negotiated_address)
 
 /* ================================================== */
 
+static void
+update_next_nke_attempt(NNC_Instance inst, double now)
+{
+  int factor, interval;
+
+  if (!inst->nke)
+    return;
+
+  factor = NKC_GetRetryFactor(inst->nke);
+  interval = MIN(factor + inst->nke_attempts - 1, NKE_MAX_RETRY_INTERVAL2);
+  inst->next_nke_attempt = now + UTI_Log2ToDouble(interval);
+}
+
+/* ================================================== */
+
 static int
-get_nke_data(NNC_Instance inst)
+get_cookies(NNC_Instance inst)
 {
   NTP_Remote_Address ntp_address;
-  SIV_Algorithm siv;
-  NKE_Key c2s, s2c;
   double now;
   int got_data;
 
-  assert(is_nke_needed(inst));
+  assert(!check_cookies(inst));
 
   now = SCH_GetLastEventMonoTime();
 
   if (!inst->nke) {
-    if (now - inst->last_nke_attempt < MIN_NKE_RETRY_INTERVAL) {
-      DEBUG_LOG("Limiting NTS-KE request rate");
+    if (now < inst->next_nke_attempt) {
+      DEBUG_LOG("Limiting NTS-KE request rate (%f seconds)",
+                inst->next_nke_attempt - now);
       return 0;
     }
 
@@ -194,24 +220,31 @@ get_nke_data(NNC_Instance inst)
 
     inst->nke = NKC_CreateInstance(&inst->nts_address, inst->name);
 
+    inst->nke_attempts++;
+    update_next_nke_attempt(inst, now);
+
     if (!NKC_Start(inst->nke))
       return 0;
-
-    inst->last_nke_attempt = now;
   }
+
+  update_next_nke_attempt(inst, now);
 
   if (NKC_IsActive(inst->nke))
     return 0;
 
-  got_data = NKC_GetNtsData(inst->nke, &siv, &c2s, &s2c,
+  got_data = NKC_GetNtsData(inst->nke, &inst->context,
                             inst->cookies, &inst->num_cookies, NTS_MAX_COOKIES,
                             &ntp_address);
 
   NKC_DestroyInstance(inst->nke);
   inst->nke = NULL;
-  
+
   if (!got_data)
     return 0;
+
+  if (inst->siv)
+    SIV_DestroyInstance(inst->siv);
+  inst->siv = NULL;
 
   if (!set_ntp_address(inst, &ntp_address)) {
     inst->num_cookies = 0;
@@ -219,22 +252,6 @@ get_nke_data(NNC_Instance inst)
   }
 
   inst->cookie_index = 0;
-
-  if (inst->siv_c2s)
-    SIV_DestroyInstance(inst->siv_c2s);
-  if (inst->siv_s2c)
-    SIV_DestroyInstance(inst->siv_s2c);
-
-  inst->siv_c2s = SIV_CreateInstance(siv);
-  inst->siv_s2c = SIV_CreateInstance(siv);
-
-  if (!inst->siv_c2s || !inst->siv_s2c ||
-      !SIV_SetKey(inst->siv_c2s, c2s.key, c2s.length) ||
-      !SIV_SetKey(inst->siv_s2c, s2c.key, s2c.length)) {
-    DEBUG_LOG("Could not initialise SIV");
-    inst->num_cookies = 0;
-    return 0;
-  }
 
   inst->nak_response = 0;
 
@@ -248,9 +265,23 @@ get_nke_data(NNC_Instance inst)
 int
 NNC_PrepareForAuth(NNC_Instance inst)
 {
-  if (is_nke_needed(inst)) {
-    if (!get_nke_data(inst))
+  if (!inst->load_attempt) {
+    load_cookies(inst);
+    inst->load_attempt = 1;
+  }
+
+  if (!check_cookies(inst)) {
+    if (!get_cookies(inst))
       return 0;
+  }
+
+  if (!inst->siv)
+    inst->siv = SIV_CreateInstance(inst->context.algorithm);
+
+  if (!inst->siv ||
+      !SIV_SetKey(inst->siv, inst->context.c2s.key, inst->context.c2s.length)) {
+    DEBUG_LOG("Could not set SIV key");
+    return 0;
   }
 
   UTI_GetRandomBytes(&inst->uniq_id, sizeof (inst->uniq_id));
@@ -267,8 +298,9 @@ NNC_GenerateRequestAuth(NNC_Instance inst, NTP_Packet *packet,
 {
   NKE_Cookie *cookie;
   int i, req_cookies;
+  void *ef_body;
 
-  if (inst->num_cookies == 0 || !inst->siv_c2s)
+  if (inst->num_cookies == 0 || !inst->siv)
     return 0;
 
   if (info->mode != MODE_CLIENT)
@@ -287,12 +319,13 @@ NNC_GenerateRequestAuth(NNC_Instance inst, NTP_Packet *packet,
     return 0;
 
   for (i = 0; i < req_cookies - 1; i++) {
-    if (!NEF_AddField(packet, info, NTP_EF_NTS_COOKIE_PLACEHOLDER,
-                      cookie->cookie, cookie->length))
+    if (!NEF_AddBlankField(packet, info, NTP_EF_NTS_COOKIE_PLACEHOLDER,
+                           cookie->length, &ef_body))
       return 0;
+    memset(ef_body, 0, cookie->length);
   }
 
-  if (!NNA_GenerateAuthEF(packet, info, inst->siv_c2s, inst->nonce, sizeof (inst->nonce),
+  if (!NNA_GenerateAuthEF(packet, info, inst->siv, inst->nonce, sizeof (inst->nonce),
                           (const unsigned char *)"", 0, NTP_MAX_V4_MAC_LENGTH + 4))
     return 0;
 
@@ -362,8 +395,11 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
   if (inst->ok_response)
     return 0;
 
-  if (!inst->siv_s2c)
+  if (!inst->siv ||
+      !SIV_SetKey(inst->siv, inst->context.s2c.key, inst->context.s2c.length)) {
+    DEBUG_LOG("Could not set SIV key");
     return 0;
+  }
 
   for (parsed = NTP_HEADER_LENGTH; parsed < info->length; parsed += ef_length) {
     if (!NEF_ParseField(packet, info->length, parsed,
@@ -388,7 +424,7 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
           return 0;
         }
 
-        if (!NNA_DecryptAuthEF(packet, info, inst->siv_s2c, parsed,
+        if (!NNA_DecryptAuthEF(packet, info, inst->siv, parsed,
                                plaintext, sizeof (plaintext), &plaintext_length))
           return 0;
 
@@ -418,7 +454,8 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
 
   /* At this point we know the client interoperates with the server.  Allow a
      new NTS-KE session to be started as soon as the cookies run out. */
-  inst->last_nke_attempt = -MIN_NKE_RETRY_INTERVAL;
+  inst->nke_attempts = 0;
+  inst->next_nke_attempt = 0.0;
 
   return 1;
 }
@@ -428,6 +465,8 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
 void
 NNC_ChangeAddress(NNC_Instance inst, IPAddr *address)
 {
+  save_cookies(inst);
+
   if (inst->nke)
     NKC_DestroyInstance(inst->nke);
 
@@ -438,4 +477,153 @@ NNC_ChangeAddress(NNC_Instance inst, IPAddr *address)
   reset_instance(inst);
 
   DEBUG_LOG("NTS reset");
+}
+
+/* ================================================== */
+
+static void
+save_cookies(NNC_Instance inst)
+{
+  char buf[2 * NKE_MAX_COOKIE_LENGTH + 2], *dump_dir, *filename;
+  struct timespec now;
+  double context_time;
+  FILE *f;
+  int i;
+
+  if (inst->num_cookies < 1 || !UTI_IsIPReal(&inst->nts_address.ip_addr))
+    return;
+
+  dump_dir = CNF_GetNtsDumpDir();
+  if (!dump_dir)
+    return;
+
+  filename = UTI_IPToString(&inst->nts_address.ip_addr);
+
+  f = UTI_OpenFile(dump_dir, filename, ".tmp", 'w', 0600);
+  if (!f)
+    return;
+
+  SCH_GetLastEventTime(&now, NULL, NULL);
+  context_time = inst->last_nke_success - SCH_GetLastEventMonoTime();
+  context_time += UTI_TimespecToDouble(&now);
+
+  if (fprintf(f, "%s%.1f\n%s %d\n%d ",
+              DUMP_IDENTIFIER, context_time, UTI_IPToString(&inst->ntp_address->ip_addr),
+              inst->ntp_address->port, (int)inst->context.algorithm) < 0 ||
+      !UTI_BytesToHex(inst->context.s2c.key, inst->context.s2c.length, buf, sizeof (buf)) ||
+      fprintf(f, "%s ", buf) < 0 ||
+      !UTI_BytesToHex(inst->context.c2s.key, inst->context.c2s.length, buf, sizeof (buf)) ||
+      fprintf(f, "%s\n", buf) < 0)
+    goto error;
+
+  for (i = 0; i < inst->num_cookies; i++) {
+    if (!UTI_BytesToHex(inst->cookies[i].cookie, inst->cookies[i].length, buf, sizeof (buf)) ||
+        fprintf(f, "%s\n", buf) < 0)
+      goto error;
+  }
+
+  fclose(f);
+
+  if (!UTI_RenameTempFile(dump_dir, filename, ".tmp", ".nts"))
+    ;
+  return;
+
+error:
+  DEBUG_LOG("Could not %s cookies for %s", "save", filename);
+  fclose(f);
+
+  if (!UTI_RemoveFile(dump_dir, filename, ".nts"))
+    ;
+}
+
+/* ================================================== */
+
+#define MAX_WORDS 3
+
+static void
+load_cookies(NNC_Instance inst)
+{
+  char line[2 * NKE_MAX_COOKIE_LENGTH + 2], *dump_dir, *filename, *words[MAX_WORDS];
+  int i, algorithm, port;
+  double context_time;
+  struct timespec now;
+  IPSockAddr ntp_addr;
+  FILE *f;
+
+  dump_dir = CNF_GetNtsDumpDir();
+  if (!dump_dir)
+    return;
+
+  filename = UTI_IPToString(&inst->nts_address.ip_addr);
+
+  f = UTI_OpenFile(dump_dir, filename, ".nts", 'r', 0);
+  if (!f)
+    return;
+
+  /* Don't load this file again */
+  if (!UTI_RemoveFile(dump_dir, filename, ".nts"))
+    ;
+
+  if (inst->siv)
+    SIV_DestroyInstance(inst->siv);
+  inst->siv = NULL;
+
+  if (!fgets(line, sizeof (line), f) || strcmp(line, DUMP_IDENTIFIER) != 0 ||
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 1 ||
+        sscanf(words[0], "%lf", &context_time) != 1 ||
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 2 ||
+        !UTI_StringToIP(words[0], &ntp_addr.ip_addr) || sscanf(words[1], "%d", &port) != 1 ||
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 3 ||
+        sscanf(words[0], "%d", &algorithm) != 1)
+    goto error;
+
+  inst->context.algorithm = algorithm;
+  inst->context.s2c.length = UTI_HexToBytes(words[1], inst->context.s2c.key,
+                                            sizeof (inst->context.s2c.key));
+  inst->context.c2s.length = UTI_HexToBytes(words[2], inst->context.c2s.key,
+                                            sizeof (inst->context.c2s.key));
+
+  if (inst->context.s2c.length != SIV_GetKeyLength(algorithm) ||
+      inst->context.c2s.length != inst->context.s2c.length)
+    goto error;
+
+  for (i = 0; i < NTS_MAX_COOKIES && fgets(line, sizeof (line), f); i++) {
+    if (UTI_SplitString(line, words, MAX_WORDS) != 1)
+      goto error;
+
+    inst->cookies[i].length = UTI_HexToBytes(words[0], inst->cookies[i].cookie,
+                                             sizeof (inst->cookies[i].cookie));
+    if (inst->cookies[i].length == 0)
+      goto error;
+  }
+
+  inst->num_cookies = i;
+
+  ntp_addr.port = port;
+  if (!set_ntp_address(inst, &ntp_addr))
+    goto error;
+
+  SCH_GetLastEventTime(&now, NULL, NULL);
+  context_time -= UTI_TimespecToDouble(&now);
+  if (context_time > 0)
+    context_time = 0;
+  inst->last_nke_success = context_time + SCH_GetLastEventMonoTime();
+
+  DEBUG_LOG("Loaded %d cookies for %s", i, filename);
+  return;
+
+error:
+  DEBUG_LOG("Could not %s cookies for %s", "load", filename);
+  fclose(f);
+
+  memset(&inst->context, 0, sizeof (inst->context));
+  inst->num_cookies = 0;
+}
+
+/* ================================================== */
+
+void
+NNC_DumpData(NNC_Instance inst)
+{
+  save_cookies(inst);
 }

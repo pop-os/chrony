@@ -33,10 +33,16 @@
 extern void NKS_Initialise(int scfilter_level);
 extern void NKS_Finalise(void);
 
-/* Generate a new NTS cookie containing the C2S and S2C keys */
-extern int NKS_GenerateCookie(NKE_Key *c2s, NKE_Key *s2c, NKE_Cookie *cookie);
+/* Save the current server keys */
+extern void NKS_DumpKeys(void);
 
-/* Validate a cookie and extract the C2S and S2C keys */
-extern int NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Key *c2s, NKE_Key *s2c);
+/* Reload the keys */
+extern void NKS_ReloadKeys(void);
+
+/* Generate an NTS cookie with a given context */
+extern int NKS_GenerateCookie(NKE_Context *context, NKE_Cookie *cookie);
+
+/* Validate a cookie and decode the context */
+extern int NKS_DecodeCookie(NKE_Cookie *cookie, NKE_Context *context);
 
 #endif

@@ -223,8 +223,9 @@ static char *leapsec_tz = NULL;
 /* Name of the user to which will be dropped root privileges. */
 static char *user;
 
-/* NTS cache dir, certificates, private key, and port */
-static char *nts_cachedir = NULL;
+/* NTS server and client configuration */
+static char *nts_dump_dir = NULL;
+static char *nts_ntp_server = NULL;
 static char *nts_server_cert_file = NULL;
 static char *nts_server_key_file = NULL;
 static int nts_server_port = 11443;
@@ -233,6 +234,9 @@ static int nts_server_connections = 100;
 static int nts_refresh = 2419200; /* 4 weeks */
 static int nts_rotate = 604800; /* 1 week */
 static char *nts_trusted_cert_file = NULL;
+
+/* Number of clock updates needed to enable certificate time checks */
+static int no_cert_time_check = 0;
 
 /* Flag disabling use of system trusted certificates */
 static int no_system_cert = 0;
@@ -404,7 +408,8 @@ CNF_Finalise(void)
   Free(mail_user_on_change);
   Free(tempcomp_sensor_file);
   Free(tempcomp_point_file);
-  Free(nts_cachedir);
+  Free(nts_dump_dir);
+  Free(nts_ntp_server);
   Free(nts_server_cert_file);
   Free(nts_server_key_file);
   Free(nts_trusted_cert_file);
@@ -543,6 +548,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_int(p, &min_samples);
   } else if (!strcasecmp(command, "minsources")) {
     parse_int(p, &min_sources);
+  } else if (!strcasecmp(command, "nocerttimecheck")) {
+    parse_int(p, &no_cert_time_check);
   } else if (!strcasecmp(command, "noclientlog")) {
     no_client_log = parse_null(p);
   } else if (!strcasecmp(command, "nosystemcert")) {
@@ -551,8 +558,11 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_string(p, &ntp_signd_socket);
   } else if (!strcasecmp(command, "ntstrustedcerts")) {
     parse_string(p, &nts_trusted_cert_file);
-  } else if (!strcasecmp(command, "ntscachedir")) {
-    parse_string(p, &nts_cachedir);
+  } else if (!strcasecmp(command, "ntscachedir") ||
+             !strcasecmp(command, "ntsdumpdir")) {
+    parse_string(p, &nts_dump_dir);
+  } else if (!strcasecmp(command, "ntsntpserver")) {
+    parse_string(p, &nts_ntp_server);
   } else if (!strcasecmp(command, "ntsport")) {
     parse_int(p, &nts_server_port);
   } else if (!strcasecmp(command, "ntsprocesses")) {
@@ -2069,9 +2079,17 @@ CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface)
 /* ================================================== */
 
 char *
-CNF_GetNtsCacheDir(void)
+CNF_GetNtsDumpDir(void)
 {
-  return nts_cachedir;
+  return nts_dump_dir;
+}
+
+/* ================================================== */
+
+char *
+CNF_GetNtsNtpServer(void)
+{
+  return nts_ntp_server;
 }
 
 /* ================================================== */
@@ -2144,4 +2162,12 @@ int
 CNF_GetNoSystemCert(void)
 {
   return no_system_cert;
+}
+
+/* ================================================== */
+
+int
+CNF_GetNoCertTimeCheck(void)
+{
+  return no_cert_time_check;
 }
