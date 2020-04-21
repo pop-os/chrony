@@ -19,7 +19,7 @@
   /usr/sbin/chronyd mr,
 
   /etc/chrony/{,**} r,
-  /{,var/}run/chronyd.pid w,
+  /{,var/}run/chrony/chronyd.pid w,
   /{,var/}run/chrony/{,*} rw,
   /var/lib/chrony/{,*} r,
   /var/lib/chrony/* w,
