@@ -22,7 +22,7 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin
 DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
-PIDFILE=/run/chronyd.pid
+PIDFILE=/run/chrony/chronyd.pid
 CHRONY_HELPER=/usr/lib/chrony/chrony-helper
 
 [ -x "$DAEMON" ] || exit 0
