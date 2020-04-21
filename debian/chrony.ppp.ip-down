@@ -6,7 +6,7 @@
 # were in the public domain.  I waive all rights.
 # Modified by Vincent Blut <vincent.debian@free.fr>
 
-if [ -e /run/chronyd.pid ]; then
+if [ -e /run/chrony/chronyd.pid ]; then
     chronyc onoffline > /dev/null 2>&1
 fi
 
