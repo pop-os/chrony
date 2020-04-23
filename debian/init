@@ -23,7 +23,7 @@ DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
 PIDFILE=/run/chrony/chronyd.pid
-CHRONY_HELPER=/usr/lib/chrony/chrony-helper
+CHRONY_HELPER=/usr/libexec/chrony/chrony-helper
 
 [ -x "$DAEMON" ] || exit 0
 
