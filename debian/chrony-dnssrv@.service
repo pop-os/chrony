@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/chrony/chrony-helper update-dnssrv-servers %I
+ExecStart=/usr/libexec/chrony/chrony-helper update-dnssrv-servers %I
 ProtectSystem=strict
 PrivateDevices=yes
 ProtectHome=yes
