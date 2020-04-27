@@ -40,7 +40,7 @@ override_dh_installinit:
 	dh_installinit
 # Disable the system call filter on architectures mentioned below
 # due to missing support in libseccomp and/or in the Linux kernel.
-ifneq (,$(filter $(DEB_HOST_ARCH), alpha ia64 m68k riscv64 sh4 sparc64))
+ifneq (,$(filter $(DEB_HOST_ARCH), alpha ia64 m68k sh4 sparc64))
 	sed -i '/DAEMON_OPTS=/s/"-F -1"/""/' $(BASE)/etc/default/chrony
 endif
 
