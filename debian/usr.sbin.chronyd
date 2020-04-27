@@ -15,6 +15,9 @@
   capability chown,
   # Needed to support HW timestamping
   capability net_admin,
+  # Give “root” the ability to read and write the PID file
+  capability dac_override,
+  capability dac_read_search,
 
   /usr/sbin/chronyd mr,
 
