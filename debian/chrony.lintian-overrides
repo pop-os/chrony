@@ -5,3 +5,6 @@ chrony: non-standard-file-perm usr/share/chrony/chrony.keys 0640 != 0644
 # False positive. chrony-dnssrv@.service isn’t a daemon but a oneshot service,
 # not started at boot, whose role is to lookup for _ntp._udp DNS SRV records.
 chrony: package-supports-alternative-init-but-no-init.d-script lib/systemd/system/chrony-dnssrv@.service
+
+# NetworkManager does not execute dispatcher scripts in /usr/libexec.
+chrony: executable-in-usr-lib usr/lib/NetworkManager/dispatcher.d/20-chrony
