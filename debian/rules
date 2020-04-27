@@ -48,6 +48,3 @@ override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	dh_auto_test
 endif
-
-override_dh_missing:
-	dh_missing --fail-missing
