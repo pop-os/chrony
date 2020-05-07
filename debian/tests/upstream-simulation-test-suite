@@ -22,9 +22,9 @@ prepare_clknetsim() {
     # This symbolic link is necessary to prevent clknetsim from FTBFS.
     ln -s /usr/include/"$DEB_HOST_MULTIARCH"/sys/time.h /usr/include/sys/
 
-    wget -P "$CLKNETSIM_PATH" "$clknetsim_src" 2>&1
+    wget -P "$CLKNETSIM_PATH" "$clknetsim_src" 2>&1 || exit 77
     tar -xvzf "$CLKNETSIM_PATH"/"$clknetsim_archive" \
-        -C "$CLKNETSIM_PATH" --strip-components=1 2>&1
+        -C "$CLKNETSIM_PATH" --strip-components=1 2>&1 || exit 77
 
     if [ ! -x "$CLKNETSIM_PATH/clknetsim" ] && [ ! -e "$CLKNETSIM_PATH/clknetsim.so" ]; then
         make -C "$CLKNETSIM_PATH" 2>&1
