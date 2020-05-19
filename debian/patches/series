@@ -7,3 +7,4 @@ rtc-handle-RTCs-that-do-not-support-interrupts.patch
 rtc-disable-interrupts-in-finalization.patch
 rtc-extend-check-for-RTCs-that-do-not-support-interrupts.patch
 test-accept-test-result-if-RTC-can-not-enable-RTC_UIE_ON.patch
+allow-some-*time64-syscalls-in-seccomp-filter.patch
