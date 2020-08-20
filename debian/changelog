@@ -1,3 +1,18 @@
+chrony (3.5.1-1) unstable; urgency=medium
+
+  * Import upstream version 3.5.1:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+    - CVE-2020-14367: create new file when writing pidfile.
+
+  * debian/chrony.lintian-overrides:
+    - Remove unused override.
+
+  [ Ville Skyttä ]
+  * debian/chrony.conf:
+    - Comment spelling fix. (MR: !5)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 20 Aug 2020 14:07:22 +0200
+
 chrony (3.5-9) unstable; urgency=medium
 
   * debian/patches/:
