@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2019-05-10
+.\"      Date: 2020-08-19
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2019-05-10" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2020-08-19" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
