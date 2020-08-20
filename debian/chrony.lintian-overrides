@@ -1,7 +1,3 @@
 # The “chrony.keys” file must not be world readable as it could contain
 # symmetric keys used for NTP authentication.
 chrony: non-standard-file-perm usr/share/chrony/chrony.keys 0640 != 0644
-
-# False positive. chrony-dnssrv@.service isn’t a daemon but a oneshot service,
-# not started at boot, whose role is to lookup for _ntp._udp DNS SRV records.
-chrony: package-supports-alternative-init-but-no-init.d-script lib/systemd/system/chrony-dnssrv@.service
