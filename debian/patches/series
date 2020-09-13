@@ -1,0 +1,2 @@
+allow-lstat-and-readlink-in-seccomp-filter.patch
+allow-readlinkat-in-seccomp-filter.patch
