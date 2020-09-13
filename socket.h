@@ -49,7 +49,7 @@ typedef enum {
 
 typedef struct {
   void *data;
-  unsigned int length;
+  int length;
   SCK_AddressType addr_type;
   int if_index;
 
@@ -73,27 +73,33 @@ typedef struct {
   int descriptor;
 } SCK_Message;
 
-/* Initialisation function */
-extern void SCK_Initialise(void);
+/* Initialisation function (the specified IP family is enabled,
+   or all if IPADDR_UNSPEC) */
+extern void SCK_Initialise(int family);
 
 /* Finalisation function */
 extern void SCK_Finalise(void);
 
-/* Check if support for the IP family was enabled in the build */
-extern int SCK_IsFamilySupported(int family);
+/* Check if support for the IP family is enabled */
+extern int SCK_IsIpFamilyEnabled(int family);
 
 /* Get the 0.0.0.0/::0 or 127.0.0.1/::1 address */
 extern void SCK_GetAnyLocalIPAddress(int family, IPAddr *local_addr);
 extern void SCK_GetLoopbackIPAddress(int family, IPAddr *local_addr);
+
+/* Check if an IP address is a link-local address */
+extern int SCK_IsLinkLocalIPAddress(IPAddr *addr);
 
 /* Specify a bind()-like function for binding sockets to privileged ports when
    running in a restricted process (e.g. after dropping root privileges) */
 extern void SCK_SetPrivBind(int (*function)(int sock_fd, struct sockaddr *address,
                                             socklen_t address_len));
 
-/* Open socket */
-extern int SCK_OpenUdpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int flags);
-extern int SCK_OpenTcpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int flags);
+/* Open a socket (addresses and iface may be NULL) */
+extern int SCK_OpenUdpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr,
+                             const char *iface, int flags);
+extern int SCK_OpenTcpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr,
+                             const char *iface, int flags);
 extern int SCK_OpenUnixDatagramSocket(const char *remote_addr, const char *local_addr,
                                       int flags);
 extern int SCK_OpenUnixStreamSocket(const char *remote_addr, const char *local_addr,
@@ -113,8 +119,8 @@ extern int SCK_AcceptConnection(int sock_fd, IPSockAddr *remote_addr);
 extern int SCK_ShutdownConnection(int sock_fd);
 
 /* Receive and send data on connected sockets - recv()/send() wrappers */
-extern int SCK_Receive(int sock_fd, void *buffer, unsigned int length, int flags);
-extern int SCK_Send(int sock_fd, const void *buffer, unsigned int length, int flags);
+extern int SCK_Receive(int sock_fd, void *buffer, int length, int flags);
+extern int SCK_Send(int sock_fd, const void *buffer, int length, int flags);
 
 /* Receive a single message or multiple messages.  The functions return
    a pointer to static buffers, or NULL on error.  The buffers are valid until

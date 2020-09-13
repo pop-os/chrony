@@ -83,19 +83,20 @@ static void read_from_socket(int sock_fd, int event, void *anything);
 static int
 open_socket(int family, int local_port, int client_only, IPSockAddr *remote_addr)
 {
-  int sock_fd, sock_flags, events = SCH_FILE_INPUT;
+  int sock_fd, sock_flags, dscp, events = SCH_FILE_INPUT;
   IPSockAddr local_addr;
+  char *iface;
 
-  if (!SCK_IsFamilySupported(family))
+  if (!SCK_IsIpFamilyEnabled(family))
     return INVALID_SOCK_FD;
 
-  if (!client_only)
+  if (!client_only) {
     CNF_GetBindAddress(family, &local_addr.ip_addr);
-  else
+    iface = CNF_GetBindNtpInterface();
+  } else {
     CNF_GetBindAcquisitionAddress(family, &local_addr.ip_addr);
-
-  if (local_addr.ip_addr.family != family)
-    SCK_GetAnyLocalIPAddress(family, &local_addr.ip_addr);
+    iface = CNF_GetBindAcquisitionInterface();
+  }
 
   local_addr.port = local_port;
 
@@ -103,11 +104,19 @@ open_socket(int family, int local_port, int client_only, IPSockAddr *remote_addr
   if (!client_only)
     sock_flags |= SCK_FLAG_BROADCAST;
 
-  sock_fd = SCK_OpenUdpSocket(remote_addr, &local_addr, sock_flags);
+  sock_fd = SCK_OpenUdpSocket(remote_addr, &local_addr, iface, sock_flags);
   if (sock_fd < 0) {
     if (!client_only)
       LOG(LOGS_ERR, "Could not open NTP socket on %s", UTI_IPSockAddrToString(&local_addr));
     return INVALID_SOCK_FD;
+  }
+
+  dscp = CNF_GetNtpDscp();
+  if (dscp > 0 && dscp < 64) {
+#ifdef IP_TOS
+    if (!SCK_SetIntOption(sock_fd, IPPROTO_IP, IP_TOS, dscp << 2))
+      ;
+#endif
   }
 
   if (!client_only && family == IPADDR_INET4 && local_addr.port > 0)
@@ -152,7 +161,7 @@ close_socket(int sock_fd)
 /* ================================================== */
 
 void
-NIO_Initialise(int family)
+NIO_Initialise(void)
 {
   int server_port, client_port;
 
@@ -191,25 +200,18 @@ NIO_Initialise(int family)
   server_sock_ref4 = 0;
   server_sock_ref6 = 0;
 
-  if (family == IPADDR_UNSPEC || family == IPADDR_INET4) {
-    if (permanent_server_sockets && server_port)
-      server_sock_fd4 = open_socket(IPADDR_INET4, server_port, 0, NULL);
-    if (!separate_client_sockets) {
-      if (client_port != server_port || !server_port)
-        client_sock_fd4 = open_socket(IPADDR_INET4, client_port, 1, NULL);
-      else
-        client_sock_fd4 = server_sock_fd4;
-    }
+  if (permanent_server_sockets && server_port) {
+    server_sock_fd4 = open_socket(IPADDR_INET4, server_port, 0, NULL);
+    server_sock_fd6 = open_socket(IPADDR_INET6, server_port, 0, NULL);
   }
 
-  if (family == IPADDR_UNSPEC || family == IPADDR_INET6) {
-    if (permanent_server_sockets && server_port)
-      server_sock_fd6 = open_socket(IPADDR_INET6, server_port, 0, NULL);
-    if (!separate_client_sockets) {
-      if (client_port != server_port || !server_port)
-        client_sock_fd6 = open_socket(IPADDR_INET6, client_port, 1, NULL);
-      else
-        client_sock_fd6 = server_sock_fd6;
+  if (!separate_client_sockets) {
+    if (client_port != server_port || !server_port) {
+      client_sock_fd4 = open_socket(IPADDR_INET4, client_port, 1, NULL);
+      client_sock_fd6 = open_socket(IPADDR_INET6, client_port, 1, NULL);
+    } else {
+      client_sock_fd4 = server_sock_fd4;
+      client_sock_fd6 = server_sock_fd6;
     }
   }
 
@@ -455,8 +457,12 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
     message.remote_addr.ip.port = remote_addr->port;
   }
 
-  message.if_index = local_addr->if_index;
   message.local_addr.ip = local_addr->ip_addr;
+
+  /* Don't require responses to non-link-local addresses to use the same
+     interface */
+  message.if_index = SCK_IsLinkLocalIPAddress(&message.remote_addr.ip.ip_addr) ?
+                       local_addr->if_index : INVALID_IF_INDEX;
 
 #if !defined(HAVE_IN_PKTINFO) && defined(IP_SENDSRCADDR)
   /* On FreeBSD a local IPv4 address cannot be specified on bound socket */

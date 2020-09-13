@@ -35,7 +35,7 @@ prepare_response(NKSN_Instance session, int valid)
   if (valid)
     index = -1;
   else
-    index = random() % 9;
+    index = random() % 10;
   DEBUG_LOG("index=%d", index);
 
   NKSN_BeginMessage(session);
@@ -89,8 +89,12 @@ prepare_response(NKSN_Instance session, int valid)
   }
 
   if (index != 8) {
-    for (i = 0; i < NKE_MAX_COOKIES; i++)
+    for (i = 0; i < NKE_MAX_COOKIES; i++) {
+      length = (random() % sizeof (data) + 1) / 4 * 4;
+      if (index == 9)
+        length += (length < sizeof (data) ? 1 : -1) * (random() % 3 + 1);
       TEST_CHECK(NKSN_AddRecord(session, 0, NKE_RECORD_COOKIE, data, length));
+    }
   }
 
   TEST_CHECK(NKSN_EndMessage(session));
@@ -112,7 +116,6 @@ test_unit(void)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
   LCL_Initialise();
-  NKC_Initialise();
 
   SCK_GetLoopbackIPAddress(AF_INET, &addr.ip_addr);
   addr.port = 0;
@@ -129,7 +132,6 @@ test_unit(void)
 
   NKC_DestroyInstance(inst);
 
-  NKC_Finalise();
   LCL_Finalise();
   CNF_Finalise();
 }

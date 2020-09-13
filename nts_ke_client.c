@@ -58,7 +58,8 @@ struct NKC_Instance_Record {
 
 /* ================================================== */
 
-static void *client_credentials;
+static void *client_credentials = NULL;
+static int client_credentials_refs = 0;
 
 /* ================================================== */
 
@@ -71,7 +72,7 @@ name_resolve_handler(DNS_Status status, int n_addrs, IPAddr *ip_addrs, void *arg
   inst->resolving_name = 0;
 
   if (inst->destroying) {
-    NKC_DestroyInstance(inst);
+    Free(inst);
     return;
   }
 
@@ -84,7 +85,7 @@ name_resolve_handler(DNS_Status status, int n_addrs, IPAddr *ip_addrs, void *arg
 
   inst->ntp_address.ip_addr = ip_addrs[0];
 
-  /* Prefer an address of the same family as NTS-KE */
+  /* Prefer an address in the same family as the NTS-KE server */
   for (i = 0; i < n_addrs; i++) {
     DEBUG_LOG("%s resolved to %s", inst->server_name, UTI_IPToString(&ip_addrs[i]));
     if (ip_addrs[i].family == inst->address.ip_addr.family) {
@@ -168,13 +169,21 @@ process_response(NKC_Instance inst)
         error = 1;
         break;
       case NKE_RECORD_COOKIE:
-        DEBUG_LOG("Got cookie #%d length=%d", inst->num_cookies + 1, length);
-        assert(NKE_MAX_COOKIE_LENGTH == sizeof (inst->cookies[inst->num_cookies].cookie));
-        if (length <= NKE_MAX_COOKIE_LENGTH && inst->num_cookies < NKE_MAX_COOKIES) {
-          inst->cookies[inst->num_cookies].length = length;
-          memcpy(inst->cookies[inst->num_cookies].cookie, data, length);
-          inst->num_cookies++;
+        DEBUG_LOG("Got cookie length=%d", length);
+
+        if (length < 1 || length > NKE_MAX_COOKIE_LENGTH || length % 4 != 0 ||
+            inst->num_cookies >= NKE_MAX_COOKIES) {
+          DEBUG_LOG("Unexpected length/cookie");
+          break;
         }
+
+        assert(NKE_MAX_COOKIE_LENGTH == sizeof (inst->cookies[inst->num_cookies].cookie));
+        assert(NKE_MAX_COOKIES == sizeof (inst->cookies) /
+                                  sizeof (inst->cookies[inst->num_cookies]));
+        inst->cookies[inst->num_cookies].length = length;
+        memcpy(inst->cookies[inst->num_cookies].cookie, data, length);
+
+        inst->num_cookies++;
         break;
       case NKE_RECORD_NTPV4_SERVER_NEGOTIATION:
         if (length < 1 || length >= sizeof (inst->server_name)) {
@@ -256,23 +265,6 @@ handle_message(void *arg)
 
 /* ================================================== */
 
-void
-NKC_Initialise(void)
-{
-  client_credentials = NULL;
-}
-
-/* ================================================== */
-
-void
-NKC_Finalise(void)
-{
-  if (client_credentials)
-    NKSN_DestroyCertCredentials(client_credentials);
-}
-
-/* ================================================== */
-
 NKC_Instance
 NKC_CreateInstance(IPSockAddr *address, const char *name)
 {
@@ -287,10 +279,10 @@ NKC_CreateInstance(IPSockAddr *address, const char *name)
   inst->destroying = 0;
   inst->got_response = 0;
 
-  /* Create the credentials with the first client instance and share them
-     with other instances */
+  /* Share the credentials with other client instances */
   if (!client_credentials)
     client_credentials = NKSN_CreateCertCredentials(NULL, NULL, CNF_GetNtsTrustedCertFile());
+  client_credentials_refs++;
 
   return inst;
 }
@@ -300,15 +292,23 @@ NKC_CreateInstance(IPSockAddr *address, const char *name)
 void
 NKC_DestroyInstance(NKC_Instance inst)
 {
-  /* If the resolver is running, destroy the instance later when finished */
+  NKSN_DestroyInstance(inst->session);
+
+  Free(inst->name);
+
+  client_credentials_refs--;
+  if (client_credentials_refs <= 0 && client_credentials) {
+    NKSN_DestroyCertCredentials(client_credentials);
+    client_credentials = NULL;
+  }
+
+  /* If the asynchronous resolver is running, let the handler free
+     the instance later */
   if (inst->resolving_name) {
     inst->destroying = 1;
     return;
   }
 
-  NKSN_DestroyInstance(inst->session);
-
-  Free(inst->name);
   Free(inst);
 }
 
@@ -318,24 +318,24 @@ int
 NKC_Start(NKC_Instance inst)
 {
   IPSockAddr local_addr;
-  char label[512];
+  char label[512], *iface;
   int sock_fd;
 
   assert(!NKC_IsActive(inst));
+
+  inst->got_response = 0;
 
   if (!client_credentials) {
     DEBUG_LOG("Missing client credentials");
     return 0;
   }
 
-  /* Follow the bindacqaddress setting */
+  /* Follow the bindacqaddress and bindacqdevice settings */
   CNF_GetBindAcquisitionAddress(inst->address.ip_addr.family, &local_addr.ip_addr);
-  if (local_addr.ip_addr.family != inst->address.ip_addr.family)
-    SCK_GetAnyLocalIPAddress(inst->address.ip_addr.family, &local_addr.ip_addr);
-
   local_addr.port = 0;
+  iface = CNF_GetBindAcquisitionInterface();
 
-  sock_fd = SCK_OpenTcpSocket(&inst->address, &local_addr, 0);
+  sock_fd = SCK_OpenTcpSocket(&inst->address, &local_addr, iface, 0);
   if (sock_fd < 0)
     return 0;
 
@@ -344,7 +344,7 @@ NKC_Start(NKC_Instance inst)
                UTI_IPSockAddrToString(&inst->address), inst->name) >= sizeof (label))
     ;
 
-  /* Start a NTS-KE session */
+  /* Start an NTS-KE session */
   if (!NKSN_StartSession(inst->session, sock_fd, label, client_credentials, CLIENT_TIMEOUT)) {
     SCK_CloseSocket(sock_fd);
     return 0;
@@ -388,7 +388,7 @@ NKC_GetNtsData(NKC_Instance inst, NKE_Context *context,
 
   *ntp_address = inst->ntp_address;
 
-  return i;
+  return 1;
 }
 
 /* ================================================== */

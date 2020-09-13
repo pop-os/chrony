@@ -222,7 +222,7 @@ open_socket(struct Address *addr)
 
   switch (addr->type) {
     case SCK_ADDR_IP:
-      sock_fd = SCK_OpenUdpSocket(&addr->addr.ip, NULL, 0);
+      sock_fd = SCK_OpenUdpSocket(&addr->addr.ip, NULL, NULL, 0);
       break;
     case SCK_ADDR_UNIX:
       /* Construct path of our socket.  Use the same directory as the server
@@ -961,38 +961,11 @@ process_cmd_cmddenyall(CMD_Request *msg, char *line)
 /* ================================================== */
 
 static int
-accheck_getaddr(char *line, IPAddr *addr)
-{
-  unsigned long a, b, c, d;
-  IPAddr ip;
-  char *p;
-  p = line;
-  if (!*p) {
-    return 0;
-  } else {
-    if (sscanf(p, "%lu.%lu.%lu.%lu", &a, &b, &c, &d) == 4) {
-      addr->family = IPADDR_INET4;
-      addr->addr.in4 = (a<<24) | (b<<16) | (c<<8) | d;
-      return 1;
-    } else {
-      if (DNS_Name2IPAddress(p, &ip, 1) != DNS_Success) {
-        return 0;
-      } else {
-        *addr = ip;
-        return 1;
-      }
-    }
-  }
-}
-
-/* ================================================== */
-
-static int
 process_cmd_accheck(CMD_Request *msg, char *line)
 {
   IPAddr ip;
   msg->command = htons(REQ_ACCHECK);
-  if (accheck_getaddr(line, &ip)) {
+  if (DNS_Name2IPAddress(line, &ip, 1) == DNS_Success) {
     UTI_IPHostToNetwork(&ip, &msg->data.ac_check.ip);
     return 1;
   } else {    
@@ -1008,7 +981,7 @@ process_cmd_cmdaccheck(CMD_Request *msg, char *line)
 {
   IPAddr ip;
   msg->command = htons(REQ_CMDACCHECK);
-  if (accheck_getaddr(line, &ip)) {
+  if (DNS_Name2IPAddress(line, &ip, 1) == DNS_Success) {
     UTI_IPHostToNetwork(&ip, &msg->data.ac_check.ip);
     return 1;
   } else {    
@@ -1084,11 +1057,11 @@ process_cmd_add_source(CMD_Request *msg, char *line)
   word = line;
   line = CPS_SplitWord(line);
 
-  if (!strcmp(word, "server")) {
+  if (!strcasecmp(word, "server")) {
     type = REQ_ADDSRC_SERVER;
-  } else if (!strcmp(word, "peer")) {
+  } else if (!strcasecmp(word, "peer")) {
     type = REQ_ADDSRC_PEER;
-  } else if (!strcmp(word, "pool")) {
+  } else if (!strcasecmp(word, "pool")) {
     type = REQ_ADDSRC_POOL;
   } else {
     LOG(LOGS_ERR, "Invalid syntax for add command");
@@ -1120,7 +1093,7 @@ process_cmd_add_source(CMD_Request *msg, char *line)
         assert(0);
       strncpy((char *)msg->data.ntp_source.name, data.name,
               sizeof (msg->data.ntp_source.name));
-      msg->data.ntp_source.port = htonl((unsigned long) data.port);
+      msg->data.ntp_source.port = htonl(data.port);
       msg->data.ntp_source.minpoll = htonl(data.params.minpoll);
       msg->data.ntp_source.maxpoll = htonl(data.params.maxpoll);
       msg->data.ntp_source.presend_minpoll = htonl(data.params.presend_minpoll);
@@ -1209,29 +1182,32 @@ give_help(void)
     "Time sources:\0\0"
     "sources [-a] [-v]\0Display information about current sources\0"
     "sourcestats [-a] [-v]\0Display statistics about collected measurements\0"
+    "selectdata [-a] [-v]\0Display information about source selection\0"
     "reselect\0Force reselecting synchronisation source\0"
     "reselectdist <dist>\0Modify reselection distance\0"
     "\0\0"
     "NTP sources:\0\0"
     "activity\0Check how many NTP sources are online/offline\0"
+    "authdata [-a] [-v]\0Display information about authentication\0"
     "ntpdata [<address>]\0Display information about last valid measurement\0"
     "add server <name> [options]\0Add new NTP server\0"
     "add pool <name> [options]\0Add new pool of NTP servers\0"
     "add peer <name> [options]\0Add new NTP peer\0"
     "delete <address>\0Remove server or peer\0"
-    "burst <n-good>/<n-max> [<mask>/<address>]\0Start rapid set of measurements\0"
+    "burst <n-good>/<n-max> [[<mask>/]<address>]\0Start rapid set of measurements\0"
     "maxdelay <address> <delay>\0Modify maximum valid sample delay\0"
     "maxdelayratio <address> <ratio>\0Modify maximum valid delay/minimum ratio\0"
     "maxdelaydevratio <address> <ratio>\0Modify maximum valid delay/deviation ratio\0"
     "minpoll <address> <poll>\0Modify minimum polling interval\0"
     "maxpoll <address> <poll>\0Modify maximum polling interval\0"
     "minstratum <address> <stratum>\0Modify minimum stratum\0"
-    "offline [<mask>/<address>]\0Set sources in subnet to offline status\0"
-    "online [<mask>/<address>]\0Set sources in subnet to online status\0"
+    "offline [[<mask>/]<address>]\0Set sources in subnet to offline status\0"
+    "online [[<mask>/]<address>]\0Set sources in subnet to online status\0"
     "onoffline\0Set all sources to online or offline status\0"
     "\0according to network configuration\0"
     "polltarget <address> <target>\0Modify poll target\0"
     "refresh\0Refresh IP addresses\0"
+    "reload sources\0Re-read *.sources files\0"
     "sourcename <address>\0Display original name\0"
     "\0\0"
     "Manual time input:\0\0"
@@ -1242,7 +1218,7 @@ give_help(void)
     "\0(e.g. Sep 25, 2015 16:30:05 or 16:30:05)\0"
     "\0\0NTP access:\0\0"
     "accheck <address>\0Check whether address is allowed\0"
-    "clients\0Report on clients that have accessed the server\0"
+    "clients [-p <packets>] [-k] [-r]\0Report on clients that accessed the server\0"
     "serverstats\0Display statistics of the server\0"
     "allow [<subnet>]\0Allow access to subnet as a default\0"
     "allow all [<subnet>]\0Allow access to subnet and all children\0"
@@ -1269,7 +1245,7 @@ give_help(void)
     "cyclelogs\0Close and re-open log files\0"
     "dump\0Dump measurements and NTS keys/cookies\0"
     "rekey\0Re-read keys\0"
-    "reset\0Drop all measurements\0"
+    "reset sources\0Drop all measurements\0"
     "shutdown\0Stop daemon\0"
     "\0\0"
     "Client commands:\0\0"
@@ -1299,8 +1275,12 @@ enum {
   TAB_COMPLETE_BASE_CMDS,
   TAB_COMPLETE_ADD_OPTS,
   TAB_COMPLETE_MANUAL_OPTS,
+  TAB_COMPLETE_RELOAD_OPTS,
+  TAB_COMPLETE_RESET_OPTS,
   TAB_COMPLETE_SOURCES_OPTS,
   TAB_COMPLETE_SOURCESTATS_OPTS,
+  TAB_COMPLETE_AUTHDATA_OPTS,
+  TAB_COMPLETE_SELECTDATA_OPTS,
   TAB_COMPLETE_MAX_INDEX
 };
 
@@ -1311,28 +1291,33 @@ command_name_generator(const char *text, int state)
 {
   const char *name, **names[TAB_COMPLETE_MAX_INDEX];
   const char *base_commands[] = {
-    "accheck", "activity", "add", "allow", "burst",
+    "accheck", "activity", "add", "allow", "authdata", "burst",
     "clients", "cmdaccheck", "cmdallow", "cmddeny", "cyclelogs", "delete",
     "deny", "dns", "dump", "exit", "help", "keygen", "local", "makestep",
     "manual", "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
     "maxupdateskew", "minpoll", "minstratum", "ntpdata", "offline", "online", "onoffline",
-    "polltarget", "quit", "refresh", "rekey", "reselect", "reselectdist", "reset",
-    "retries", "rtcdata", "serverstats", "settime", "shutdown", "smoothing",
+    "polltarget", "quit", "refresh", "rekey", "reload", "reselect", "reselectdist", "reset",
+    "retries", "rtcdata", "selectdata", "serverstats", "settime", "shutdown", "smoothing",
     "smoothtime", "sourcename", "sources", "sourcestats",
     "timeout", "tracking", "trimrtc", "waitsync", "writertc",
     NULL
   };
   const char *add_options[] = { "peer", "pool", "server", NULL };
   const char *manual_options[] = { "on", "off", "delete", "list", "reset", NULL };
-  const char *sources_options[] = { "-a", "-v", NULL };
-  const char *sourcestats_options[] = { "-a", "-v", NULL };
+  const char *reset_options[] = { "sources", NULL };
+  const char *reload_options[] = { "sources", NULL };
+  const char *common_source_options[] = { "-a", "-v", NULL };
   static int list_index, len;
 
   names[TAB_COMPLETE_BASE_CMDS] = base_commands;
   names[TAB_COMPLETE_ADD_OPTS] = add_options;
   names[TAB_COMPLETE_MANUAL_OPTS] = manual_options;
-  names[TAB_COMPLETE_SOURCES_OPTS] = sources_options;
-  names[TAB_COMPLETE_SOURCESTATS_OPTS] = sourcestats_options;
+  names[TAB_COMPLETE_RELOAD_OPTS] = reload_options;
+  names[TAB_COMPLETE_RESET_OPTS] = reset_options;
+  names[TAB_COMPLETE_AUTHDATA_OPTS] = common_source_options;
+  names[TAB_COMPLETE_SELECTDATA_OPTS] = common_source_options;
+  names[TAB_COMPLETE_SOURCES_OPTS] = common_source_options;
+  names[TAB_COMPLETE_SOURCESTATS_OPTS] = common_source_options;
 
   if (!state) {
     list_index = 0;
@@ -1360,8 +1345,16 @@ command_name_completion(const char *text, int start, int end)
 
   if (!strcmp(first, "add ")) {
     tab_complete_index = TAB_COMPLETE_ADD_OPTS;
+  } else if (!strcmp(first, "authdata ")) {
+    tab_complete_index = TAB_COMPLETE_AUTHDATA_OPTS;
   } else if (!strcmp(first, "manual ")) {
     tab_complete_index = TAB_COMPLETE_MANUAL_OPTS;
+  } else if (!strcmp(first, "reload ")) {
+    tab_complete_index = TAB_COMPLETE_RELOAD_OPTS;
+  } else if (!strcmp(first, "reset ")) {
+    tab_complete_index = TAB_COMPLETE_RESET_OPTS;
+  } else if (!strcmp(first, "selectdata ")) {
+    tab_complete_index = TAB_COMPLETE_SELECTDATA_OPTS;
   } else if (!strcmp(first, "sources ")) {
     tab_complete_index = TAB_COMPLETE_SOURCES_OPTS;
   } else if (!strcmp(first, "sourcestats ")) {
@@ -2056,7 +2049,7 @@ get_source_name(IPAddr *ip_addr, char *buf, int size)
   UTI_IPHostToNetwork(ip_addr, &request.data.ntp_source_name.ip_addr);
   if (!request_reply(&request, &reply, RPY_NTP_SOURCE_NAME, 0) ||
       reply.data.ntp_source_name.name[sizeof (reply.data.ntp_source_name.name) - 1] != '\0' ||
-      snprintf(buf, size, "%s", reply.data.ntp_source_name.name) >= size)
+      snprintf(buf, size, "%s", (char *)reply.data.ntp_source_name.name) >= size)
     return 0;
 
   /* Make sure the name is printable */
@@ -2359,6 +2352,91 @@ process_cmd_tracking(char *line)
 /* ================================================== */
 
 static int
+process_cmd_authdata(char *line)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  IPAddr ip_addr;
+  uint32_t i, source_mode, n_sources;
+  int all, verbose;
+  const char *mode_str;
+  char name[256];
+
+  parse_sources_options(line, &all, &verbose);
+
+  request.command = htons(REQ_N_SOURCES);
+  if (!request_reply(&request, &reply, RPY_N_SOURCES, 0))
+    return 0;
+
+  n_sources = ntohl(reply.data.n_sources.n_sources);
+
+  if (verbose) {
+    printf(    "                             .- Auth. mechanism (NTS, SK - symmetric key)\n");
+    printf(    "                            |   Key length -.  Cookie length (bytes) -.\n");
+    printf(    "                            |       (bits)  |  Num. of cookies --.    |\n");
+    printf(    "                            |               |  Key est. attempts  |   |\n");
+    printf(    "                            |               |           |         |   |\n");
+  }
+
+  print_header("Name/IP address             Mode KeyID Type KLen Last Atmp  NAK Cook CLen");
+
+  /*           "NNNNNNNNNNNNNNNNNNNNNNNNNNN MMMM KKKKK AAAA LLLL LLLL AAAA NNNN CCCC LLLL" */
+
+  for (i = 0; i < n_sources; i++) {
+    request.command = htons(REQ_SOURCE_DATA);
+    request.data.source_data.index = htonl(i);
+    if (!request_reply(&request, &reply, RPY_SOURCE_DATA, 0))
+      return 0;
+
+    source_mode = ntohs(reply.data.source_data.mode);
+    if (source_mode != RPY_SD_MD_CLIENT && source_mode != RPY_SD_MD_PEER)
+      continue;
+
+    UTI_IPNetworkToHost(&reply.data.source_data.ip_addr, &ip_addr);
+    if (!all && ip_addr.family == IPADDR_ID)
+      continue;
+
+    request.command = htons(REQ_AUTH_DATA);
+    request.data.auth_data.ip_addr = reply.data.source_data.ip_addr;
+    if (!request_reply(&request, &reply, RPY_AUTH_DATA, 0))
+      return 0;
+
+    format_name(name, sizeof (name), 25, 0, 0, 1, &ip_addr);
+
+    switch (ntohs(reply.data.auth_data.mode)) {
+      case RPY_AD_MD_NONE:
+        mode_str = "-";
+        break;
+      case RPY_AD_MD_SYMMETRIC:
+        mode_str = "SK";
+        break;
+      case RPY_AD_MD_NTS:
+        mode_str = "NTS";
+        break;
+      default:
+        mode_str = "?";
+        break;
+    }
+
+    print_report("%-27s %4s %5U %4d %4d %I %4d %4d %4d %4d\n",
+                 name, mode_str,
+                 (unsigned long)ntohl(reply.data.auth_data.key_id),
+                 ntohs(reply.data.auth_data.key_type),
+                 ntohs(reply.data.auth_data.key_length),
+                 (unsigned long)ntohl(reply.data.auth_data.last_ke_ago),
+                 ntohs(reply.data.auth_data.ke_attempts),
+                 ntohs(reply.data.auth_data.nak),
+                 ntohs(reply.data.auth_data.cookies),
+                 ntohs(reply.data.auth_data.cookie_length),
+                 REPORT_END);
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
 process_cmd_ntpdata(char *line)
 {
   CMD_Request request;
@@ -2475,25 +2553,106 @@ process_cmd_ntpdata(char *line)
 /* ================================================== */
 
 static int
+process_cmd_selectdata(char *line)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  uint32_t i, n_sources;
+  int all, verbose, conf_options, eff_options;
+  char name[256];
+  IPAddr ip_addr;
+
+  parse_sources_options(line, &all, &verbose);
+
+  request.command = htons(REQ_N_SOURCES);
+  if (!request_reply(&request, &reply, RPY_N_SOURCES, 0))
+    return 0;
+
+  n_sources = ntohl(reply.data.n_sources.n_sources);
+
+  if (verbose) {
+    printf(    "  .-- State: N - noselect, M - missing samples, d/D - large distance,\n");
+    printf(    " /           ~ - jittery, w/W - waits for others, T - not trusted,\n");
+    printf(    "|            x - falseticker, P - not preferred, U - waits for update,\n");
+    printf(    "|            S - stale, O - orphan, + - combined, * - best.\n");
+    printf(    "|        Effective options ------.  (N - noselect, P - prefer\n");
+    printf(    "|       Configured options -.     \\  T - trust, R - require)\n");
+    printf(    "|   Auth. enabled (Y/N) -.   \\     \\     Offset interval --.\n");
+    printf(    "|                        |    |     |                       |\n");
+  }
+
+  print_header("S Name/IP Address        Auth COpts EOpts Last Score     Interval   ");
+
+  /*           "S NNNNNNNNNNNNNNNNNNNNNNNNN A OOOO- OOOO- LLLL SSSSS LLLLLLL LLLLLLL" */
+
+  for (i = 0; i < n_sources; i++) {
+    request.command = htons(REQ_SELECT_DATA);
+    request.data.source_data.index = htonl(i);
+    if (!request_reply(&request, &reply, RPY_SELECT_DATA, 0))
+      return 0;
+
+    UTI_IPNetworkToHost(&reply.data.select_data.ip_addr, &ip_addr);
+    if (!all && ip_addr.family == IPADDR_ID)
+      continue;
+
+    format_name(name, sizeof (name), 25, ip_addr.family == IPADDR_UNSPEC,
+                ntohl(reply.data.select_data.ref_id), 1, &ip_addr);
+
+    conf_options = ntohs(reply.data.select_data.conf_options);
+    eff_options = ntohs(reply.data.select_data.eff_options);
+
+    print_report("%c %-25s %c %c%c%c%c%c %c%c%c%c%c %I %5.1f %+S %+S\n",
+                 reply.data.select_data.state_char,
+                 name,
+                 reply.data.select_data.authentication ? 'Y' : 'N',
+                 conf_options & RPY_SD_OPTION_NOSELECT ? 'N' : '-',
+                 conf_options & RPY_SD_OPTION_PREFER ? 'P' : '-',
+                 conf_options & RPY_SD_OPTION_TRUST ? 'T' : '-',
+                 conf_options & RPY_SD_OPTION_REQUIRE ? 'R' : '-',
+                 '-',
+                 eff_options & RPY_SD_OPTION_NOSELECT ? 'N' : '-',
+                 eff_options & RPY_SD_OPTION_PREFER ? 'P' : '-',
+                 eff_options & RPY_SD_OPTION_TRUST ? 'T' : '-',
+                 eff_options & RPY_SD_OPTION_REQUIRE ? 'R' : '-',
+                 '-',
+                 (unsigned long)ntohl(reply.data.select_data.last_sample_ago),
+                 UTI_FloatNetworkToHost(reply.data.select_data.score),
+                 UTI_FloatNetworkToHost(reply.data.select_data.lo_limit),
+                 UTI_FloatNetworkToHost(reply.data.select_data.hi_limit),
+                 REPORT_END);
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
 process_cmd_serverstats(char *line)
 {
   CMD_Request request;
   CMD_Reply reply;
 
   request.command = htons(REQ_SERVER_STATS);
-  if (!request_reply(&request, &reply, RPY_SERVER_STATS, 0))
+  if (!request_reply(&request, &reply, RPY_SERVER_STATS2, 0))
     return 0;
 
   print_report("NTP packets received       : %U\n"
                "NTP packets dropped        : %U\n"
                "Command packets received   : %U\n"
                "Command packets dropped    : %U\n"
-               "Client log records dropped : %U\n",
+               "Client log records dropped : %U\n"
+               "NTS-KE connections accepted: %U\n"
+               "NTS-KE connections dropped : %U\n"
+               "Authenticated NTP packets  : %U\n",
                (unsigned long)ntohl(reply.data.server_stats.ntp_hits),
                (unsigned long)ntohl(reply.data.server_stats.ntp_drops),
                (unsigned long)ntohl(reply.data.server_stats.cmd_hits),
                (unsigned long)ntohl(reply.data.server_stats.cmd_drops),
                (unsigned long)ntohl(reply.data.server_stats.log_drops),
+               (unsigned long)ntohl(reply.data.server_stats.nke_hits),
+               (unsigned long)ntohl(reply.data.server_stats.nke_drops),
+               (unsigned long)ntohl(reply.data.server_stats.ntp_auth_hits),
                REPORT_END);
 
   return 1;
@@ -2591,20 +2750,46 @@ process_cmd_clients(char *line)
   CMD_Request request;
   CMD_Reply reply;
   IPAddr ip;
-  uint32_t i, n_clients, next_index, n_indices;
+  uint32_t i, n_clients, next_index, n_indices, min_hits, reset;
   RPY_ClientAccesses_Client *client;
-  char name[50];
+  char header[80], name[50], *opt, *arg;
+  int nke;
 
   next_index = 0;
+  min_hits = 0;
+  reset = 0;
+  nke = 0;
 
-  print_header("Hostname                      NTP   Drop Int IntL Last     Cmd   Drop Int  Last");
+  while (*line) {
+    opt = line;
+    line = CPS_SplitWord(line);
+    if (strcmp(opt, "-k") == 0) {
+      nke = 1;
+    } else if (strcmp(opt, "-p") == 0) {
+      arg = line;
+      line = CPS_SplitWord(line);
+      if (sscanf(arg, "%"SCNu32, &min_hits) != 1) {
+        LOG(LOGS_ERR, "Invalid syntax for clients command");
+        return 0;
+      }
+    } else if (strcmp(opt, "-r") == 0) {
+      reset = 1;
+    }
+  }
+
+  snprintf(header, sizeof (header),
+           "Hostname                      NTP   Drop Int IntL Last  %6s   Drop Int  Last",
+           nke ? "NTS-KE" : "Cmd");
+  print_header(header);
 
   while (1) {
-    request.command = htons(REQ_CLIENT_ACCESSES_BY_INDEX2);
+    request.command = htons(REQ_CLIENT_ACCESSES_BY_INDEX3);
     request.data.client_accesses_by_index.first_index = htonl(next_index);
     request.data.client_accesses_by_index.n_clients = htonl(MAX_CLIENT_ACCESSES);
+    request.data.client_accesses_by_index.min_hits = htonl(min_hits);
+    request.data.client_accesses_by_index.reset = htonl(reset);
 
-    if (!request_reply(&request, &reply, RPY_CLIENT_ACCESSES_BY_INDEX2, 0))
+    if (!request_reply(&request, &reply, RPY_CLIENT_ACCESSES_BY_INDEX3, 0))
       return 0;
 
     n_clients = ntohl(reply.data.client_accesses_by_index.n_clients);
@@ -2629,10 +2814,11 @@ process_cmd_clients(char *line)
                    client->ntp_interval,
                    client->ntp_timeout_interval,
                    (unsigned long)ntohl(client->last_ntp_hit_ago),
-                   (unsigned long)ntohl(client->cmd_hits),
-                   (unsigned long)ntohl(client->cmd_drops),
-                   client->cmd_interval,
-                   (unsigned long)ntohl(client->last_cmd_hit_ago),
+                   (unsigned long)ntohl(nke ? client->nke_hits : client->cmd_hits),
+                   (unsigned long)ntohl(nke ? client->nke_drops : client->cmd_drops),
+                   nke ? client->nke_interval : client->cmd_interval,
+                   (unsigned long)ntohl(nke ? client->last_nke_hit_ago :
+                                              client->last_cmd_hit_ago),
                    REPORT_END);
     }
 
@@ -2836,10 +3022,32 @@ process_cmd_shutdown(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
-static void
+static int
+process_cmd_reload(CMD_Request *msg, char *line)
+{
+  if (!strcmp(line, "sources")) {
+    msg->command = htons(REQ_RELOAD_SOURCES);
+  } else {
+    LOG(LOGS_ERR, "Invalid syntax for reload command");
+    return 0;
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
 process_cmd_reset(CMD_Request *msg, char *line)
 {
-  msg->command = htons(REQ_RESET);
+  if (!strcmp(line, "sources")) {
+    msg->command = htons(REQ_RESET_SOURCES);
+  } else {
+    LOG(LOGS_ERR, "Invalid syntax for reset command");
+    return 0;
+  }
+
+  return 1;
 }
 
 /* ================================================== */
@@ -2959,26 +3167,35 @@ process_cmd_retries(const char *line)
 static int
 process_cmd_keygen(char *line)
 {
+  unsigned int i, args, cmac_length, length, id = 1, bits = 160;
   unsigned char key[512];
-  char type[17];
-  unsigned int i, cmac_length, length, id = 1, bits = 160;
+  const char *type;
+  char *words[3];
 
 #ifdef FEAT_SECHASH
-  snprintf(type, sizeof (type), "SHA1");
+  type = "SHA1";
 #else
-  snprintf(type, sizeof (type), "MD5");
+  type = "MD5";
 #endif
 
-  if (sscanf(line, "%u %16s %u", &id, type, &bits))
-    ;
+  args = UTI_SplitString(line, words, 3);
+  if (args >= 2)
+    type = words[1];
+
+  if (args > 3 ||
+      (args >= 1 && sscanf(words[0], "%u", &id) != 1) ||
+      (args >= 3 && sscanf(words[2], "%u", &bits) != 1)) {
+    LOG(LOGS_ERR, "Invalid syntax for keygen command");
+    return 0;
+  }
 
 #ifdef HAVE_CMAC
-  cmac_length = CMC_GetKeyLength(type);
+  cmac_length = CMC_GetKeyLength(UTI_CmacNameToAlgorithm(type));
 #else
   cmac_length = 0;
 #endif
 
-  if (HSH_GetHashId(type) >= 0) {
+  if (HSH_GetHashId(UTI_HashNameToAlgorithm(type)) >= 0) {
     length = (bits + 7) / 8;
   } else if (cmac_length > 0) {
     length = cmac_length;
@@ -3038,6 +3255,9 @@ process_line(char *line)
     } else {
       do_normal_submit = process_cmd_allow(&tx_message, line);
     }
+  } else if (!strcmp(command, "authdata")) {
+    do_normal_submit = 0;
+    ret = process_cmd_authdata(line);
   } else if (!strcmp(command, "burst")) {
     do_normal_submit = process_cmd_burst(&tx_message, line);
   } else if (!strcmp(command, "clients")) {
@@ -3134,18 +3354,23 @@ process_line(char *line)
     process_cmd_refresh(&tx_message, line);
   } else if (!strcmp(command, "rekey")) {
     process_cmd_rekey(&tx_message, line);
+  } else if (!strcmp(command, "reload")) {
+    do_normal_submit = process_cmd_reload(&tx_message, line);
   } else if (!strcmp(command, "reselect")) {
     process_cmd_reselect(&tx_message, line);
   } else if (!strcmp(command, "reselectdist")) {
     do_normal_submit = process_cmd_reselectdist(&tx_message, line);
   } else if (!strcmp(command, "reset")) {
-    process_cmd_reset(&tx_message, line);
+    do_normal_submit = process_cmd_reset(&tx_message, line);
   } else if (!strcmp(command, "retries")) {
     ret = process_cmd_retries(line);
     do_normal_submit = 0;
   } else if (!strcmp(command, "rtcdata")) {
     do_normal_submit = 0;
     ret = process_cmd_rtcreport(line);
+  } else if (!strcmp(command, "selectdata")) {
+    do_normal_submit = 0;
+    ret = process_cmd_selectdata(line);
   } else if (!strcmp(command, "serverstats")) {
     do_normal_submit = 0;
     ret = process_cmd_serverstats(line);
@@ -3358,7 +3583,7 @@ main(int argc, char **argv)
 
   UTI_SetQuitSignalsHandler(signal_handler, 0);
 
-  SCK_Initialise();
+  SCK_Initialise(IPADDR_UNSPEC);
   server_addresses = get_addresses(hostnames, port);
 
   if (!open_io())

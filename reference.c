@@ -304,6 +304,8 @@ REF_Finalise(void)
     update_drift_file(LCL_ReadAbsoluteFrequency(), our_skew);
   }
 
+  LCL_RemoveParameterChangeHandler(handle_slew, NULL);
+
   Free(fb_drifts);
 
   initialised = 0;
@@ -489,8 +491,7 @@ maybe_log_offset(double offset, time_t now)
   abs_offset = fabs(offset);
 
   if (abs_offset > log_change_threshold) {
-    LOG(LOGS_WARN, "System clock wrong by %.6f seconds, adjustment started",
-        -offset);
+    LOG(LOGS_WARN, "System clock wrong by %.6f seconds", -offset);
   }
 
   if (do_mail_change &&
@@ -556,8 +557,7 @@ is_offset_ok(double offset)
     return 1;
   }
 
-  offset = fabs(offset);
-  if (offset > max_offset) {
+  if (fabs(offset) > max_offset) {
     LOG(LOGS_WARN, 
         "Adjustment of %.3f seconds exceeds the allowed maximum of %.3f seconds (%s) ",
         -offset, max_offset, !max_offset_ignore ? "exiting" : "ignored");
@@ -1018,7 +1018,7 @@ REF_SetReference(int stratum, NTP_Leap leap, int combined_sources,
   our_residual_freq = residual_frequency;
   our_root_delay = root_delay;
   our_root_dispersion = root_dispersion;
-  our_frequency_sd = offset_sd;
+  our_frequency_sd = frequency_sd;
   our_offset_sd = offset_sd;
   last_ref_update = mono_now;
   last_ref_update_interval = update_interval;

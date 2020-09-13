@@ -137,8 +137,8 @@ static void
 send_response(int interleaved, int authenticated, int allow_update, int valid_ts, int valid_auth)
 {
   NTP_Packet *req, *res;
+  uint32_t key_id = 0;
   int auth_len = 0;
-  uint32_t key_id;
 
   req = &req_buffer;
   res = &res_buffer;
@@ -322,7 +322,7 @@ test_unit(void)
   TST_RegisterDummyDrivers();
   SCH_Initialise();
   SRC_Initialise();
-  NIO_Initialise(IPADDR_UNSPEC);
+  NIO_Initialise();
   NCR_Initialise();
   REF_Initialise();
 

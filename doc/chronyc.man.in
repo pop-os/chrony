@@ -1,23 +1,32 @@
 '\" t
 .\"     Title: chronyc
-.\"    Author: [see the "AUTHORS" section]
-.\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2020-04-20
+.\"    Author: [see the "AUTHOR(S)" section]
+.\" Generator: Asciidoctor 2.0.10
+.\"      Date: 2020-08-25
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2020-04-20" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2020-08-25" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
 .nh
 .ad l
 .de URL
-\\$2 \(laURL: \\$1 \(ra\\$3
+\fI\\$2\fP <\\$1>\\$3
 ..
-.if \n[.g] .mso www.tmac
-.LINKSTYLE blue R < >
+.als MTO URL
+.if \n[.g] \{\
+.  mso www.tmac
+.  am URL
+.    ad l
+.  .
+.  am MTO
+.    ad l
+.  .
+.  LINKSTYLE blue R < >
+.\}
 .SH "NAME"
 chronyc \- command\-line interface for chrony daemon
 .SH "SYNOPSIS"
@@ -150,9 +159,7 @@ program.
 The \fBtracking\fP command displays parameters about the system\(cqs clock
 performance. An example of the output is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 Reference ID    : CB00710F (foo.example.net)
 Stratum         : 3
@@ -168,9 +175,7 @@ Root dispersion : 0.001100737 seconds
 Update interval : 64.2 seconds
 Leap status     : Normal
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The fields are explained as follows:
 .sp
@@ -275,15 +280,11 @@ variations, etc.
 An absolute bound on the computer\(cqs clock accuracy (assuming the stratum\-1
 computer is correct) is given by:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay)
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBUpdate interval\fP
@@ -318,16 +319,12 @@ command to quickly make a new measurement and correct the clock by stepping if
 needed, without waiting for \fBchronyd\fP to complete the measurement and update
 the clock.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 makestep 0.1 1
 burst 1/2
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 BE WARNED: Certain software will be seriously affected by such jumps in the
 system time. (That is the reason why \fBchronyd\fP uses slewing normally.)
@@ -358,15 +355,11 @@ repeated. The interval is 10 seconds by default.
 .sp
 An example is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 waitsync 60 0.01
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 which will wait up to about 10 minutes (60 times 10 seconds) for \fBchronyd\fP to
 synchronise to a source and the remaining correction to be less than 10
@@ -386,9 +379,7 @@ do not have a known address yet. Such sources have an identifier in the format
 The \fB\-v\fP option enables a verbose output. In this case,
 extra caption lines are shown as a reminder of the meanings of the columns.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 MS Name/IP address         Stratum Poll Reach LastRx Last sample
 ===============================================================================
@@ -396,9 +387,7 @@ MS Name/IP address         Stratum Poll Reach LastRx Last sample
 ^? foo.example.net               2   6   377    23   \-923us[ \-924us] +/\-   43ms
 ^+ bar.example.net               1   6   377    21  \-2629us[\-2619us] +/\-   86ms
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The columns are as follows:
 .sp
@@ -417,8 +406,8 @@ This column indicates the state of the source.
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fI*\fP indicates the source to which \fBchronyd\fP is currently synchronised.
 .RE
@@ -428,8 +417,8 @@ This column indicates the state of the source.
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fI+\fP indicates acceptable sources which are combined with the selected
 source.
@@ -440,8 +429,8 @@ source.
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fI\-\fP indicates acceptable sources which are excluded by the combining
 algorithm.
@@ -452,8 +441,8 @@ algorithm.
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fI?\fP indicates sources to which connectivity has been lost or whose packets
 do not pass all tests. It is also shown at start\-up, until at least 3 samples
@@ -465,8 +454,8 @@ have been gathered from it.
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fIx\fP indicates a clock which \fBchronyd\fP thinks is a falseticker (i.e. its
 time is inconsistent with a majority of other sources).
@@ -477,8 +466,8 @@ time is inconsistent with a majority of other sources).
 \h'-04'\(bu\h'+03'\c
 .\}
 .el \{\
-.sp -1
-.IP \(bu 2.3
+.  sp -1
+.  IP \(bu 2.3
 .\}
 \fI~\fP indicates a source whose time appears to have too much variability.
 .RE
@@ -552,17 +541,13 @@ extra caption lines are shown as a reminder of the meanings of the columns.
 .sp
 An example report is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 Name/IP Address            NP  NR  Span  Frequency  Freq Skew  Offset  Std Dev
 ===============================================================================
 foo.example.net            11   5   46m     \-0.001      0.045      1us    25us
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The columns are as follows:
 .sp
@@ -615,6 +600,318 @@ This is the estimated offset of the source.
 \fBStd Dev\fP
 .RS 4
 This is the estimated sample standard deviation.
+.RE
+.RE
+.sp
+\fBselectdata\fP [\fB\-a\fP] [\fB\-v\fP]
+.RS 4
+The \fBselectdata\fP command displays information specific to the selection of time
+sources. If the \fB\-a\fP option is specified, all sources are displayed, including
+those that do not have a known address yet. With the \fB\-v\fP option, extra caption
+lines are shown as a reminder of the meanings of the columns.
+.sp
+An example of the output is shown below.
+.sp
+.if n .RS 4
+.nf
+S Name/IP Address        Auth COpts EOpts Last Score     Interval
+====================================================================
+D foo.example.net           Y \-\-\-\-\- \-\-TR\-    4   1.0   \-61ms   +62ms
+* bar.example.net           N \-\-\-\-\- \-\-\-\-\-    0   1.0 \-6846us +7305us
++ baz.example.net           N \-\-\-\-\- \-\-\-\-\-   10   1.0 \-7381us +7355us
+.fi
+.if n .RE
+.sp
+The columns are as follows:
+.sp
+\fBS\fP
+.RS 4
+This column indicates the state of the source after the last source selection.
+It is similar to the state reported by the \fBsources\fP command, but more
+states are reported.
+.RE
+.sp
+
+.RS 4
+The following states indicate the source is not considered selectable for
+synchronisation:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIN\fP \- has the \fBnoselect\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIM\fP \- does not have enough measurements.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fId\fP \- has a root distance larger than the maximum distance (configured by the
+\fBmaxdistance\fP directive).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI~\fP \- has a jitter larger than the maximum jitter (configured by the
+\fBmaxjitter\fP directive).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIw\fP \- waits for other sources to get out of the \fIM\fP state.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIS\fP \- has older measurements than other sources.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIO\fP \- has a stratum equal or larger than the orphan stratum (configured by
+the \fBlocal\fP directive).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIT\fP \- does not fully agree with sources that have the \fBtrust\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIx\fP \- does not agree with other sources (falseticker).
+.RE
+.RE
+.sp
+
+.RS 4
+The following states indicate the source is considered selectable, but it is
+not currently used for synchronisation:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIW\fP \- waits for other sources to be selectable (required by the
+\fBminsources\fP directive, or
+the \fBrequire\fP option of another source).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIP\fP \- another selectable source is preferred due to the \fBprefer\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIU\fP \- waits for a new measurement (after selecting a different best source).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fID\fP \- has, or recently had, a root distance which is too large to be combined
+with other sources (configured by the
+\fBcombinelimit\fP directive).
+.RE
+.RE
+.sp
+
+.RS 4
+The following states indicate the source is used for synchronisation of the
+local clock:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI+\fP \- combined with the best source.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI*\fP \- selected as the best source to update the reference data (e.g. root
+delay, root dispersion).
+.RE
+.RE
+.sp
+\fBName/IP address\fP
+.RS 4
+This column shows the name or IP address of the source if it is an NTP server,
+or the reference ID if it is a reference clock.
+.RE
+.sp
+\fBAuth\fP
+.RS 4
+This column indicites whether an authentication mechanism is enabled for the
+source. \fIY\fP means yes and \fIN\fP means no.
+.RE
+.sp
+\fBCOpts\fP
+.RS 4
+This column displays the configured selection options of the source.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIN\fP indicates the \fBnoselect\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIP\fP indicates the \fBprefer\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIT\fP indicates the \fBtrust\fP option.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIR\fP indicates the \fBrequire\fP option.
+.RE
+.RE
+.sp
+\fBEOpts\fP
+.RS 4
+This column displays the current effective selection options of the source,
+which can be different from the configured options due to the authentication
+selection mode (configured by the
+\fBauthselmode\fP directive). The symbols are the
+same as in the \fBCOpts\fP column.
+.RE
+.sp
+\fBLast\fP
+.RS 4
+This column displays how long ago was the last measurement of the source made
+when the selection was performed.
+.RE
+.sp
+\fBScore\fP
+.RS 4
+This column displays the current score against the source in the \fI*\fP state. The
+scoring system avoids frequent reselection when multiple sources have a similar
+root distance. A value larger than 1 indicates this source was better than the
+\fI*\fP source in recent selections. If the score reaches 10, the best source will
+be reselected and the scores will be reset to 1.
+.RE
+.sp
+\fBInterval\fP
+.RS 4
+This column displays the lower and upper endpoint of the interval which was
+expected to contain the true offset of the local clock considering the root
+distance at the time of the selection.
 .RE
 .RE
 .sp
@@ -677,6 +974,250 @@ not visible in the \fBsources\fP and \fBsourcestats\fP reports.
 .RE
 .RE
 .sp
+\fBauthdata\fP [\fB\-a\fP]
+.RS 4
+The \fBauthdata\fP command displays information specific to authentication of NTP
+sources. If the \fB\-a\fP option is specified, all sources are displayed, including
+those that do not have a known address yet. An example of the output is
+shown below.
+.sp
+.if n .RS 4
+.nf
+Name/IP address             Mode KeyID Type KLen Last Atmp  NAK Cook CLen
+=========================================================================
+foo.example.net              NTS     1   15  256 135m    0    0    8  100
+bar.example.net               SK    30   13  128    \-    0    0    0    0
+baz.example.net                \-     0    0    0    \-    0    0    0    0
+.fi
+.if n .RE
+.sp
+The columns are as follows:
+.sp
+\fBName/IP address\fP
+.RS 4
+This column shows the name or the IP address of the source.
+.RE
+.sp
+\fBMode\fP
+.RS 4
+This column shows which mechanism authenticates NTP packets received from the
+source. \fINTS\fP means Network Time Security, \fISK\fP means a symmetric key, and \fI\-\fP
+means authentication is disabled.
+.RE
+.sp
+\fBKeyID\fP
+.RS 4
+This column shows an identifier of the key used for authentication. With a
+symmetric key, it is the ID from the key file.
+With NTS, it is a number starting at zero and incremented by one with each
+successful key establishment using the NTS\-KE protocol, i.e. it shows how many
+times the key establishment was performed with this source.
+.RE
+.sp
+\fBType\fP
+.RS 4
+This columns shows an identifier of the algorithm used for authentication.
+With a symmetric key, it is the hash function or cipher specified in the key
+file. With NTS, it is an authenticated encryption with associated data (AEAD)
+algorithm, which is negotiated in the NTS\-KE protocol. The following values can
+be reported:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+1: MD5
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+2: SHA1
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+3: SHA256
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+4: SHA384
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+5: SHA512
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+6: SHA3\-224
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+7: SHA3\-256
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+8: SHA3\-384
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+9: SHA3\-512
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+10: TIGER
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+11: WHIRLPOOL
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+13: AES128
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+14: AES256
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+15: AEAD\-AES\-SIV\-CMAC\-256
+.RE
+.RE
+.sp
+\fBKLen\fP
+.RS 4
+This column shows the length of the key in bits.
+.RE
+.sp
+\fBLast\fP
+.RS 4
+This column shows how long ago the last successful key establishment was
+performed. It is in seconds, or letters \fIm\fP, \fIh\fP, \fId\fP or \fIy\fP indicate minutes,
+hours, days, or years.
+.RE
+.sp
+\fBAtmp\fP
+.RS 4
+This column shows the number of attempts to perform the key establishment since
+the last successful key establishment. A number larger than 1 indicates a
+problem with the network or server.
+.RE
+.sp
+\fBNAK\fP
+.RS 4
+This column shows whether an NTS NAK was received since the last request.
+A NAK indicates that authentication failed on the server side due to
+\fBchronyd\fP using a cookie which is no longer valid and that it needs to perform
+the key establishment again in order to get new cookies.
+.RE
+.sp
+\fBCook\fP
+.RS 4
+This column shows the number of NTS cookies that \fBchronyd\fP currently has. If
+the key establishment was successful, a number smaller than 8 indicates a
+problem with the network or server.
+.RE
+.sp
+\fBCLen\fP
+.RS 4
+This column shows the length in bytes of the NTS cookie which will be used in
+the next request.
+.RE
+.RE
+.sp
 \fBntpdata\fP [\fIaddress\fP]
 .RS 4
 The \fBntpdata\fP command displays the last valid measurement and other
@@ -684,9 +1225,7 @@ NTP\-specific information about the specified NTP source, or all NTP sources
 (with a known address) if no address was specified. An example of the output is
 shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 Remote address  : 203.0.113.15 (CB00710F)
 Remote port     : 123
@@ -715,9 +1254,7 @@ Total TX        : 24
 Total RX        : 24
 Total valid RX  : 24
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The fields are explained as follows:
 .sp
@@ -816,15 +1353,11 @@ parameters and options is identical to that for the
 .sp
 An example of using this command is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 add peer foo.example.net minpoll 6 maxpoll 10 key 25
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBadd pool\fP \fIname\fP [\fIoption\fP]...
@@ -838,15 +1371,11 @@ directive in the configuration file.
 .sp
 An example of using this command is shown below:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 add pool foo.example.net maxsources 3 iburst
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBadd server\fP \fIname\fP [\fIoption\fP]...
@@ -860,15 +1389,11 @@ directive in the configuration file.
 .sp
 An example of using this command is shown below:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 add server foo.example.net minpoll 6 maxpoll 10 key 25
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBdelete\fP \fIaddress\fP
@@ -941,15 +1466,11 @@ matched.
 .sp
 An example of the two\-argument form of the command is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 burst 2/10
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 This will cause \fBchronyd\fP to attempt to get two good measurements from each
 source, stopping after two have been obtained, but in no event will it try more
@@ -957,16 +1478,12 @@ than ten probes to the source.
 .sp
 Examples of the four\-argument form of the command are:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 burst 2/10 255.255.0.0/1.2.0.0
 burst 2/10 2001:db8:789a::/48
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 In the first case, the two out of ten sampling will only be applied to sources
 whose IPv4 addresses are of the form \fI1.2.x.y\fP, where \fIx\fP and \fIy\fP are
@@ -975,15 +1492,11 @@ IPv6 addresses have first 48 bits equal to \fI2001:db8:789a\fP.
 .sp
 Example of the three\-argument form of the command is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 burst 2/10 foo.example.net
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBmaxdelay\fP \fIaddress\fP \fIdelay\fP
@@ -1055,18 +1568,14 @@ The second form allows an IP address mask and a masked
 address to be specified. The third form uses CIDR notation. The fourth form
 uses an IP address or a hostname. These forms are illustrated below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 offline
 offline 255.255.255.0/1.2.3.0
 offline 2001:db8:789a::/48
 offline foo.example.net
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The second form means that the \fBoffline\fP command is to be applied to any source
 whose IPv4 address is in the \fI1.2.3\fP subnet. (The host\(cqs address is logically
@@ -1077,16 +1586,12 @@ fourth form means that the command is to be applied only to that one source.
 .sp
 The wildcard form of the address is equivalent to:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 offline 0.0.0.0/0.0.0.0
 offline ::/0
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBonline\fP [\fIaddress\fP], \fBonline\fP [\fImasked\-address\fP/\fImasked\-bits\fP], \fBonline\fP [\fImask\fP/\fImasked\-address\fP]
@@ -1125,6 +1630,13 @@ automatically after 8 polling intervals, but this command can still be useful
 to replace them immediately and not wait until they are marked as unreachable.
 .RE
 .sp
+\fBreload\fP \fBsources\fP
+.RS 4
+The \fBreload sources\fP command causes \fBchronyd\fP to re\-read all \fI*.sources\fP files
+from the directories specified by the
+\fBsourcedir\fP directive.
+.RE
+.sp
 \fBsourcename\fP \fIaddress\fP
 .RS 4
 The \fBsourcename\fP command prints the original hostname or address that was
@@ -1149,18 +1661,14 @@ The \fBoff\fP form of the command disables use of the \fBsettime\fP command.
 The \fBlist\fP form of the command lists all the samples currently stored in
 \fBchronyd\fP. The output is illustrated below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 210 n_samples = 1
 #    Date  Time(UTC)    Slewed   Original   Residual
 ====================================================
  0 27Jan99 22:09:20       0.00       0.97       0.00
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The columns are as as follows:
 .sp
@@ -1169,8 +1677,8 @@ The columns are as as follows:
 \h'-04' 1.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 1." 4.2
+.  sp -1
+.  IP " 1." 4.2
 .\}
 The sample index (used for the \fBmanual delete\fP command).
 .RE
@@ -1180,8 +1688,8 @@ The sample index (used for the \fBmanual delete\fP command).
 \h'-04' 2.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 2." 4.2
+.  sp -1
+.  IP " 2." 4.2
 .\}
 The date and time of the sample.
 .RE
@@ -1191,8 +1699,8 @@ The date and time of the sample.
 \h'-04' 3.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 3." 4.2
+.  sp -1
+.  IP " 3." 4.2
 .\}
 The system clock error when the timestamp was entered, adjusted to allow
 for changes made to the system clock since.
@@ -1203,8 +1711,8 @@ for changes made to the system clock since.
 \h'-04' 4.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 4." 4.2
+.  sp -1
+.  IP " 4." 4.2
 .\}
 The system clock error when the timestamp was entered, as it originally was
 (without allowing for changes to the system clock since).
@@ -1215,8 +1723,8 @@ The system clock error when the timestamp was entered, as it originally was
 \h'-04' 5.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 5." 4.2
+.  sp -1
+.  IP " 5." 4.2
 .\}
 The regression residual at this point, in seconds. This allows \(oqoutliers\(cq
 to be easily spotted, so that they can be deleted using the \fBmanual delete\fP
@@ -1271,17 +1779,13 @@ can only specify time to the nearest second.
 .sp
 Examples of inputs that are valid are shown below:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 settime 16:30
 settime 16:30:05
 settime Nov 21, 2015 16:30:05
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 For a full description of getdate, see the getdate documentation
 (bundled, for example, with the source for GNU tar).
@@ -1295,43 +1799,42 @@ particular host.
 .sp
 Examples of use, showing a named host and a numeric IP address, are as follows:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 accheck foo.example.net
 accheck 1.2.3.4
 accheck 2001:db8::1
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 This command can be used to examine the effect of a series of \fBallow\fP, \fBallow
 all\fP, \fBdeny\fP, and \fBdeny all\fP commands specified either via \fBchronyc\fP, or in
 \fBchronyd\fP\(cqs configuration file.
 .RE
 .sp
-\fBclients\fP
+\fBclients\fP [\fB\-p\fP \fIpackets\fP] [\fB\-k\fP] [\fB\-r\fP]
 .RS 4
 This command shows a list of clients that have accessed the server, through
-either the NTP or command ports. It does not include accesses over
-the Unix domain command socket. There are no arguments.
+the NTP, command, or NTS\-KE port. It does not include accesses over the Unix
+domain command socket.
+.sp
+The \fB\-p\fP option specifies the minimum number of received NTP or command
+packets, or accepted NTS\-KE connections, needed to include a client in the
+list. The default value is 0, i.e. all clients are reported. With the \fB\-k\fP
+option the last four columns will show the NTS\-KE accesses instead of command
+accesses. If the \fB\-r\fP option is specified, \fBchronyd\fP will reset the counters of
+received and dropped packets or connections after reporting the current values.
 .sp
 An example of the output is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 Hostname                      NTP   Drop Int IntL Last     Cmd   Drop Int  Last
 ===============================================================================
 localhost                       2      0   2   \-   133      15      0  \-1     7
 foo.example.net                12      0   6   \-    23       0      0   \-     \-
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 Each row shows the data for a single host. Only hosts that have passed the host
 access checks (set with the \fBallow\fP, \fBdeny\fP,
@@ -1346,8 +1849,8 @@ The columns are as follows:
 \h'-04' 1.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 1." 4.2
+.  sp -1
+.  IP " 1." 4.2
 .\}
 The hostname of the client.
 .RE
@@ -1357,8 +1860,8 @@ The hostname of the client.
 \h'-04' 2.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 2." 4.2
+.  sp -1
+.  IP " 2." 4.2
 .\}
 The number of NTP packets received from the client.
 .RE
@@ -1368,8 +1871,8 @@ The number of NTP packets received from the client.
 \h'-04' 3.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 3." 4.2
+.  sp -1
+.  IP " 3." 4.2
 .\}
 The number of NTP packets dropped to limit the response rate.
 .RE
@@ -1379,8 +1882,8 @@ The number of NTP packets dropped to limit the response rate.
 \h'-04' 4.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 4." 4.2
+.  sp -1
+.  IP " 4." 4.2
 .\}
 The average interval between NTP packets.
 .RE
@@ -1390,8 +1893,8 @@ The average interval between NTP packets.
 \h'-04' 5.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 5." 4.2
+.  sp -1
+.  IP " 5." 4.2
 .\}
 The average interval between NTP packets after limiting the response rate.
 .RE
@@ -1401,8 +1904,8 @@ The average interval between NTP packets after limiting the response rate.
 \h'-04' 6.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 6." 4.2
+.  sp -1
+.  IP " 6." 4.2
 .\}
 Time since the last NTP packet was received
 .RE
@@ -1412,10 +1915,11 @@ Time since the last NTP packet was received
 \h'-04' 7.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 7." 4.2
+.  sp -1
+.  IP " 7." 4.2
 .\}
-The number of command packets received from the client.
+The number of command packets or NTS\-KE connections received/accepted from
+the client.
 .RE
 .sp
 .RS 4
@@ -1423,10 +1927,11 @@ The number of command packets received from the client.
 \h'-04' 8.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 8." 4.2
+.  sp -1
+.  IP " 8." 4.2
 .\}
-The number of command packets dropped to limit the response rate.
+The number of command packets or NTS\-KE connections dropped to limit the
+response rate.
 .RE
 .sp
 .RS 4
@@ -1434,10 +1939,10 @@ The number of command packets dropped to limit the response rate.
 \h'-04' 9.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 9." 4.2
+.  sp -1
+.  IP " 9." 4.2
 .\}
-The average interval between command packets.
+The average interval between command packets or NTS\-KE connections.
 .RE
 .sp
 .RS 4
@@ -1445,37 +1950,36 @@ The average interval between command packets.
 \h'-04' 10.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 10." 4.2
+.  sp -1
+.  IP " 10." 4.2
 .\}
-Time since the last command packet was received.
+Time since the last command packet or NTS\-KE connection was
+received/accepted.
 .RE
 .RE
 .sp
 \fBserverstats\fP
 .RS 4
-The \fBserverstats\fP command displays how many valid NTP and command requests
-\fBchronyd\fP as a server received from clients, how many of them were dropped to
-limit the response rate as configured by the
-\fBratelimit\fP and
-\fBcmdratelimit\fP directives, and how many
+The \fBserverstats\fP command displays how many valid NTP and command requests, and
+NTS\-KE connections, \fBchronyd\fP operating as a server received from clients, and
+how many of them were dropped due to rate limiting. It also displays how many
 client log records were dropped due to the memory limit configured by the
-\fBclientloglimit\fP directive. An example of
-the output is shown below.
+\fBclientloglimit\fP directive and how many of
+the NTP requests (from those which were not dropped) were authenticated. An
+example of the output is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 NTP packets received       : 1598
 NTP packets dropped        : 8
 Command packets received   : 19
 Command packets dropped    : 0
 Client log records dropped : 0
+NTS\-KE connections accepted: 3
+NTS\-KE connections dropped : 0
+Authenticated NTP packets  : 189
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBallow\fP [\fBall\fP] [\fIsubnet\fP]
@@ -1485,9 +1989,7 @@ The effect of the allow command is identical to the
 .sp
 The syntax is illustrated in the following examples:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 allow foo.example.net
 allow all 1.2
@@ -1500,9 +2002,7 @@ allow ::/0
 allow
 allow all
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBdeny\fP [\fBall\fP] [\fIsubnet\fP]
@@ -1512,9 +2012,7 @@ The effect of the allow command is identical to the
 .sp
 The syntax is illustrated in the following examples:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 deny foo.example.net
 deny all 1.2
@@ -1527,9 +2025,7 @@ deny ::/0
 deny
 deny all
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBlocal\fP [\fIoption\fP]..., \fBlocal\fP \fBoff\fP
@@ -1553,9 +2049,7 @@ smoothing, which can be enabled with the
 \fBsmoothtime\fP directive. An example of the
 output is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 Active         : Yes
 Offset         : +1.000268817 seconds
@@ -1564,9 +2058,7 @@ Wander         : \-0.010000 ppm per second
 Last update    : 17.8 seconds ago
 Remaining time : 19988.4 seconds
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The fields are explained as follows:
 .sp
@@ -1623,17 +2115,13 @@ used to check whether monitoring access is permitted from a named host.
 .sp
 Examples of use are as follows:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 cmdaccheck foo.example.net
 cmdaccheck 1.2.3.4
 cmdaccheck 2001:db8::1
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBcmdallow\fP [\fBall\fP] [\fIsubnet\fP]
@@ -1657,9 +2145,7 @@ The \fBrtcdata\fP command displays the current RTC parameters.
 .sp
 An example output is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 RTC ref time (GMT) : Sat May 30 07:25:56 2015
 Number of samples  : 10
@@ -1668,9 +2154,7 @@ Sample span period :  549
 RTC is fast by     :    \-1.632736 seconds
 RTC gains time at  :  \-107.623 ppm
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 The fields have the following meaning:
 .sp
@@ -1735,8 +2219,8 @@ more than 1 second away from the system clock):
 \h'-04' 1.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 1." 4.2
+.  sp -1
+.  IP " 1." 4.2
 .\}
 Remember the currently estimated gain or loss rate of the RTC and flush the
 previous measurements.
@@ -1747,8 +2231,8 @@ previous measurements.
 \h'-04' 2.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 2." 4.2
+.  sp -1
+.  IP " 2." 4.2
 .\}
 Step the real\-time clock to bring it within a second of the system clock.
 .RE
@@ -1758,8 +2242,8 @@ Step the real\-time clock to bring it within a second of the system clock.
 \h'-04' 3.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 3." 4.2
+.  sp -1
+.  IP " 3." 4.2
 .\}
 Make several measurements to accurately determine the new offset between
 the RTC and the system clock (i.e. the remaining fraction of a second
@@ -1771,8 +2255,8 @@ error).
 \h'-04' 4.\h'+01'\c
 .\}
 .el \{\
-.sp -1
-.IP " 4." 4.2
+.  sp -1
+.  IP " 4." 4.2
 .\}
 Save the RTC parameters to the RTC file (specified with the
 \fBrtcfile\fP directive in the configuration file).
@@ -1813,9 +2297,7 @@ The \fBcyclelogs\fP command causes all of \fBchronyd\fP\(cqs open log files to b
 and re\-opened. This allows them to be renamed so that they can be periodically
 purged. An example of how to do this is shown below.
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 # mv /var/log/chrony/measurements.log /var/log/chrony/measurements1.log
 # chronyc cyclelogs
@@ -1824,9 +2306,7 @@ purged. An example of how to do this is shown below.
 \-rw\-r\-\-r\-\-   1 root     root        12345 Jun  8 18:17 measurements1.log
 # rm \-f measurements1.log
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .RE
 .sp
 \fBdump\fP
@@ -1850,13 +2330,13 @@ automatic rotation is disabled in the
 configuration file.
 .RE
 .sp
-\fBreset\fP
+\fBreset\fP \fBsources\fP
 .RS 4
-The \fBreset\fP command causes \fBchronyd\fP to drop all measurements and switch to the
-unsynchronised state. This command can help \fBchronyd\fP with recovery when the
-measurements are known to be no longer valid or accurate, e.g. due to moving
-the computer to a different network, or resuming the computer from a low\-power
-state (which resets the system clock).
+The \fBreset sources\fP command causes \fBchronyd\fP to drop all measurements and
+switch to the unsynchronised state. This command can help \fBchronyd\fP with
+recovery when the measurements are known to be no longer valid or accurate,
+e.g. due to moving the computer to a different network, or resuming the
+computer from a low\-power state (which resets the system clock).
 .RE
 .sp
 \fBshutdown\fP
@@ -1940,15 +2420,11 @@ function was selected, between 80 and 4096 bits (by default 160 bits).
 .sp
 An example is:
 .sp
-.if n \{\
-.RS 4
-.\}
+.if n .RS 4
 .nf
 keygen 73 SHA1 256
 .fi
-.if n \{\
-.RE
-.\}
+.if n .RE
 .sp
 which generates a 256\-bit SHA1 key with number 73. The printed line should
 then be securely transferred and added to the key files on both server and

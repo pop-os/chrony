@@ -27,10 +27,11 @@
 #include "ntp.h"
 #include "nts_ke_client.h"
 
-#define NKC_CreateInstance(address, name) NULL
-#define NKC_DestroyInstance(inst)
+#define NKC_CreateInstance(address, name) Malloc(1)
+#define NKC_DestroyInstance(inst) Free(inst)
 #define NKC_Start(inst) (random() % 2)
 #define NKC_IsActive(inst) (random() % 2)
+#define NKC_GetRetryFactor(inst) (1)
 
 static int get_nts_data(NKC_Instance inst, NKE_Context *context,
                         NKE_Cookie *cookies, int *num_cookies, int max_cookies,
@@ -59,6 +60,8 @@ get_nts_data(NKC_Instance inst, NKE_Context *context,
   *num_cookies = random() % max_cookies + 1;
   for (i = 0; i < *num_cookies; i++) {
     cookies[i].length = random() % (sizeof (cookies[i].cookie) + 1);
+    if (random() % 4 != 0)
+      cookies[i].length = cookies[i].length / 4 * 4;
     memset(cookies[i].cookie, random(), cookies[i].length);
   }
 
@@ -81,10 +84,14 @@ get_request(NNC_Instance inst)
   info.version = 4;
   info.mode = MODE_CLIENT;
   info.length = random() % (sizeof (packet) + 1);
+  if (random() % 4 != 0)
+    info.length = info.length / 4 * 4;
 
-  inst->num_cookies = 0;
+  if (inst->num_cookies > 0 && random() % 2) {
+    inst->num_cookies = 0;
 
-  TEST_CHECK(!NNC_GenerateRequestAuth(inst, &packet, &info));
+    TEST_CHECK(!NNC_GenerateRequestAuth(inst, &packet, &info));
+  }
 
   while (!NNC_PrepareForAuth(inst)) {
     inst->next_nke_attempt = SCH_GetLastEventMonoTime() + random() % 10 - 7;
@@ -124,9 +131,9 @@ get_request(NNC_Instance inst)
 static void
 prepare_response(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info, int valid, int nak)
 {
-  unsigned char cookie[508], plaintext[512], nonce[512];
-  int nonce_length, cookie_length, plaintext_length, min_auth_length;
-  int index, auth_start;
+  unsigned char cookie[508], plaintext[528], nonce[448];
+  int nonce_length, ef_length, cookie_length, plaintext_length, min_auth_length;
+  int i, index, auth_start;
   SIV_Instance siv;
 
   memset(packet, 0, sizeof (*packet));
@@ -139,7 +146,7 @@ prepare_response(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info, in
   if (valid)
     index = -1;
   else
-    index = random() % (nak ? 2 : 6);
+    index = random() % (nak ? 2 : 8);
 
   DEBUG_LOG("index=%d nak=%d", index, nak);
 
@@ -168,16 +175,29 @@ prepare_response(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info, in
   DEBUG_LOG("nonce_length=%d cookie_length=%d min_auth_length=%d",
             nonce_length, cookie_length, min_auth_length);
 
-
   UTI_GetRandomBytes(nonce, nonce_length);
   UTI_GetRandomBytes(cookie, cookie_length);
 
+  if (cookie_length >= 12 && cookie_length <= 32 && random() % 2 == 0)
+    TEST_CHECK(NEF_AddField(packet, info, NTP_EF_NTS_COOKIE, cookie, cookie_length));
+
   plaintext_length = 0;
-  if (index != 3)
-    TEST_CHECK(NEF_SetField(plaintext, sizeof (plaintext), 0, NTP_EF_NTS_COOKIE,
-                            cookie, cookie_length, &plaintext_length));
+  if (index != 3) {
+    for (i = random() % ((sizeof (plaintext) - 16) / (cookie_length + 4)); i >= 0; i--) {
+      TEST_CHECK(NEF_SetField(plaintext, sizeof (plaintext), plaintext_length,
+                              NTP_EF_NTS_COOKIE, cookie,
+                              i == 0 ? cookie_length : random() % (cookie_length + 1) / 4 * 4,
+                              &ef_length));
+      plaintext_length += ef_length;
+    }
+  }
   auth_start = info->length;
   if (index != 4) {
+    if (index == 5) {
+      assert(plaintext_length + 16 <= sizeof (plaintext));
+      memset(plaintext + plaintext_length, 0, 16);
+      plaintext_length += 16;
+    }
     siv = SIV_CreateInstance(inst->context.algorithm);
     TEST_CHECK(siv);
     TEST_CHECK(SIV_SetKey(siv, inst->context.s2c.key, inst->context.s2c.length));
@@ -186,8 +206,10 @@ prepare_response(NNC_Instance inst, NTP_Packet *packet, NTP_PacketInfo *info, in
                                   min_auth_length));
     SIV_DestroyInstance(siv);
   }
-  if (index == 5)
+  if (index == 6)
     ((unsigned char *)packet)[auth_start + 8]++;
+  if (index == 7)
+    TEST_CHECK(NEF_AddField(packet, info, 0x7000, inst->uniq_id, sizeof (inst->uniq_id)));
 }
 
 void
@@ -199,6 +221,8 @@ test_unit(void)
   IPSockAddr addr;
   IPAddr ip_addr;
   int i, j, prev_num_cookies, valid;
+
+  TEST_CHECK(SIV_GetKeyLength(AEAD_AES_SIV_CMAC_256) > 0);
 
   SCK_GetLoopbackIPAddress(AF_INET, &addr.ip_addr);
   addr.port = 0;
@@ -233,7 +257,7 @@ test_unit(void)
 
     if (valid) {
       TEST_CHECK(NNC_CheckResponseAuth(inst, &packet, &info));
-      TEST_CHECK(inst->num_cookies == MIN(NTS_MAX_COOKIES, prev_num_cookies + 1));
+      TEST_CHECK(inst->num_cookies >= MIN(NTS_MAX_COOKIES, prev_num_cookies + 1));
       TEST_CHECK(inst->ok_response);
     }
 

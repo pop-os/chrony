@@ -410,15 +410,20 @@ udp. You need to amend the firewall configuration in this case.
 
 4.2. I keep getting the error 501 Not authorised
 
-Since version 2.2, the password command doesn't do anything and chronyc needs
-to run locally under the root or chrony user, which are allowed to access the
-chronyd's Unix domain command socket.
+This error indicates that chronyc sent the command to chronyd using a UDP
+socket instead of the Unix domain socket (e.g. /var/run/chrony/chronyd.sock),
+which is required for some commands. For security reasons, only the root and
+chrony users are allowed to access the socket.
 
-With older versions, you need to authenticate with the password command first
-or use the -a option to authenticate automatically on start. The configuration
-file needs to specify a file which contains keys (keyfile directive) and which
-key in the key file should be used for chronyc authentication (commandkey
-directive).
+It is also possible that the socket doesn't exist. chronyd will not create the
+socket if the directory has a wrong owner or permissions. In this case there
+should be an error message from chronyd in the system log.
+
+With versions older than 2.2, which don't use the Unix domain socket, you need
+to authenticate with the password command first, or use the -a option to
+authenticate automatically on start. The configuration file needs to specify a
+file which contains keys (keyfile directive) and which key in the key file
+should be used for chronyc authentication (commandkey directive).
 
 4.3. Why does chronyc tracking always print an IPv4 address as reference ID?
 
@@ -558,4 +563,4 @@ needs to be made to work as a service.
 We have no plans to do this. Anyone is welcome to pick this work up and
 contribute it back to the project.
 
-Last updated 2020-04-20 15:49:58 CEST
+Last updated 2020-08-25 11:49:44 +0200

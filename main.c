@@ -38,7 +38,6 @@
 #include "ntp_signd.h"
 #include "ntp_sources.h"
 #include "ntp_core.h"
-#include "nts_ke_client.h"
 #include "nts_ke_server.h"
 #include "nts_ntp_server.h"
 #include "socket.h"
@@ -91,7 +90,7 @@ delete_pidfile(void)
 {
   const char *pidfile = CNF_GetPidFile();
 
-  if (!pidfile[0])
+  if (!pidfile)
     return;
 
   if (!UTI_RemoveFile(NULL, pidfile, NULL))
@@ -105,9 +104,7 @@ MAI_CleanupAndExit(void)
 {
   if (!initialised) exit(exit_status);
   
-  if (CNF_GetDumpDir()[0] != '\0') {
-    SRC_DumpSources();
-  }
+  SRC_DumpSources();
 
   /* Don't update clock when removing sources */
   REF_SetMode(REF_ModeIgnore);
@@ -116,7 +113,6 @@ MAI_CleanupAndExit(void)
   TMC_Finalise();
   MNL_Finalise();
   CLG_Finalise();
-  NKC_Finalise();
   NKS_Finalise();
   NNS_Finalise();
   NSD_Finalise();
@@ -125,13 +121,15 @@ MAI_CleanupAndExit(void)
   NCR_Finalise();
   NIO_Finalise();
   CAM_Finalise();
-  SCK_Finalise();
+
   KEY_Finalise();
   RCL_Finalise();
   SRC_Finalise();
   REF_Finalise();
   RTC_Finalise();
   SYS_Finalise();
+
+  SCK_Finalise();
   SCH_Finalise();
   LCL_Finalise();
   PRV_Finalise();
@@ -150,7 +148,6 @@ MAI_CleanupAndExit(void)
 static void
 signal_cleanup(int x)
 {
-  if (!initialised) exit(0);
   SCH_QuitProgram();
 }
 
@@ -261,7 +258,7 @@ check_pidfile(void)
   FILE *in;
   int pid, count;
   
-  if (!pidfile[0])
+  if (!pidfile)
     return;
 
   in = UTI_OpenFile(NULL, pidfile, NULL, 'r', 0);
@@ -289,7 +286,7 @@ write_pidfile(void)
   const char *pidfile = CNF_GetPidFile();
   FILE *out;
 
-  if (!pidfile[0])
+  if (!pidfile)
     return;
 
   out = UTI_OpenFile(NULL, pidfile, NULL, 'W', 0644);
@@ -377,7 +374,7 @@ go_daemon(void)
 static void
 print_help(const char *progname)
 {
-      printf("Usage: %s [-4|-6] [-n|-d] [-q|-Q] [-r] [-R] [-s] [-t TIMEOUT] [-f FILE|COMMAND...]\n",
+      printf("Usage: %s [-4|-6] [-n|-d] [-p|-q|-Q] [-r] [-R] [-s] [-t TIMEOUT] [-f FILE|COMMAND...]\n",
              progname);
 }
 
@@ -414,7 +411,7 @@ int main
   int do_init_rtc = 0, restarted = 0, client_only = 0, timeout = -1;
   int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
   int clock_control = 1, system_log = 1, log_severity = LOGS_INFO;
-  int config_args = 0;
+  int config_args = 0, print_config = 0;
 
   do_platform_checks();
 
@@ -434,7 +431,7 @@ int main
   optind = 1;
 
   /* Parse short command-line options */
-  while ((opt = getopt(argc, argv, "46df:F:hl:L:mnP:qQrRst:u:vx")) != -1) {
+  while ((opt = getopt(argc, argv, "46df:F:hl:L:mnpP:qQrRst:u:vx")) != -1) {
     switch (opt) {
       case '4':
       case '6':
@@ -462,6 +459,12 @@ int main
         break;
       case 'n':
         nofork = 1;
+        break;
+      case 'p':
+        print_config = 1;
+        client_only = 1;
+        nofork = 1;
+        system_log = 0;
         break;
       case 'P':
         sched_priority = parse_int_arg(optarg);
@@ -527,6 +530,8 @@ int main
   DNS_SetAddressFamily(address_family);
 
   CNF_Initialise(restarted, client_only);
+  if (print_config)
+    CNF_EnablePrint();
 
   /* Parse the config file or the remaining command line arguments */
   config_args = argc - optind;
@@ -536,6 +541,9 @@ int main
     for (; optind < argc; optind++)
       CNF_ParseLine(NULL, config_args + optind - argc + 1, argv[optind]);
   }
+
+  if (print_config)
+    return 0;
 
   /* Check whether another chronyd may already be running */
   check_pidfile();
@@ -556,16 +564,20 @@ int main
   PRV_Initialise();
   LCL_Initialise();
   SCH_Initialise();
+  SCK_Initialise(address_family);
+
+  /* Start helper processes if needed */
+  NKS_PreInitialise(pw->pw_uid, pw->pw_gid, scfilter_level);
+
   SYS_Initialise(clock_control);
   RTC_Initialise(do_init_rtc);
   SRC_Initialise();
   RCL_Initialise();
   KEY_Initialise();
-  SCK_Initialise();
 
   /* Open privileged ports before dropping root */
-  CAM_Initialise(address_family);
-  NIO_Initialise(address_family);
+  CAM_Initialise();
+  NIO_Initialise();
   NCR_Initialise();
   CNF_SetupAccessRestrictions();
 
@@ -590,8 +602,7 @@ int main
   NSR_Initialise();
   NSD_Initialise();
   NNS_Initialise();
-  NKS_Initialise(scfilter_level);
-  NKC_Initialise();
+  NKS_Initialise();
   CLG_Initialise();
   MNL_Initialise();
   TMC_Initialise();

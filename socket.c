@@ -82,6 +82,10 @@ struct MessageHeader {
 
 static int initialised;
 
+/* Flags indicating in which IP families sockets can be requested */
+static int ip4_enabled;
+static int ip6_enabled;
+
 /* Flags supported by socket() */
 static int supported_socket_flags;
 
@@ -114,7 +118,7 @@ prepare_buffers(unsigned int n)
     hdr->msg_hdr.msg_namelen = sizeof (msg->name);
     hdr->msg_hdr.msg_iov = &msg->iov;
     hdr->msg_hdr.msg_iovlen = 1;
-    hdr->msg_hdr.msg_control = &msg->cmsg_buf;
+    hdr->msg_hdr.msg_control = msg->cmsg_buf;
     hdr->msg_hdr.msg_controllen = sizeof (msg->cmsg_buf);
     hdr->msg_hdr.msg_flags = 0;
     hdr->msg_len = 0;
@@ -172,7 +176,7 @@ check_socket_flag(int sock_flag, int fd_flag, int fs_flag)
 static int
 set_socket_nonblock(int sock_fd)
 {
-  if (fcntl(sock_fd, F_SETFL, O_NONBLOCK)) {
+  if (fcntl(sock_fd, F_SETFL, O_NONBLOCK) < 0) {
     DEBUG_LOG("Could not set O_NONBLOCK : %s", strerror(errno));
     return 0;
   }
@@ -333,6 +337,23 @@ is_any_address(IPAddr *addr)
 /* ================================================== */
 
 static int
+bind_device(int sock_fd, const char *iface)
+{
+#ifdef SO_BINDTODEVICE
+  if (setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, iface, strlen(iface) + 1) < 0) {
+    DEBUG_LOG("Could not bind socket to %s : %s", iface, strerror(errno));
+    return 0;
+  }
+  return 1;
+#else
+  DEBUG_LOG("Could not bind socket to %s : %s", iface, "Not supported");
+  return 0;
+#endif
+}
+
+/* ================================================== */
+
+static int
 bind_ip_address(int sock_fd, IPSockAddr *addr, int flags)
 {
   union sockaddr_all saddr;
@@ -399,7 +420,8 @@ connect_ip_address(int sock_fd, IPSockAddr *addr)
 /* ================================================== */
 
 static int
-open_ip_socket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int type, int flags)
+open_ip_socket(IPSockAddr *remote_addr, IPSockAddr *local_addr, const char *iface,
+               int type, int flags)
 {
   int domain, family, sock_fd;
 
@@ -412,10 +434,14 @@ open_ip_socket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int type, int fl
 
   switch (family) {
     case IPADDR_INET4:
+      if (!ip4_enabled)
+        return INVALID_SOCK_FD;
       domain = AF_INET;
       break;
 #ifdef FEAT_IPV6
     case IPADDR_INET6:
+      if (!ip6_enabled)
+        return INVALID_SOCK_FD;
       domain = AF_INET6;
       break;
 #endif
@@ -432,6 +458,9 @@ open_ip_socket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int type, int fl
     goto error;
 
   if (!set_ip_options(sock_fd, family, flags))
+    goto error;
+
+  if (iface && !bind_device(sock_fd, iface))
     goto error;
 
   /* Bind the socket if a non-any local address/port was specified */
@@ -476,8 +505,8 @@ bind_unix_address(int sock_fd, const char *addr, int flags)
   }
   saddr.un.sun_family = AF_UNIX;
 
-  if (!UTI_RemoveFile(NULL, addr, NULL))
-    ;
+  if (unlink(addr) < 0)
+    DEBUG_LOG("Could not remove %s : %s", addr, strerror(errno));
 
   /* PRV_BindSocket() doesn't support Unix sockets yet */
   if (bind(sock_fd, &saddr.sa, sizeof (saddr.un)) < 0) {
@@ -627,9 +656,8 @@ log_message(int sock_fd, int direction, SCK_Message *message, const char *prefix
     case SCK_ADDR_IP:
       if (message->remote_addr.ip.ip_addr.family != IPADDR_UNSPEC)
         remote_addr = UTI_IPSockAddrToString(&message->remote_addr.ip);
-      if (message->local_addr.ip.family != IPADDR_UNSPEC) {
+      if (message->local_addr.ip.family != IPADDR_UNSPEC)
         local_addr = UTI_IPToString(&message->local_addr.ip);
-      }
       break;
     case SCK_ADDR_UNIX:
       remote_addr = message->remote_addr.path;
@@ -655,7 +683,7 @@ log_message(int sock_fd, int direction, SCK_Message *message, const char *prefix
       snprintf(tslen, sizeof (tslen), " tslen=%d", message->timestamp.l2_length);
   }
 
-  DEBUG_LOG("%s message%s%s%s%s fd=%d len=%u%s%s%s%s%s%s",
+  DEBUG_LOG("%s message%s%s%s%s fd=%d len=%d%s%s%s%s%s%s",
             prefix,
             remote_addr ? (direction > 0 ? " from " : " to ") : "",
             remote_addr ? remote_addr : "",
@@ -710,7 +738,7 @@ init_message_nonaddress(SCK_Message *message)
 /* ================================================== */
 
 static int
-process_header(struct msghdr *msg, unsigned int msg_length, int sock_fd, int flags,
+process_header(struct msghdr *msg, int msg_length, int sock_fd, int flags,
                SCK_Message *message)
 {
   struct cmsghdr *cmsg;
@@ -892,7 +920,10 @@ receive_messages(int sock_fd, int flags, int max_messages, int *num_messages)
   hdr = ARR_GetElements(recv_headers);
   n = ARR_GetSize(recv_headers);
   n = MIN(n, max_messages);
-  assert(n >= 1);
+
+  if (n < 1 || n > MAX_RECV_MESSAGES ||
+      n > ARR_GetSize(recv_messages) || n > ARR_GetSize(recv_sck_messages))
+    assert(0);
 
   recv_flags = get_recv_flags(flags);
 
@@ -1001,6 +1032,11 @@ send_message(int sock_fd, SCK_Message *message, int flags)
     msg.msg_namelen = 0;
   }
 
+  if (message->length < 0) {
+    DEBUG_LOG("Invalid length %d", message->length);
+    return 0;
+  }
+
   iov.iov_base = message->data;
   iov.iov_len = message->length;
   msg.msg_iov = &iov;
@@ -1094,8 +1130,15 @@ send_message(int sock_fd, SCK_Message *message, int flags)
 /* ================================================== */
 
 void
-SCK_Initialise(void)
+SCK_Initialise(int family)
 {
+  ip4_enabled = family == IPADDR_INET4 || family == IPADDR_UNSPEC;
+#ifdef FEAT_IPV6
+  ip6_enabled = family == IPADDR_INET6 || family == IPADDR_UNSPEC;
+#else
+  ip6_enabled = 0;
+#endif
+
   recv_messages = ARR_CreateInstance(sizeof (struct Message));
   ARR_SetSize(recv_messages, MAX_RECV_MESSAGES);
   recv_headers = ARR_CreateInstance(sizeof (struct MessageHeader));
@@ -1135,15 +1178,13 @@ SCK_Finalise(void)
 /* ================================================== */
 
 int
-SCK_IsFamilySupported(int family)
+SCK_IsIpFamilyEnabled(int family)
 {
   switch (family) {
     case IPADDR_INET4:
-      return 1;
+      return ip4_enabled;
     case IPADDR_INET6:
-#ifdef FEAT_IPV6
-      return 1;
-#endif
+      return ip6_enabled;
     default:
       return 0;
   }
@@ -1194,6 +1235,23 @@ SCK_GetLoopbackIPAddress(int family, IPAddr *local_addr)
 
 /* ================================================== */
 
+int
+SCK_IsLinkLocalIPAddress(IPAddr *addr)
+{
+  switch (addr->family) {
+    case IPADDR_INET4:
+      /* 169.254.0.0/16 */
+      return (addr->addr.in4 & 0xffff0000) == 0xa9fe0000;
+    case IPADDR_INET6:
+      /* fe80::/10 */
+      return addr->addr.in6[0] == 0xfe && (addr->addr.in6[1] & 0xc0) == 0x80;
+    default:
+      return 0;
+  }
+}
+
+/* ================================================== */
+
 void
 SCK_SetPrivBind(int (*function)(int sock_fd, struct sockaddr *address,
                                 socklen_t address_len))
@@ -1204,17 +1262,17 @@ SCK_SetPrivBind(int (*function)(int sock_fd, struct sockaddr *address,
 /* ================================================== */
 
 int
-SCK_OpenUdpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int flags)
+SCK_OpenUdpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, const char *iface, int flags)
 {
-  return open_ip_socket(remote_addr, local_addr, SOCK_DGRAM, flags);
+  return open_ip_socket(remote_addr, local_addr, iface, SOCK_DGRAM, flags);
 }
 
 /* ================================================== */
 
 int
-SCK_OpenTcpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, int flags)
+SCK_OpenTcpSocket(IPSockAddr *remote_addr, IPSockAddr *local_addr, const char *iface, int flags)
 {
-  return open_ip_socket(remote_addr, local_addr, SOCK_STREAM, flags);
+  return open_ip_socket(remote_addr, local_addr, iface, SOCK_STREAM, flags);
 }
 
 /* ================================================== */
@@ -1353,9 +1411,14 @@ SCK_ShutdownConnection(int sock_fd)
 /* ================================================== */
 
 int
-SCK_Receive(int sock_fd, void *buffer, unsigned int length, int flags)
+SCK_Receive(int sock_fd, void *buffer, int length, int flags)
 {
   int r;
+
+  if (length < 0) {
+    DEBUG_LOG("Invalid length %d", length);
+    return -1;
+  }
 
   r = recv(sock_fd, buffer, length, get_recv_flags(flags));
 
@@ -1372,16 +1435,21 @@ SCK_Receive(int sock_fd, void *buffer, unsigned int length, int flags)
 /* ================================================== */
 
 int
-SCK_Send(int sock_fd, const void *buffer, unsigned int length, int flags)
+SCK_Send(int sock_fd, const void *buffer, int length, int flags)
 {
   int r;
 
   assert(flags == 0);
 
+  if (length < 0) {
+    DEBUG_LOG("Invalid length %d", length);
+    return -1;
+  }
+
   r = send(sock_fd, buffer, length, 0);
 
   if (r < 0) {
-    DEBUG_LOG("Could not send data fd=%d len=%u : %s", sock_fd, length, strerror(errno));
+    DEBUG_LOG("Could not send data fd=%d len=%d : %s", sock_fd, length, strerror(errno));
     return r;
   }
 
@@ -1444,8 +1512,10 @@ SCK_RemoveSocket(int sock_fd)
       saddr.sa.sa_family != AF_UNIX)
     return 0;
 
-  if (!UTI_RemoveFile(NULL, saddr.un.sun_path, NULL))
+  if (unlink(saddr.un.sun_path) < 0) {
+    DEBUG_LOG("Could not remove %s : %s", saddr.un.sun_path, strerror(errno));
     return 0;
+  }
 
   return 1;
 }
@@ -1468,7 +1538,7 @@ SCK_SockaddrToIPSockAddr(struct sockaddr *sa, int sa_length, IPSockAddr *ip_sa)
 
   switch (sa->sa_family) {
     case AF_INET:
-      if (sa_length < sizeof (struct sockaddr_in))
+      if (sa_length < (int)sizeof (struct sockaddr_in))
         return;
       ip_sa->ip_addr.family = IPADDR_INET4;
       ip_sa->ip_addr.addr.in4 = ntohl(((struct sockaddr_in *)sa)->sin_addr.s_addr);
@@ -1476,7 +1546,7 @@ SCK_SockaddrToIPSockAddr(struct sockaddr *sa, int sa_length, IPSockAddr *ip_sa)
       break;
 #ifdef FEAT_IPV6
     case AF_INET6:
-      if (sa_length < sizeof (struct sockaddr_in6))
+      if (sa_length < (int)sizeof (struct sockaddr_in6))
         return;
       ip_sa->ip_addr.family = IPADDR_INET6;
       memcpy(&ip_sa->ip_addr.addr.in6, ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
@@ -1496,7 +1566,7 @@ SCK_IPSockAddrToSockaddr(IPSockAddr *ip_sa, struct sockaddr *sa, int sa_length)
 {
   switch (ip_sa->ip_addr.family) {
     case IPADDR_INET4:
-      if (sa_length < sizeof (struct sockaddr_in))
+      if (sa_length < (int)sizeof (struct sockaddr_in))
         return 0;
       memset(sa, 0, sizeof (struct sockaddr_in));
       sa->sa_family = AF_INET;
@@ -1508,7 +1578,7 @@ SCK_IPSockAddrToSockaddr(IPSockAddr *ip_sa, struct sockaddr *sa, int sa_length)
       return sizeof (struct sockaddr_in);
 #ifdef FEAT_IPV6
     case IPADDR_INET6:
-      if (sa_length < sizeof (struct sockaddr_in6))
+      if (sa_length < (int)sizeof (struct sockaddr_in6))
         return 0;
       memset(sa, 0, sizeof (struct sockaddr_in6));
       sa->sa_family = AF_INET6;
@@ -1521,7 +1591,7 @@ SCK_IPSockAddrToSockaddr(IPSockAddr *ip_sa, struct sockaddr *sa, int sa_length)
       return sizeof (struct sockaddr_in6);
 #endif
     default:
-      if (sa_length < sizeof (struct sockaddr))
+      if (sa_length < (int)sizeof (struct sockaddr))
         return 0;
       memset(sa, 0, sizeof (struct sockaddr));
       sa->sa_family = AF_UNSPEC;

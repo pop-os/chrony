@@ -437,10 +437,13 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid, int clock_control)
   
   UTI_DropRoot(uid, gid);
 
-  /* Keep CAP_NET_BIND_SERVICE only if a server NTP port can be opened
-     and keep CAP_SYS_TIME only if the clock control is enabled */
-  if (snprintf(cap_text, sizeof (cap_text), "%s %s",
+  /* Keep CAP_NET_BIND_SERVICE if the NTP server sockets may need to be bound.
+     Keep CAP_NET_RAW if an NTP socket may need to be bound to a device.
+     Keep CAP_SYS_TIME if the clock control is enabled. */
+  if (snprintf(cap_text, sizeof (cap_text), "%s %s %s",
                CNF_GetNTPPort() ? "cap_net_bind_service=ep" : "",
+               CNF_GetBindNtpInterface() || CNF_GetBindAcquisitionInterface() ?
+                 "cap_net_raw=ep" : "",
                clock_control ? "cap_sys_time=ep" : "") >= sizeof (cap_text))
     assert(0);
 
@@ -478,36 +481,119 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_SystemCallContext context)
 {
   const int syscalls[] = {
     /* Clock */
-    SCMP_SYS(adjtimex), SCMP_SYS(clock_adjtime), SCMP_SYS(clock_gettime),
-    SCMP_SYS(gettimeofday), SCMP_SYS(settimeofday), SCMP_SYS(time),
+    SCMP_SYS(adjtimex),
+    SCMP_SYS(clock_adjtime),
+#ifdef __NR_clock_adjtime64
+    SCMP_SYS(clock_adjtime64),
+#endif
+    SCMP_SYS(clock_gettime),
+#ifdef __NR_clock_gettime64
+    SCMP_SYS(clock_gettime64),
+#endif
+    SCMP_SYS(gettimeofday),
+    SCMP_SYS(settimeofday),
+    SCMP_SYS(time),
+
     /* Process */
-    SCMP_SYS(clone), SCMP_SYS(exit), SCMP_SYS(exit_group), SCMP_SYS(getpid),
-    SCMP_SYS(getrlimit), SCMP_SYS(getuid), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigreturn),
-    SCMP_SYS(rt_sigprocmask), SCMP_SYS(set_tid_address), SCMP_SYS(sigreturn),
-    SCMP_SYS(wait4), SCMP_SYS(waitpid),
+    SCMP_SYS(clone),
+    SCMP_SYS(exit),
+    SCMP_SYS(exit_group),
+    SCMP_SYS(getpid),
+    SCMP_SYS(getrlimit),
+    SCMP_SYS(getuid),
+    SCMP_SYS(rt_sigaction),
+    SCMP_SYS(rt_sigreturn),
+    SCMP_SYS(rt_sigprocmask),
+    SCMP_SYS(set_tid_address),
+    SCMP_SYS(sigreturn),
+    SCMP_SYS(wait4),
+    SCMP_SYS(waitpid),
+
     /* Memory */
-    SCMP_SYS(brk), SCMP_SYS(madvise), SCMP_SYS(mmap), SCMP_SYS(mmap2),
-    SCMP_SYS(mprotect), SCMP_SYS(mremap), SCMP_SYS(munmap), SCMP_SYS(shmdt),
+    SCMP_SYS(brk),
+    SCMP_SYS(madvise),
+    SCMP_SYS(mmap),
+    SCMP_SYS(mmap2),
+    SCMP_SYS(mprotect),
+    SCMP_SYS(mremap),
+    SCMP_SYS(munmap),
+    SCMP_SYS(shmdt),
+
     /* Filesystem */
-    SCMP_SYS(_llseek), SCMP_SYS(access), SCMP_SYS(chmod), SCMP_SYS(chown),
-    SCMP_SYS(chown32), SCMP_SYS(faccessat), SCMP_SYS(fchmodat), SCMP_SYS(fchownat),
-    SCMP_SYS(fstat), SCMP_SYS(fstat64), SCMP_SYS(getdents), SCMP_SYS(getdents64),
-    SCMP_SYS(lseek), SCMP_SYS(newfstatat), SCMP_SYS(rename), SCMP_SYS(renameat),
-    SCMP_SYS(renameat2), SCMP_SYS(stat), SCMP_SYS(stat64), SCMP_SYS(statfs),
-    SCMP_SYS(statfs64), SCMP_SYS(unlink), SCMP_SYS(unlinkat),
+    SCMP_SYS(_llseek),
+    SCMP_SYS(access),
+    SCMP_SYS(chmod),
+    SCMP_SYS(chown),
+    SCMP_SYS(chown32),
+    SCMP_SYS(faccessat),
+    SCMP_SYS(fchmodat),
+    SCMP_SYS(fchownat),
+    SCMP_SYS(fstat),
+    SCMP_SYS(fstat64),
+    SCMP_SYS(getdents),
+    SCMP_SYS(getdents64),
+    SCMP_SYS(lseek),
+    SCMP_SYS(newfstatat),
+    SCMP_SYS(rename),
+    SCMP_SYS(renameat),
+    SCMP_SYS(renameat2),
+    SCMP_SYS(stat),
+    SCMP_SYS(stat64),
+    SCMP_SYS(statfs),
+    SCMP_SYS(statfs64),
+    SCMP_SYS(unlink),
+    SCMP_SYS(unlinkat),
+
     /* Socket */
-    SCMP_SYS(accept), SCMP_SYS(bind), SCMP_SYS(connect), SCMP_SYS(getsockname),
-    SCMP_SYS(getsockopt), SCMP_SYS(recv), SCMP_SYS(recvfrom),
-    SCMP_SYS(recvmmsg), SCMP_SYS(recvmsg), SCMP_SYS(send), SCMP_SYS(sendmmsg),
-    SCMP_SYS(sendmsg), SCMP_SYS(sendto), SCMP_SYS(shutdown),
+    SCMP_SYS(accept),
+    SCMP_SYS(bind),
+    SCMP_SYS(connect),
+    SCMP_SYS(getsockname),
+    SCMP_SYS(getsockopt),
+    SCMP_SYS(recv),
+    SCMP_SYS(recvfrom),
+    SCMP_SYS(recvmmsg),
+#ifdef __NR_recvmmsg_time64
+    SCMP_SYS(recvmmsg_time64),
+#endif
+    SCMP_SYS(recvmsg),
+    SCMP_SYS(send),
+    SCMP_SYS(sendmmsg),
+    SCMP_SYS(sendmsg),
+    SCMP_SYS(sendto),
+    SCMP_SYS(shutdown),
     /* TODO: check socketcall arguments */
     SCMP_SYS(socketcall),
+
     /* General I/O */
-    SCMP_SYS(_newselect), SCMP_SYS(close), SCMP_SYS(open), SCMP_SYS(openat), SCMP_SYS(pipe),
-    SCMP_SYS(pipe2), SCMP_SYS(poll), SCMP_SYS(ppoll), SCMP_SYS(pselect6), SCMP_SYS(read),
-    SCMP_SYS(futex), SCMP_SYS(select), SCMP_SYS(set_robust_list), SCMP_SYS(write),
+    SCMP_SYS(_newselect),
+    SCMP_SYS(close),
+    SCMP_SYS(open),
+    SCMP_SYS(openat),
+    SCMP_SYS(pipe),
+    SCMP_SYS(pipe2),
+    SCMP_SYS(poll),
+    SCMP_SYS(ppoll),
+#ifdef __NR_ppoll_time64
+    SCMP_SYS(ppoll_time64),
+#endif
+    SCMP_SYS(pselect6),
+#ifdef __NR_pselect6_time64
+    SCMP_SYS(pselect6_time64),
+#endif
+    SCMP_SYS(read),
+    SCMP_SYS(futex),
+#ifdef __NR_futex_time64
+    SCMP_SYS(futex_time64),
+#endif
+    SCMP_SYS(select),
+    SCMP_SYS(set_robust_list),
+    SCMP_SYS(write),
+
     /* Miscellaneous */
-    SCMP_SYS(getrandom), SCMP_SYS(sysinfo), SCMP_SYS(uname),
+    SCMP_SYS(getrandom),
+    SCMP_SYS(sysinfo),
+    SCMP_SYS(uname),
   };
 
   const int socket_domains[] = {
