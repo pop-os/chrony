@@ -82,13 +82,13 @@ interval should stay at or below 9 (512 seconds). The default is 10 (1024
 seconds), the minimum is -6 (1/64th of a second), and the maximum is 24 (6
 months).
 *iburst*:::
-With this option, the interval between the first four requests sent to the
-server will be 2 seconds or less instead of the interval specified by the
-*minpoll* option, which allows *chronyd* to make the first update of the clock
-shortly after start.
+With this option, *chronyd* will start with a burst of 4-8 requests in order to
+make the first update of the clock sooner. It will also repeat the burst every
+time the source is switched from the offline state to online with the
+<<chronyc.adoc#online,*online*>> command in *chronyc*.
 *burst*:::
-With this option, *chronyd* will shorten the interval between up to four
-requests to 2 seconds or less when it cannot get a good measurement from the
+With this option, *chronyd* will send a burst of up to 4 requests when it
+cannot get a good measurement from the
 server. The number of requests in the burst is limited by the current polling
 interval to keep the average interval at or above the minimum interval, i.e.
 the current interval needs to be at least two times longer than the minimum
@@ -200,10 +200,11 @@ authenticated source to be safely combined with unauthenticated sources in
 order to improve the accuracy of the clock. They can be selected and used for
 synchronisation only if they agree with the trusted and required source.
 *xleave*:::
-This option enables an interleaved mode which enables the server to
-send transmit timestamps captured after the actual transmission (e.g. when the
-server is running *chronyd* with software (kernel) or hardware
-timestamping). This can significantly improve the accuracy of the measurements.
+This option enables the interleaved mode of NTP. It enables the server to
+respond with more accurate transmit timestamps (e.g. kernel or hardware
+timestamps), which cannot be contained in the transmitted packet itself and
+need to refer to a previous packet instead. This can significantly improve the
+accuracy and stability of the measurements.
 +
 The interleaved mode is compatible with servers that support only the basic
 mode. Note that even
@@ -228,7 +229,7 @@ be specified. For normal servers this option should not be required (the
 default is 123, the standard NTP port).
 *ntsport* _port_:::
 This option specifies the TCP port on which the server is listening for NTS-KE
-connections when the *nts* option is enabled. The default is 11443.
+connections when the *nts* option is enabled. The default is 4460.
 *presend* _poll_:::
 If the timing measurements being made by *chronyd* are the only network data
 passing between two computers, you might find that some measurements are badly
@@ -284,7 +285,7 @@ This option sets the desired number of sources to be used from the pool.
 sources responding to requests. The default value is 4 and the maximum value is
 16.
 +
-::
+{blank}::
 When an NTP source is unreachable,
 marked as a falseticker, or has a distance larger than the limit set by the
 <<maxdistance,*maxdistance*>> directive, *chronyd* will try to replace the
@@ -412,7 +413,7 @@ By default, the PPS refclock uses assert events (rising edge) for
 synchronisation. With this option, it will use clear events (falling edge)
 instead.
 +
-:::
+{blank}:::
 Examples:
 +
 ----
@@ -431,7 +432,7 @@ supports the following option:
 This option specifies the permissions of the shared memory segment created by
 *chronyd*. They are specified as a numeric mode. The default value is 0600
 (read-write access for owner only).
-:::
+{blank}:::
 +
 Examples:
 +
@@ -485,7 +486,7 @@ value is 0.
 This option enables timestamping of clear events (falling edge) instead of
 assert events (rising edge) in the PPS mode. This may not work with some
 clocks.
-:::
+{blank}:::
 +
 Examples:
 +
@@ -495,7 +496,7 @@ refclock PHC /dev/ptp1:nocrossts poll 3 pps
 refclock PHC /dev/ptp2:extpps:pin=1 width 0.2 poll 2
 ----
 +
-::
+{blank}::
 The *refclock* directive supports the following options:
 +
 *poll* _poll_:::
@@ -630,13 +631,39 @@ This would change the source port used for client requests to UDP port 1123.
 You could then persuade the firewall administrator to open that port.
 
 [[bindacqaddress]]*bindacqaddress* _address_::
-The *bindacqaddress* directive sets the network interface to which
+The *bindacqaddress* directive specifies a local IP address to which
 *chronyd* will bind its NTP client sockets. The syntax is similar to the
 <<bindaddress,*bindaddress*>> and <<bindcmdaddress,*bindcmdaddress*>>
 directives.
 +
 For each of the IPv4 and IPv6 protocols, only one *bindacqaddress* directive
 can be specified.
+
+[[bindacqdevice]]*bindacqdevice* _interface_::
+The *bindacqdevice* directive binds the client sockets to a network device
+specified by the interface name. This can be useful when the local address is
+dynamic, or to enable an NTP source specified with a link-local IPv6 address.
+This directive can specify only one interface and it is supported on Linux
+only.
++
+An example of the directive is:
++
+----
+bindacqdevice eth0
+----
+
+[[dscp]]*dscp* _point_::
+The *dscp* directive sets the Differentiated Services Code Point (DSCP) in
+transmitted NTP packets to the specified value. It can improve stability of NTP
+measurements in local networks where switches or routers are configured to
+prioritise forwarding of packets with specific DSCP values. The default value
+is 0 and the maximum value is 63.
++
+An example of the directive (setting the Expedited Forwarding class) is:
++
+----
+dscp 46
+----
 
 [[dumpdir]]*dumpdir* _directory_::
 To compute the rate of gain or loss of time, *chronyd* has to store a
@@ -654,6 +681,8 @@ restarts of *chronyd* (assuming no changes are made to the system clock
 behaviour whilst it is not running). The *dumpdir* directive defines the
 directory where the measurement histories are saved when *chronyd* exits,
 or the <<chronyc.adoc#dump,*dump*>> command in *chronyc* is issued.
++
+If the directory does not exist, it will be created automatically.
 +
 An example of the directive is:
 +
@@ -696,6 +725,8 @@ received from the server in order to avoid making an NTS-KE request when
 source in files named by the IP address of the NTS-KE server (e.g.
 _1.2.3.4.nts_). By default, the client does not save the cookies.
 +
+If the directory does not exist, it will be created automatically.
++
 An example of the directive is:
 +
 ----
@@ -726,7 +757,7 @@ authentication mechanism to be used on computers which start with wrong time
 has important security implications, e.g. if an NTP server was ever
 compromised, its certificate could be used in an attack after the expiration
 time. The default value is 0, which means the time checks are always enabled.
-
++
 An example of the directive is:
 +
 ----
@@ -738,6 +769,78 @@ time, assuming the first update corrects the clock and later checks can work
 with correct time.
 
 === Source selection
+
+[[authselectmode]]*authselectmode* _mode_::
+NTP sources can be specified with the *key* or *nts* option to enable
+authentication to limit the impact of man-in-the-middle attacks. The
+attackers can drop or delay NTP packets (up to the *maxdelay* and
+<<maxdistance,*maxdistance*>> limits), but they cannot modify the timestamps
+contained in the packets. The attack can cause only a limited slew or step, and
+also cause the clock to run faster or slower than real time (up to double of
+the <<maxdrift,*maxdrift*>> limit).
++
+When authentication is enabled for an NTP source, it is important to disable
+unauthenticated NTP sources which could be exploited in the attack, e.g. if
+they are not reachable only over a trusted network. Alternatively, the source
+selection can be configured with the *require* and *trust* options to
+synchronise to the unauthenticated sources only if they agree with the
+authenticated sources and might have a positive impact on the accuracy of the
+clock. Note that in this case the impact of the attack is higher. The attackers
+cannot cause an arbitrarily large step or slew, but they have more control over
+the frequency of the clock and can cause *chronyd* to report false information,
+e.g. a significantly smaller root delay and dispersion.
++
+This directive determines the default selection options for authenticated and
+unauthenticated sources in order to simplify the configuration with the
+configuration file and *chronyc* commands. It sets a policy for authentication.
++
+Sources specified with the *noselect* option are ignored (not counted as either
+authenticated or unauthenticated), and they always have only the selection
+options specified in the configuration.
++
+There are four modes:
++
+*require*:::
+Authentication is strictly required for NTP sources in this mode. If any
+unauthenticated NTP sources are specified, they will automatically get the
+*noselect* option to prevent them from being selected for synchronisation.
+*prefer*:::
+In this mode, authentication is optional and preferred. If it is enabled for at
+least one NTP source, all unauthenticated NTP sources will get the *noselect*
+option.
+*mix*:::
+In this mode, authentication is optional and synchronisation to a mix of
+authenticated and unauthenticated NTP sources is allowed. If both authenticated
+and unauthenticated NTP sources are specified, all authenticated NTP sources
+and reference clocks will get the *require* and *trust* options to prevent
+synchronisation to unauthenticated NTP sources if they do not agree with a
+majority of the authenticated sources and reference clocks. This is the default
+mode.
+*ignore*:::
+In this mode, authentication is ignored in the source selection. All sources
+will have only the selection options that were specified in the configuration
+file, or *chronyc* command. This was the behaviour of *chronyd* in versions
+before 4.0.
+{blank}::
++
+As an example, the following configuration using the default *mix* mode:
++
+----
+server foo.example.net nts
+server bar.example.net nts
+server baz.example.net
+refclock SHM 0
+----
++
+is equivalent to the following configuration using the *ignore* mode:
++
+----
+authselectmode ignore
+server foo.example.net nts require trust
+server bar.example.net nts require trust
+server baz.example.net
+refclock SHM 0 require trust
+----
 
 [[combinelimit]]*combinelimit* _limit_::
 When *chronyd* has multiple sources available for synchronisation, it has to
@@ -913,7 +1016,7 @@ clock will be off for a longer time. On Linux with the default
 No correction is applied to the clock for the leap second. The clock will be
 corrected later in normal operation when new measurements are made and the
 estimated offset includes the one second error.
-::
+{blank}::
 +
 When serving time to NTP clients that cannot be configured to correct their
 clocks for a leap second by slewing, or to clients that would correct at
@@ -1264,6 +1367,17 @@ Currently, for each of the IPv4 and IPv6 protocols, only one *bindaddress*
 directive can be specified. Therefore, it is not useful on computers which
 should serve NTP on multiple network interfaces.
 
+[[binddevice]]*binddevice* _interface_::
+The *binddevice* directive binds the NTP server sockets to a network device
+specified by the interface name. This directive can specify only one interface
+and it is supported on Linux only.
++
+An example of the directive is:
++
+----
+binddevice eth0
+----
+
 [[broadcast]]*broadcast* _interval_ _address_ [_port_]::
 The *broadcast* directive is used to declare a broadcast address to which
 chronyd should send packets in the NTP broadcast mode (i.e. make *chronyd* act
@@ -1373,7 +1487,7 @@ synchronised to it. When that server fails, another will take over.
 +
 The *orphan* mode is compatible with the *ntpd*'s orphan mode (enabled by the
 *tos orphan* command).
-::
+{blank}::
 +
 An example of the directive is:
 +
@@ -1400,7 +1514,7 @@ ntpsigndsocket /var/lib/samba/ntp_signd
 
 [[ntsport]]*ntsport* _port_::
 This directive specifies the TCP port on which *chronyd* will provide the NTS
-Key Establishment (NTS-KE) service. The default port is 11443.
+Key Establishment (NTS-KE) service. The default port is 4460.
 +
 The port will be open only when a certificate and key is specified by the
 *ntsservercert* and *ntsserverkey* directives.
@@ -1516,7 +1630,7 @@ source address from completely blocking responses to that address. The leak
 rate is defined as a power of 1/2 and it is 2 by default, i.e. on average at
 least every fourth request has a response. The minimum value is 1 and the
 maximum value is 4.
-::
+{blank}::
 +
 An example use of the directive is:
 +
@@ -1527,6 +1641,17 @@ ratelimit interval 1 burst 16
 This would reduce the response rate for IP addresses sending packets on average
 more than once per 2 seconds, or sending packets in bursts of more than 16
 packets, by up to 75% (with default *leak* of 2).
+
+[[ntsratelimit]]*ntsratelimit* [_option_]...::
+This directive enables rate limiting of NTS-KE requests. It is similar to the
+<<ratelimit,*ratelimit*>> directive, except the default interval is 6
+(1 connection per 64 seconds).
++
+An example of the use of the directive is:
++
+----
+ntsratelimit interval 3 burst 1
+----
 
 [[smoothtime]]*smoothtime* _max-freq_ _max-wander_ [*leaponly*]::
 The *smoothtime* directive can be used to enable smoothing of the time that
@@ -1581,8 +1706,8 @@ smoothtime 50000 0.01
 === Command and monitoring access
 
 [[bindcmdaddress]]*bindcmdaddress* _address_::
-The *bindcmdaddress* directive allows you to specify an IP address of an
-interface on which *chronyd* will listen for monitoring command packets (issued
+The *bindcmdaddress* directive specifies a local IP address to which *chronyd*
+will bind the UDP socket listening for monitoring command packets (issued
 by *chronyc*). On systems other than Linux, the address of the interface needs
 to be already configured when *chronyd* is started.
 +
@@ -1593,9 +1718,10 @@ directory will be created on start if it does not exist. The compiled-in default
 path of the socket is _@CHRONYRUNDIR@/chronyd.sock_. The socket can be
 disabled by setting the path to _/_.
 +
-By default, *chronyd* binds to the loopback interface (with addresses
-_127.0.0.1_ and _::1_). This blocks all access except from localhost. To listen
-for command packets on all interfaces, you can add the lines:
+By default, *chronyd* binds the UDP sockets to the addresses _127.0.0.1_ and
+_::1_ (i.e. the loopback interface). This blocks all access except from
+localhost. To listen for command packets on all interfaces, you can add the
+lines:
 +
 ----
 bindcmdaddress 0.0.0.0
@@ -1611,6 +1737,17 @@ An example that sets the path of the Unix domain command socket is:
 +
 ----
 bindcmdaddress /var/run/chrony/chronyd.sock
+----
+
+[[bindcmddevice]]*bindcmddevice* _interface_::
+The *bindcmddevice* directive binds the UDP command sockets to a network device
+specified by the interface name. This directive can specify only one interface
+and it is supported on Linux only.
++
+An example of the directive is:
++
+----
+bindcmddevice eth0
 ----
 
 [[cmdallow]]*cmdallow* [*all*] [_subnet_]::
@@ -1991,7 +2128,7 @@ from the example line above):
 . Applied compensation in ppm, positive means the system clock is running
   faster than it would be without the compensation. [3.6600e-01]
 +
-::
+{blank}::
 An example of the directive is:
 +
 ----
@@ -2024,8 +2161,9 @@ which would cause a syslog message to be generated if a system clock error of ov
 0.1 seconds starts to be compensated.
 
 [[logdir]]*logdir* _directory_::
-This directive allows the directory where log files are written to be
-specified.
+This directive specifies the directory for writing log files enabled by the
+*log* directive. If the directory does not exist, it will be created
+automatically.
 +
 An example of the use of this directive is:
 +
@@ -2052,6 +2190,50 @@ option as the *chronyd* process will not be allowed to fork and execute the
 sendmail binary.
 
 === Miscellaneous
+
+[[confdir]]*confdir* _directory_...::
+The *confdir* directive includes configuration files with the _.conf_ suffix
+from a directory. The files are included in the lexicographical order of the
+file names.
++
+Multiple directories (up to 10) can be specified with a single *confdir*
+directive. In this case, if multiple directories contain a file with the same
+name, only the first file in the order of the specified directories will be
+included. This enables a fragmented configuration where existing fragments can
+be replaced by adding files to a different directory.
++
+An example of the directive is:
++
+----
+confdir @SYSCONFDIR@/chrony.d
+----
+
+[[sourcedir]]*sourcedir* _directory_...::
+The *sourcedir* directive is identical to the *confdir* directive, except the
+configuration files have the _.sources_ suffix, they can only specify NTP
+sources (i.e. use the *server*, *pool*, and *peer* directive), and can be
+reloaded by the <<chronyc.adoc#reload,*reload sources*>> command in
+*chronyc*. It is particularly useful with dynamic sources like NTP servers
+received from a DHCP server, which can be written to a file specific to the
+network interface by a networking script.
++
+An example of the directive is:
++
+----
+sourcedir /var/run/chrony-dhcp
+----
+
+[[include]]*include* _pattern_::
+The *include* directive includes a configuration file, or multiple configuration
+files if a wildcard pattern is specified. Unlike with the *confdir* directive,
+the full name of the files needs to be specified and at least one file is
+required to exist.
++
+An example of the directive is:
++
+----
+include @SYSCONFDIR@/chrony.d/*.conf
+----
 
 [[hwtimestamp]]*hwtimestamp* _interface_ [_option_]...::
 This directive enables hardware timestamping of NTP packets sent to and
@@ -2123,14 +2305,14 @@ _ntp_::::
 Enables timestamping of received NTP packets.
 _none_::::
 Disables timestamping of received packets.
-:::
+{blank}:::
 The most specific filter for timestamping NTP packets which is supported by the
 NIC is selected by default. Some NICs can timestamp only PTP packets, which
 limits the selection to the _none_ filter. Forcing timestamping of all packets
 with the _all_ filter when the NIC supports both _all_ and _ntp_ filters can be
 useful when packets are received from or on a non-standard UDP port (e.g.
 specified by the *port* directive).
-::
+{blank}::
 +
 Examples of the directive are:
 +
@@ -2138,17 +2320,6 @@ Examples of the directive are:
 hwtimestamp eth0
 hwtimestamp eth1 txcomp 300e-9 rxcomp 645e-9
 hwtimestamp *
-----
-
-[[include]]*include* _pattern_::
-The *include* directive includes a configuration file or multiple configuration
-files if a wildcard pattern is specified. This can be useful when maintaining
-configuration on multiple hosts to keep the differences in separate files.
-+
-An example of the directive is:
-+
-----
-include @SYSCONFDIR@/chrony.d/*.conf
 ----
 
 [[keyfile]]*keyfile* _file_::

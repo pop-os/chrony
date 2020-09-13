@@ -135,7 +135,11 @@ static const char permissions[] = {
   PERMIT_AUTH, /* ONOFFLINE */
   PERMIT_AUTH, /* ADD_SOURCE */
   PERMIT_OPEN, /* NTP_SOURCE_NAME */
-  PERMIT_AUTH, /* RESET */
+  PERMIT_AUTH, /* RESET_SOURCES */
+  PERMIT_AUTH, /* AUTH_DATA */
+  PERMIT_AUTH, /* CLIENT_ACCESSES_BY_INDEX3 */
+  PERMIT_AUTH, /* SELECT_DATA */
+  PERMIT_AUTH, /* RELOAD_SOURCES */
 };
 
 /* ================================================== */
@@ -153,23 +157,22 @@ static void read_from_cmd_socket(int sock_fd, int event, void *anything);
 static int
 open_socket(int family)
 {
+  const char *local_path, *iface;
   IPSockAddr local_addr;
-  const char *local_path;
   int sock_fd, port;
 
   switch (family) {
     case IPADDR_INET4:
     case IPADDR_INET6:
       port = CNF_GetCommandPort();
-      if (port == 0 || !SCK_IsFamilySupported(family))
+      if (port == 0 || !SCK_IsIpFamilyEnabled(family))
         return INVALID_SOCK_FD;
 
       CNF_GetBindCommandAddress(family, &local_addr.ip_addr);
-      if (local_addr.ip_addr.family != family)
-        SCK_GetLoopbackIPAddress(family, &local_addr.ip_addr);
       local_addr.port = port;
+      iface = CNF_GetBindCommandInterface();
 
-      sock_fd = SCK_OpenUdpSocket(NULL, &local_addr, SCK_FLAG_RX_DEST_ADDR);
+      sock_fd = SCK_OpenUdpSocket(NULL, &local_addr, iface, SCK_FLAG_RX_DEST_ADDR);
       if (sock_fd < 0) {
         LOG(LOGS_ERR, "Could not open command socket on %s",
             UTI_IPSockAddrToString(&local_addr));
@@ -233,22 +236,17 @@ do_size_checks(void)
 /* ================================================== */
 
 void
-CAM_Initialise(int family)
+CAM_Initialise(void)
 {
   assert(!initialised);
   assert(sizeof (permissions) / sizeof (permissions[0]) == N_REQUEST_TYPES);
   do_size_checks();
 
   initialised = 1;
+
   sock_fdu = INVALID_SOCK_FD;
-  sock_fd4 = INVALID_SOCK_FD;
-  sock_fd6 = INVALID_SOCK_FD;
-
-  if (family == IPADDR_UNSPEC || family == IPADDR_INET4)
-    sock_fd4 = open_socket(IPADDR_INET4);
-
-  if (family == IPADDR_UNSPEC || family == IPADDR_INET6)
-    sock_fd6 = open_socket(IPADDR_INET6);
+  sock_fd4 = open_socket(IPADDR_INET4);
+  sock_fd6 = open_socket(IPADDR_INET6);
 
   access_auth_table = ADF_CreateTable();
 }
@@ -289,7 +287,7 @@ CAM_OpenUnixSocket(void)
 {
   /* This is separated from CAM_Initialise() as it needs to be called when
      the process has already dropped the root privileges */
-  if (CNF_GetBindCommandPath()[0])
+  if (CNF_GetBindCommandPath())
     sock_fdu = open_socket(IPADDR_UNSPEC);
 }
 
@@ -299,6 +297,11 @@ static void
 transmit_reply(int sock_fd, SCK_Message *message)
 {
   message->length = PKL_ReplyLength((CMD_Reply *)message->data);
+
+  /* Don't require responses to non-link-local addresses to use the same
+     interface */
+  if (!SCK_IsLinkLocalIPAddress(&message->remote_addr.ip.ip_addr))
+    message->if_index = INVALID_IF_INDEX;
 
   if (!SCK_SendMessage(sock_fd, message, 0))
     return;
@@ -599,11 +602,7 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
         tx_message->data.source_data.mode    = htons(RPY_SD_MD_REF);
         break;
     }
-    tx_message->data.source_data.flags =
-                  htons((report.sel_options & SRC_SELECT_PREFER ? RPY_SD_FLAG_PREFER : 0) |
-                        (report.sel_options & SRC_SELECT_NOSELECT ? RPY_SD_FLAG_NOSELECT : 0) |
-                        (report.sel_options & SRC_SELECT_TRUST ? RPY_SD_FLAG_TRUST : 0) |
-                        (report.sel_options & SRC_SELECT_REQUIRE ? RPY_SD_FLAG_REQUIRE : 0));
+    tx_message->data.source_data.flags = htons(0);
     tx_message->data.source_data.reachability = htons(report.reachability);
     tx_message->data.source_data.since_sample = htonl(report.latest_meas_ago);
     tx_message->data.source_data.orig_latest_meas = UTI_FloatHostToNetwork(report.orig_latest_meas);
@@ -716,7 +715,7 @@ handle_add_source(CMD_Request *rx_message, CMD_Reply *tx_message)
       return;
   }
 
-  port = (unsigned short)(ntohl(rx_message->data.ntp_source.port));
+  port = ntohl(rx_message->data.ntp_source.port);
   params.minpoll = ntohl(rx_message->data.ntp_source.minpoll);
   params.maxpoll = ntohl(rx_message->data.ntp_source.maxpoll);
   params.presend_minpoll = ntohl(rx_message->data.ntp_source.presend_minpoll);
@@ -751,7 +750,7 @@ handle_add_source(CMD_Request *rx_message, CMD_Reply *tx_message)
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_TRUST ? SRC_SELECT_TRUST : 0) |
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_REQUIRE ? SRC_SELECT_REQUIRE : 0);
 
-  status = NSR_AddSourceByName(name, port, pool, type, &params);
+  status = NSR_AddSourceByName(name, port, pool, type, &params, NULL);
   switch (status) {
     case NSR_Success:
       break;
@@ -780,13 +779,12 @@ handle_add_source(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_del_source(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  NTP_Remote_Address rem_addr;
   NSR_Status status;
+  IPAddr ip_addr;
   
-  UTI_IPNetworkToHost(&rx_message->data.del_source.ip_addr, &rem_addr.ip_addr);
-  rem_addr.port = 0;
+  UTI_IPNetworkToHost(&rx_message->data.del_source.ip_addr, &ip_addr);
   
-  status = NSR_RemoveSource(&rem_addr);
+  status = NSR_RemoveSource(&ip_addr);
   switch (status) {
     case NSR_Success:
       break;
@@ -1000,7 +998,7 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPT_ClientAccessByIndex_Report report;
   RPY_ClientAccesses_Client *client;
   int n_indices;
-  uint32_t i, j, req_first_index, req_n_clients;
+  uint32_t i, j, req_first_index, req_n_clients, req_min_hits, req_reset;
   struct timespec now;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
@@ -1009,6 +1007,8 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
   req_n_clients = ntohl(rx_message->data.client_accesses_by_index.n_clients);
   if (req_n_clients > MAX_CLIENT_ACCESSES)
     req_n_clients = MAX_CLIENT_ACCESSES;
+  req_min_hits = ntohl(rx_message->data.client_accesses_by_index.min_hits);
+  req_reset = ntohl(rx_message->data.client_accesses_by_index.reset);
 
   n_indices = CLG_GetNumberOfIndices();
   if (n_indices < 0) {
@@ -1016,24 +1016,28 @@ handle_client_accesses_by_index(CMD_Request *rx_message, CMD_Reply *tx_message)
     return;
   }
 
-  tx_message->reply = htons(RPY_CLIENT_ACCESSES_BY_INDEX2);
+  tx_message->reply = htons(RPY_CLIENT_ACCESSES_BY_INDEX3);
   tx_message->data.client_accesses_by_index.n_indices = htonl(n_indices);
 
   for (i = req_first_index, j = 0; i < (uint32_t)n_indices && j < req_n_clients; i++) {
-    if (!CLG_GetClientAccessReportByIndex(i, &report, &now))
+    if (!CLG_GetClientAccessReportByIndex(i, req_reset, req_min_hits, &report, &now))
       continue;
 
     client = &tx_message->data.client_accesses_by_index.clients[j++];
 
     UTI_IPHostToNetwork(&report.ip_addr, &client->ip);
     client->ntp_hits = htonl(report.ntp_hits);
+    client->nke_hits = htonl(report.nke_hits);
     client->cmd_hits = htonl(report.cmd_hits);
     client->ntp_drops = htonl(report.ntp_drops);
+    client->nke_drops = htonl(report.nke_drops);
     client->cmd_drops = htonl(report.cmd_drops);
     client->ntp_interval = report.ntp_interval;
+    client->nke_interval = report.nke_interval;
     client->cmd_interval = report.cmd_interval;
     client->ntp_timeout_interval = report.ntp_timeout_interval;
     client->last_ntp_hit_ago = htonl(report.last_ntp_hit_ago);
+    client->last_nke_hit_ago = htonl(report.last_nke_hit_ago);
     client->last_cmd_hit_ago = htonl(report.last_cmd_hit_ago);
   }
 
@@ -1135,12 +1139,15 @@ handle_server_stats(CMD_Request *rx_message, CMD_Reply *tx_message)
   RPT_ServerStatsReport report;
 
   CLG_GetServerStatsReport(&report);
-  tx_message->reply = htons(RPY_SERVER_STATS);
+  tx_message->reply = htons(RPY_SERVER_STATS2);
   tx_message->data.server_stats.ntp_hits = htonl(report.ntp_hits);
+  tx_message->data.server_stats.nke_hits = htonl(report.nke_hits);
   tx_message->data.server_stats.cmd_hits = htonl(report.cmd_hits);
   tx_message->data.server_stats.ntp_drops = htonl(report.ntp_drops);
+  tx_message->data.server_stats.nke_drops = htonl(report.nke_drops);
   tx_message->data.server_stats.cmd_drops = htonl(report.cmd_drops);
   tx_message->data.server_stats.log_drops = htonl(report.log_drops);
+  tx_message->data.server_stats.ntp_auth_hits = htonl(report.ntp_auth_hits);
 }
 
 /* ================================================== */
@@ -1204,7 +1211,7 @@ handle_ntp_source_name(CMD_Request *rx_message, CMD_Reply *tx_message)
   IPAddr addr;
   char *name;
 
-  UTI_IPNetworkToHost(&rx_message->data.ntp_data.ip_addr, &addr);
+  UTI_IPNetworkToHost(&rx_message->data.ntp_source_name.ip_addr, &addr);
   name = NSR_GetName(&addr);
 
   if (!name) {
@@ -1226,13 +1233,99 @@ handle_ntp_source_name(CMD_Request *rx_message, CMD_Reply *tx_message)
 /* ================================================== */
 
 static void
-handle_reset(CMD_Request *rx_message, CMD_Reply *tx_message)
+handle_reload_sources(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  CNF_ReloadSources();
+}
+
+/* ================================================== */
+
+static void
+handle_reset_sources(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   struct timespec cooked_now, now;
 
   SRC_ResetSources();
   SCH_GetLastEventTime(&cooked_now, NULL, &now);
   LCL_NotifyExternalTimeStep(&now, &cooked_now, 0.0, 0.0);
+}
+
+/* ================================================== */
+
+static void
+handle_auth_data(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_AuthReport report;
+  IPAddr ip_addr;
+
+  UTI_IPNetworkToHost(&rx_message->data.auth_data.ip_addr, &ip_addr);
+
+  if (!NSR_GetAuthReport(&ip_addr, &report)) {
+    tx_message->status = htons(STT_NOSUCHSOURCE);
+    return;
+  }
+
+  tx_message->reply = htons(RPY_AUTH_DATA);
+
+  switch (report.mode) {
+    case NTP_AUTH_NONE:
+      tx_message->data.auth_data.mode = htons(RPY_AD_MD_NONE);
+      break;
+    case NTP_AUTH_SYMMETRIC:
+      tx_message->data.auth_data.mode = htons(RPY_AD_MD_SYMMETRIC);
+      break;
+    case NTP_AUTH_NTS:
+      tx_message->data.auth_data.mode = htons(RPY_AD_MD_NTS);
+      break;
+    default:
+      break;
+  }
+
+  tx_message->data.auth_data.key_type = htons(report.key_type);
+  tx_message->data.auth_data.key_id = htonl(report.key_id);
+  tx_message->data.auth_data.key_length = htons(report.key_length);
+  tx_message->data.auth_data.ke_attempts = htons(report.ke_attempts);
+  tx_message->data.auth_data.last_ke_ago = htonl(report.last_ke_ago);
+  tx_message->data.auth_data.cookies = htons(report.cookies);
+  tx_message->data.auth_data.cookie_length = htons(report.cookie_length);
+  tx_message->data.auth_data.nak = htons(report.nak);
+}
+
+/* ================================================== */
+
+static uint16_t
+convert_select_options(int options)
+{
+  return (options & SRC_SELECT_PREFER ? RPY_SD_OPTION_PREFER : 0) |
+         (options & SRC_SELECT_NOSELECT ? RPY_SD_OPTION_NOSELECT : 0) |
+         (options & SRC_SELECT_TRUST ? RPY_SD_OPTION_TRUST : 0) |
+         (options & SRC_SELECT_REQUIRE ? RPY_SD_OPTION_REQUIRE : 0);
+}
+
+/* ================================================== */
+
+static void
+handle_select_data(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_SelectReport report;
+
+  if (!SRC_GetSelectReport(ntohl(rx_message->data.select_data.index), &report)) {
+    tx_message->status = htons(STT_NOSUCHSOURCE);
+    return;
+  }
+
+  tx_message->reply = htons(RPY_SELECT_DATA);
+
+  tx_message->data.select_data.ref_id = htonl(report.ref_id);
+  UTI_IPHostToNetwork(&report.ip_addr, &tx_message->data.select_data.ip_addr);
+  tx_message->data.select_data.state_char = report.state_char;
+  tx_message->data.select_data.authentication = report.authentication;
+  tx_message->data.select_data.conf_options = htons(convert_select_options(report.conf_options));
+  tx_message->data.select_data.eff_options = htons(convert_select_options(report.eff_options));
+  tx_message->data.select_data.last_sample_ago = htonl(report.last_sample_ago);
+  tx_message->data.select_data.score = UTI_FloatHostToNetwork(report.score);
+  tx_message->data.select_data.hi_limit = UTI_FloatHostToNetwork(report.hi_limit);
+  tx_message->data.select_data.lo_limit = UTI_FloatHostToNetwork(report.lo_limit);
 }
 
 /* ================================================== */
@@ -1247,7 +1340,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
   IPAddr loopback_addr, remote_ip;
   int read_length, expected_length;
   int localhost, allowed, log_index;
-  unsigned short rx_command;
+  uint16_t rx_command;
   struct timespec now, cooked_now;
 
   sck_message = SCK_ReceiveMessage(sock_fd, 0);
@@ -1305,11 +1398,11 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
     return;
   }
 
-  log_index = CLG_LogCommandAccess(&remote_ip, &cooked_now);
+  log_index = CLG_LogServiceAccess(CLG_CMDMON, &remote_ip, &cooked_now);
 
   /* Don't reply to all requests from hosts other than localhost if the rate
      is excessive */
-  if (!localhost && log_index >= 0 && CLG_LimitCommandResponseRate(log_index)) {
+  if (!localhost && log_index >= 0 && CLG_LimitServiceRate(CLG_CMDMON, log_index)) {
       DEBUG_LOG("Command packet discarded to limit response rate");
       return;
   }
@@ -1553,7 +1646,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
           handle_cyclelogs(&rx_message, &tx_message);
           break;
 
-        case REQ_CLIENT_ACCESSES_BY_INDEX2:
+        case REQ_CLIENT_ACCESSES_BY_INDEX3:
           handle_client_accesses_by_index(&rx_message, &tx_message);
           break;
 
@@ -1613,8 +1706,20 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
           handle_ntp_source_name(&rx_message, &tx_message);
           break;
 
-        case REQ_RESET:
-          handle_reset(&rx_message, &tx_message);
+        case REQ_RESET_SOURCES:
+          handle_reset_sources(&rx_message, &tx_message);
+          break;
+
+        case REQ_AUTH_DATA:
+          handle_auth_data(&rx_message, &tx_message);
+          break;
+
+        case REQ_SELECT_DATA:
+          handle_select_data(&rx_message, &tx_message);
+          break;
+
+        case REQ_RELOAD_SOURCES:
+          handle_reload_sources(&rx_message, &tx_message);
           break;
 
         default:

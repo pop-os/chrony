@@ -78,6 +78,7 @@ struct NCR_Instance_Record {
   SCH_TimeoutID tx_timeout_id;  /* Timeout ID for next transmission */
   int tx_suspended;             /* Boolean indicating we can't transmit yet */
 
+  int auto_iburst;              /* If 1, initiate a burst when going online */
   int auto_burst;               /* If 1, initiate a burst on each poll */
   int auto_offline;             /* If 1, automatically go offline when requests
                                    cannot be sent */
@@ -297,6 +298,7 @@ static void transmit_timeout(void *arg);
 static double get_transmit_delay(NCR_Instance inst, int on_tx, double last_tx);
 static double get_separation(int poll);
 static int parse_packet(NTP_Packet *packet, int length, NTP_PacketInfo *info);
+static void set_connectivity(NCR_Instance inst, SRC_Connectivity connectivity);
 
 /* ================================================== */
 
@@ -555,6 +557,7 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
   result->max_delay_ratio = CLAMP(0.0, params->max_delay_ratio, MAX_MAXDELAYRATIO);
   result->max_delay_dev_ratio = CLAMP(0.0, params->max_delay_dev_ratio, MAX_MAXDELAYDEVRATIO);
   result->offset_correction = params->offset;
+  result->auto_iburst = params->iburst;
   result->auto_burst = params->burst;
   result->auto_offline = params->auto_offline;
   result->poll_target = params->poll_target;
@@ -582,8 +585,8 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
 
   /* Create a source instance for this NTP source */
   result->source = SRC_CreateNewInstance(UTI_IPToRefid(&remote_addr->ip_addr),
-                                         SRC_NTP, params->sel_options,
-                                         &result->remote_addr.ip_addr,
+                                         SRC_NTP, NAU_IsAuthEnabled(result->auth),
+                                         params->sel_options, &result->remote_addr.ip_addr,
                                          params->min_samples, params->max_samples,
                                          params->min_delay, params->asymmetry);
 
@@ -596,9 +599,7 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
   result->rx_timeout_id = 0;
   result->tx_timeout_id = 0;
   result->tx_suspended = 1;
-  result->opmode = params->connectivity == SRC_ONLINE ||
-                   (params->connectivity == SRC_MAYBE_ONLINE &&
-                    NIO_IsServerConnectable(remote_addr)) ? MD_ONLINE : MD_OFFLINE;
+  result->opmode = MD_OFFLINE;
   result->local_poll = result->minpoll;
   result->poll_score = 0.0;
   zero_local_timestamp(&result->local_tx);
@@ -608,9 +609,7 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
   
   NCR_ResetInstance(result);
 
-  if (params->iburst) {
-    NCR_InitiateSampleBurst(result, IBURST_GOOD_SAMPLES, IBURST_TOTAL_SAMPLES);
-  }
+  set_connectivity(result, params->connectivity);
 
   return result;
 }
@@ -962,6 +961,10 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
   smooth_time = 0;
   smooth_offset = 0.0;
 
+  /* Get an initial transmit timestamp.  A more accurate timestamp will be
+     taken later in this function. */
+  SCH_GetLastEventTime(&local_transmit, NULL, NULL);
+
   if (my_mode == MODE_CLIENT) {
     /* Don't reveal local time or state of the clock in client packets */
     precision = 32;
@@ -969,10 +972,6 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     our_root_delay = our_root_dispersion = 0.0;
     UTI_ZeroTimespec(&our_ref_time);
   } else {
-    /* This is accurate enough and cheaper than calling LCL_ReadCookedTime.
-       A more accurate timestamp will be taken later in this function. */
-    SCH_GetLastEventTime(&local_transmit, NULL, NULL);
-
     REF_GetReferenceParams(&local_transmit,
                            &are_we_synchronised, &leap_status,
                            &our_stratum,
@@ -1018,12 +1017,8 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
  
   message.poll = my_poll;
   message.precision = precision;
-
-  /* If we're sending a client mode packet and we aren't synchronized yet, 
-     we might have to set up artificial values for some of these parameters */
   message.root_delay = UTI_DoubleToNtp32(our_root_delay);
   message.root_dispersion = UTI_DoubleToNtp32(our_root_dispersion);
-
   message.reference_id = htonl(our_ref_id);
 
   /* Now fill in timestamps */
@@ -1063,20 +1058,13 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     /* Prepare random bits which will be added to the transmit timestamp */
     UTI_GetNtp64Fuzz(&ts_fuzz, precision);
 
-    /* Transmit - this our local time right now!  Also, we might need to
-       store this for our own use later, next time we receive a message
-       from the source we're sending to now. */
-    LCL_ReadCookedTime(&local_transmit, &local_transmit_err);
-
-    if (smooth_time)
-      UTI_AddDoubleToTimespec(&local_transmit, smooth_offset, &local_transmit);
-
-    /* Pre-compensate the transmit time by approximately how long it will take
-       to generate the authentication data */
-    if (auth)
-      NAU_AdjustRequestTimestamp(auth, &local_transmit);
-    else
-      NAU_AdjustResponseTimestamp(request, request_info, &local_transmit);
+    /* Get a more accurate transmit timestamp if it needs to be saved in the
+       packet (i.e. in the server, symmetric, and broadcast basic modes) */
+    if (!interleaved && precision < 32) {
+      LCL_ReadCookedTime(&local_transmit, &local_transmit_err);
+      if (smooth_time)
+        UTI_AddDoubleToTimespec(&local_transmit, smooth_offset, &local_transmit);
+    }
 
     UTI_TimespecToNtp64(interleaved ? &local_tx->ts : &local_transmit,
                         &message.transmit_ts, &ts_fuzz);
@@ -1112,9 +1100,16 @@ transmit_packet(NTP_Mode my_mode, /* The mode this machine wants to be */
     return 0;
   }
 
+  /* If the transmit timestamp will be saved, get an even more
+     accurate daemon timestamp closer to the transmission */
+  if (local_tx)
+    LCL_ReadCookedTime(&local_transmit, &local_transmit_err);
+
   ret = NIO_SendPacket(&message, where_to, from, info.length, local_tx != NULL);
 
   if (local_tx) {
+    if (smooth_time)
+      UTI_AddDoubleToTimespec(&local_transmit, smooth_offset, &local_transmit);
     local_tx->ts = local_transmit;
     local_tx->err = local_transmit_err;
     local_tx->source = NTP_TS_DAEMON;
@@ -1796,8 +1791,8 @@ process_response(NCR_Instance inst, NTP_Local_Address *local_addr,
           break;
       }
     } else {
-      /* Slowly increase the polling interval if we can't get good packet */
-      adjust_poll(inst, 0.1);
+      /* Slowly increase the polling interval if we can't get a good response */
+      adjust_poll(inst, testD ? 0.02 : 0.1);
     }
 
     /* If in client mode, no more packets are expected to be coming from the
@@ -2081,10 +2076,10 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
   }
 
   kod = 0;
-  log_index = CLG_LogNTPAccess(&remote_addr->ip_addr, &rx_ts->ts);
+  log_index = CLG_LogServiceAccess(CLG_NTP, &remote_addr->ip_addr, &rx_ts->ts);
 
   /* Don't reply to all requests if the rate is excessive */
-  if (log_index >= 0 && CLG_LimitNTPResponseRate(log_index)) {
+  if (log_index >= 0 && CLG_LimitServiceRate(CLG_NTP, log_index)) {
       DEBUG_LOG("NTP packet discarded to limit response rate");
       return;
   }
@@ -2096,10 +2091,12 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
     /* Don't respond unless a non-zero KoD was returned */
     if (kod == 0)
       return;
+  } else if (info.auth.mode != NTP_AUTH_NONE && info.auth.mode != NTP_AUTH_MSSNTP) {
+    CLG_LogAuthNtpRequest();
   }
 
   /* If it is an NTPv4 packet with a long MAC and no extension fields,
-     respond with a NTPv3 packet to avoid breaking RFC 7822 and keep
+     respond with an NTPv3 packet to avoid breaking RFC 7822 and keep
      the length symmetric.  Otherwise, respond with the same version. */
   if (info.version == 4 && info.ext_fields == 0 && info.auth.mode == NTP_AUTH_SYMMETRIC &&
       info.auth.mac.length > NTP_MAX_V4_MAC_LENGTH)
@@ -2255,13 +2252,9 @@ NCR_SlewTimes(NCR_Instance inst, struct timespec *when, double dfreq, double dof
 
 /* ================================================== */
 
-void
-NCR_SetConnectivity(NCR_Instance inst, SRC_Connectivity connectivity)
+static void
+set_connectivity(NCR_Instance inst, SRC_Connectivity connectivity)
 {
-  char *s;
-
-  s = UTI_IPToString(&inst->remote_addr.ip_addr);
-
   if (connectivity == SRC_MAYBE_ONLINE)
     connectivity = NIO_IsServerConnectable(&inst->remote_addr) ? SRC_ONLINE : SRC_OFFLINE;
 
@@ -2272,17 +2265,17 @@ NCR_SetConnectivity(NCR_Instance inst, SRC_Connectivity connectivity)
           /* Nothing to do */
           break;
         case MD_OFFLINE:
-          LOG(LOGS_INFO, "Source %s online", s);
           inst->opmode = MD_ONLINE;
           NCR_ResetInstance(inst);
           start_initial_timeout(inst);
+          if (inst->auto_iburst)
+            NCR_InitiateSampleBurst(inst, IBURST_GOOD_SAMPLES, IBURST_TOTAL_SAMPLES);
           break;
         case MD_BURST_WAS_ONLINE:
           /* Will revert */
           break;
         case MD_BURST_WAS_OFFLINE:
           inst->opmode = MD_BURST_WAS_ONLINE;
-          LOG(LOGS_INFO, "Source %s online", s);
           break;
         default:
           assert(0);
@@ -2291,14 +2284,12 @@ NCR_SetConnectivity(NCR_Instance inst, SRC_Connectivity connectivity)
     case SRC_OFFLINE:
       switch (inst->opmode) {
         case MD_ONLINE:
-          LOG(LOGS_INFO, "Source %s offline", s);
           take_offline(inst);
           break;
         case MD_OFFLINE:
           break;
         case MD_BURST_WAS_ONLINE:
           inst->opmode = MD_BURST_WAS_OFFLINE;
-          LOG(LOGS_INFO, "Source %s offline", s);
           break;
         case MD_BURST_WAS_OFFLINE:
           break;
@@ -2309,6 +2300,26 @@ NCR_SetConnectivity(NCR_Instance inst, SRC_Connectivity connectivity)
     default:
       assert(0);
   }
+}
+
+/* ================================================== */
+
+void
+NCR_SetConnectivity(NCR_Instance inst, SRC_Connectivity connectivity)
+{
+  OperatingMode prev_opmode;
+  int was_online, is_online;
+
+  prev_opmode = inst->opmode;
+
+  set_connectivity(inst, connectivity);
+
+  /* Report an important change */
+  was_online = prev_opmode == MD_ONLINE || prev_opmode == MD_BURST_WAS_ONLINE;
+  is_online = inst->opmode == MD_ONLINE || inst->opmode == MD_BURST_WAS_ONLINE;
+  if (was_online != is_online)
+    LOG(LOGS_INFO, "Source %s %s",
+        UTI_IPToString(&inst->remote_addr.ip_addr), is_online ? "online" : "offline");
 }
 
 /* ================================================== */
@@ -2440,6 +2451,14 @@ NCR_ReportSource(NCR_Instance inst, RPT_SourceReport *report, struct timespec *n
     default:
       assert(0);
   }
+}
+
+/* ================================================== */
+
+void
+NCR_GetAuthReport(NCR_Instance inst, RPT_AuthReport *report)
+{
+  NAU_GetReport(inst->auth, report);
 }
 
 /* ================================================== */
@@ -2596,14 +2615,13 @@ broadcast_timeout(void *arg)
 /* ================================================== */
 
 void
-NCR_AddBroadcastDestination(IPAddr *addr, unsigned short port, int interval)
+NCR_AddBroadcastDestination(NTP_Remote_Address *addr, int interval)
 {
   BroadcastDestination *destination;
 
   destination = (BroadcastDestination *)ARR_GetNewElement(broadcasts);
 
-  destination->addr.ip_addr = *addr;
-  destination->addr.port = port;
+  destination->addr = *addr;
   destination->local_addr.ip_addr.family = IPADDR_UNSPEC;
   destination->local_addr.if_index = INVALID_IF_INDEX;
   destination->local_addr.sock_fd = NIO_OpenServerSocket(&destination->addr);

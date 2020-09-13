@@ -1,23 +1,32 @@
 '\" t
 .\"     Title: chronyd
-.\"    Author: [see the "AUTHORS" section]
-.\" Generator: Asciidoctor 1.5.6.1
-.\"      Date: 2020-04-20
+.\"    Author: [see the "AUTHOR(S)" section]
+.\" Generator: Asciidoctor 2.0.10
+.\"      Date: 2020-08-25
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2020-04-20" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2020-08-25" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
 .nh
 .ad l
 .de URL
-\\$2 \(laURL: \\$1 \(ra\\$3
+\fI\\$2\fP <\\$1>\\$3
 ..
-.if \n[.g] .mso www.tmac
-.LINKSTYLE blue R < >
+.als MTO URL
+.if \n[.g] \{\
+.  mso www.tmac
+.  am URL
+.    ad l
+.  .
+.  am MTO
+.    ad l
+.  .
+.  LINKSTYLE blue R < >
+.\}
 .SH "NAME"
 chronyd \- chrony daemon
 .SH "SYNOPSIS"
@@ -81,6 +90,14 @@ This option specifies the minimum severity level of messages to be written to
 the log file, syslog, or terminal. The following levels can be specified:
 0 (informational), 1 (warning), 2 (non\-fatal error), and 3 (fatal error). The
 default value is 0.
+.RE
+.sp
+\fB\-p\fP
+.RS 4
+When run in this mode, \fBchronyd\fP will print the configuration and exit. It will
+not detach from the terminal. This option can be used to verify the syntax of
+the configuration and get the whole configuration, even if it is split into
+multiple files and read by the \fBinclude\fP or \fBconfdir\fP directive.
 .RE
 .sp
 \fB\-q\fP

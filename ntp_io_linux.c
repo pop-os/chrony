@@ -125,7 +125,7 @@ add_interface(CNF_HwTsInterface *conf_iface)
       return 1;
   }
 
-  sock_fd = SCK_OpenUdpSocket(NULL, NULL, 0);
+  sock_fd = SCK_OpenUdpSocket(NULL, NULL, NULL, 0);
   if (sock_fd < 0)
     return 0;
 
@@ -285,7 +285,7 @@ update_interface_speed(struct Interface *iface)
   struct ifreq req;
   int sock_fd, link_speed;
 
-  sock_fd = SCK_OpenUdpSocket(NULL, NULL, 0);
+  sock_fd = SCK_OpenUdpSocket(NULL, NULL, NULL, 0);
   if (sock_fd < 0)
     return;
 
@@ -320,7 +320,7 @@ check_timestamping_option(int option)
 {
   int sock_fd;
 
-  sock_fd = SCK_OpenUdpSocket(NULL, NULL, 0);
+  sock_fd = SCK_OpenUdpSocket(NULL, NULL, NULL, 0);
   if (sock_fd < 0)
     return 0;
 
@@ -341,7 +341,7 @@ open_dummy_socket(void)
 {
   int sock_fd, events = 0;
 
-  sock_fd = SCK_OpenUdpSocket(NULL, NULL, 0);
+  sock_fd = SCK_OpenUdpSocket(NULL, NULL, NULL, 0);
   if (sock_fd < 0)
     return INVALID_SOCK_FD;
 
@@ -757,7 +757,7 @@ NIO_Linux_ProcessMessage(SCK_Message *message, NTP_Local_Address *local_addr,
   l2_length = message->length;
   message->length = extract_udp_data(message->data, &message->remote_addr.ip, message->length);
 
-  DEBUG_LOG("Extracted message for %s fd=%d len=%u",
+  DEBUG_LOG("Extracted message for %s fd=%d len=%d",
             UTI_IPSockAddrToString(&message->remote_addr.ip),
             local_addr->sock_fd, message->length);
 

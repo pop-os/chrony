@@ -50,7 +50,7 @@ prepare_request(NKSN_Instance session, int valid)
   if (valid)
     index = -1;
   else
-    index = random() % 7;
+    index = random() % 9;
   DEBUG_LOG("index=%d", index);
 
   NKSN_BeginMessage(session);
@@ -61,30 +61,34 @@ prepare_request(NKSN_Instance session, int valid)
 
   if (index != 0) {
     memset(data, NKE_NEXT_PROTOCOL_NTPV4 + 1, sizeof (data));
+    data[0] = htons(NKE_NEXT_PROTOCOL_NTPV4);
     if (index == 1)
-      data[0] = htons(NKE_NEXT_PROTOCOL_NTPV4 + random() % 10 + 1);
-    else
-      data[0] = htons(NKE_NEXT_PROTOCOL_NTPV4);
-    if (index == 2)
+      length = 0;
+    else if (index == 2)
       length = 3 + random() % 15 * 2;
     else
       length = 2 + random() % 16 * 2;
     TEST_CHECK(NKSN_AddRecord(session, 1, NKE_RECORD_NEXT_PROTOCOL, data, length));
   }
 
-  if (index != 3) {
-    if (index == 4)
-      data[0] = htons(AEAD_AES_SIV_CMAC_256 + random() % 10 + 1);
-    else
-      data[0] = htons(AEAD_AES_SIV_CMAC_256);
+  if (index == 3)
+    TEST_CHECK(NKSN_AddRecord(session, 1, NKE_RECORD_NEXT_PROTOCOL, data, length));
+
+  if (index != 4) {
+    data[0] = htons(AEAD_AES_SIV_CMAC_256);
     if (index == 5)
+      length = 0;
+    else if (index == 6)
       length = 3 + random() % 15 * 2;
     else
       length = 2 + random() % 16 * 2;
     TEST_CHECK(NKSN_AddRecord(session, 1, NKE_RECORD_AEAD_ALGORITHM, data, length));
   }
 
-  if (index == 6) {
+  if (index == 7)
+    TEST_CHECK(NKSN_AddRecord(session, 1, NKE_RECORD_AEAD_ALGORITHM, data, length));
+
+  if (index == 8) {
     length = random() % (sizeof (data) + 1);
     TEST_CHECK(NKSN_AddRecord(session, 1, 1000 + random() % 1000, data, length));
   }
@@ -154,7 +158,8 @@ test_unit(void)
   SCH_Initialise();
 
   unlink("ntskeys");
-  NKS_Initialise(0);
+  NKS_PreInitialise(0, 0, 0);
+  NKS_Initialise();
 
   session = NKSN_CreateInstance(1, NULL, handle_message, NULL);
 

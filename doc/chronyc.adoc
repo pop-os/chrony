@@ -414,6 +414,92 @@ This is the estimated offset of the source.
 *Std Dev*:::
 This is the estimated sample standard deviation.
 
+[[selectdata]]*selectdata* [*-a*] [*-v*]::
+The *selectdata* command displays information specific to the selection of time
+sources. If the *-a* option is specified, all sources are displayed, including
+those that do not have a known address yet. With the *-v* option, extra caption
+lines are shown as a reminder of the meanings of the columns.
++
+An example of the output is shown below.
++
+----
+S Name/IP Address        Auth COpts EOpts Last Score     Interval   
+====================================================================
+D foo.example.net           Y ----- --TR-    4   1.0   -61ms   +62ms
+* bar.example.net           N ----- -----    0   1.0 -6846us +7305us
++ baz.example.net           N ----- -----   10   1.0 -7381us +7355us
+----
++
+The columns are as follows:
++
+*S*:::
+This column indicates the state of the source after the last source selection.
+It is similar to the state reported by the *sources* command, but more
+states are reported.
+{blank}:::
+The following states indicate the source is not considered selectable for
+synchronisation:
+* _N_ - has the *noselect* option.
+* _M_ - does not have enough measurements.
+* _d_ - has a root distance larger than the maximum distance (configured by the
+        <<chrony.conf.adoc#maxdistance,*maxdistance*>> directive).
+* _~_ - has a jitter larger than the maximum jitter (configured by the
+        <<chrony.conf.adoc#maxjitter,*maxjitter*>> directive).
+* _w_ - waits for other sources to get out of the _M_ state.
+* _S_ - has older measurements than other sources.
+* _O_ - has a stratum equal or larger than the orphan stratum (configured by
+        the <<chrony.conf.adoc#local,*local*>> directive).
+* _T_ - does not fully agree with sources that have the *trust* option.
+* _x_ - does not agree with other sources (falseticker).
+{blank}:::
+The following states indicate the source is considered selectable, but it is
+not currently used for synchronisation:
+* _W_ - waits for other sources to be selectable (required by the
+        <<chrony.conf.adoc#minsources,*minsources*>> directive, or
+        the *require* option of another source).
+* _P_ - another selectable source is preferred due to the *prefer* option.
+* _U_ - waits for a new measurement (after selecting a different best source).
+* _D_ - has, or recently had, a root distance which is too large to be combined
+        with other sources (configured by the
+        <<chrony.conf.adoc#combinelimit,*combinelimit*>> directive).
+{blank}:::
+The following states indicate the source is used for synchronisation of the
+local clock:
+* _+_ - combined with the best source.
+* _*_ - selected as the best source to update the reference data (e.g. root
+        delay, root dispersion).
+*Name/IP address*:::
+This column shows the name or IP address of the source if it is an NTP server,
+or the reference ID if it is a reference clock.
+*Auth*:::
+This column indicites whether an authentication mechanism is enabled for the
+source. _Y_ means yes and _N_ means no.
+*COpts*:::
+This column displays the configured selection options of the source.
+* _N_ indicates the *noselect* option.
+* _P_ indicates the *prefer* option.
+* _T_ indicates the *trust* option.
+* _R_ indicates the *require* option.
+*EOpts*:::
+This column displays the current effective selection options of the source,
+which can be different from the configured options due to the authentication
+selection mode (configured by the
+<<chrony.conf.adoc#authselmode,*authselmode*>> directive). The symbols are the
+same as in the *COpts* column.
+*Last*:::
+This column displays how long ago was the last measurement of the source made
+when the selection was performed.
+*Score*:::
+This column displays the current score against the source in the _*_ state. The
+scoring system avoids frequent reselection when multiple sources have a similar
+root distance. A value larger than 1 indicates this source was better than the
+_*_ source in recent selections. If the score reaches 10, the best source will
+be reselected and the scores will be reset to 1.
+*Interval*:::
+This column displays the lower and upper endpoint of the interval which was
+expected to contain the true offset of the local clock considering the root
+distance at the time of the selection.
+
 [[reselect]]*reselect*::
 To avoid excessive switching between sources, *chronyd* can stay synchronised
 to a source even when it is not currently the best one among the available
@@ -453,6 +539,77 @@ the offline state.
 *unresolved*:::
 the name of the server or peer was not resolved to an address yet; this source is
 not visible in the *sources* and *sourcestats* reports.
+
+[[authdata]]*authdata* [*-a*]::
+The *authdata* command displays information specific to authentication of NTP
+sources. If the *-a* option is specified, all sources are displayed, including
+those that do not have a known address yet. An example of the output is
+shown below.
++
+----
+Name/IP address             Mode KeyID Type KLen Last Atmp  NAK Cook CLen
+=========================================================================
+foo.example.net              NTS     1   15  256 135m    0    0    8  100
+bar.example.net               SK    30   13  128    -    0    0    0    0
+baz.example.net                -     0    0    0    -    0    0    0    0
+----
++
+The columns are as follows:
++
+*Name/IP address*:::
+This column shows the name or the IP address of the source.
+*Mode*:::
+This column shows which mechanism authenticates NTP packets received from the
+source. _NTS_ means Network Time Security, _SK_ means a symmetric key, and _-_
+means authentication is disabled.
+*KeyID*:::
+This column shows an identifier of the key used for authentication. With a
+symmetric key, it is the ID from the <<chrony.conf.adoc#keyfile,key file>>.
+With NTS, it is a number starting at zero and incremented by one with each
+successful key establishment using the NTS-KE protocol, i.e. it shows how many
+times the key establishment was performed with this source.
+*Type*:::
+This columns shows an identifier of the algorithm used for authentication.
+With a symmetric key, it is the hash function or cipher specified in the key
+file. With NTS, it is an authenticated encryption with associated data (AEAD)
+algorithm, which is negotiated in the NTS-KE protocol. The following values can
+be reported:
+* 1: MD5
+* 2: SHA1
+* 3: SHA256
+* 4: SHA384
+* 5: SHA512
+* 6: SHA3-224
+* 7: SHA3-256
+* 8: SHA3-384
+* 9: SHA3-512
+* 10: TIGER
+* 11: WHIRLPOOL
+* 13: AES128
+* 14: AES256
+* 15: AEAD-AES-SIV-CMAC-256
+*KLen*:::
+This column shows the length of the key in bits.
+*Last*:::
+This column shows how long ago the last successful key establishment was
+performed. It is in seconds, or letters _m_, _h_, _d_ or _y_ indicate minutes,
+hours, days, or years.
+*Atmp*:::
+This column shows the number of attempts to perform the key establishment since
+the last successful key establishment. A number larger than 1 indicates a
+problem with the network or server.
+*NAK*:::
+This column shows whether an NTS NAK was received since the last request.
+A NAK indicates that authentication failed on the server side due to
+*chronyd* using a cookie which is no longer valid and that it needs to perform
+the key establishment again in order to get new cookies.
+*Cook*:::
+This column shows the number of NTS cookies that *chronyd* currently has. If
+the key establishment was successful, a number smaller than 8 indicates a
+problem with the network or server.
+*CLen*:::
+This column shows the length in bytes of the NTS cookie which will be used in
+the next request.
 
 [[ntpdata]]*ntpdata* [_address_]::
 The *ntpdata* command displays the last valid measurement and other
@@ -626,7 +783,7 @@ alternative to the form with mask.
 _address_:::
 This is an IP address or a hostname. The burst command is applied only to
 that source.
-::
+{blank}::
 +
 If no _mask_ or _masked-address_ arguments are provided, every source will be
 matched.
@@ -771,6 +928,11 @@ Sources that stop responding will be replaced with newly resolved addresses
 automatically after 8 polling intervals, but this command can still be useful
 to replace them immediately and not wait until they are marked as unreachable.
 
+[[reload]]*reload* *sources*::
+The *reload sources* command causes *chronyd* to re-read all _*.sources_ files
+from the directories specified by the
+<<chrony.conf.adoc#sourcedir,*sourcedir*>> directive.
+
 [[sourcename]]*sourcename* _address_::
 The *sourcename* command prints the original hostname or address that was
 specified for an NTP source in the configuration file, or the *add* command.
@@ -816,7 +978,7 @@ The columns are as as follows:
 . The regression residual at this point, in seconds. This allows '`outliers`'
   to be easily spotted, so that they can be deleted using the *manual delete*
   command.
-::
+{blank}::
 +
 The *delete* form of the command deletes a single sample. The parameter is the
 index of the sample, as shown in the first column of the output from *manual
@@ -887,10 +1049,17 @@ This command can be used to examine the effect of a series of *allow*, *allow
 all*, *deny*, and *deny all* commands specified either via *chronyc*, or in
 *chronyd*'s configuration file.
 
-[[clients]]*clients*::
+[[clients]]*clients* [*-p* _packets_] [*-k*] [*-r*]::
 This command shows a list of clients that have accessed the server, through
-either the NTP or command ports. It does not include accesses over
-the Unix domain command socket. There are no arguments.
+the NTP, command, or NTS-KE port. It does not include accesses over the Unix
+domain command socket.
++
+The *-p* option specifies the minimum number of received NTP or command
+packets, or accepted NTS-KE connections, needed to include a client in the
+list. The default value is 0, i.e. all clients are reported. With the *-k*
+option the last four columns will show the NTS-KE accesses instead of command
+accesses. If the *-r* option is specified, *chronyd* will reset the counters of
+received and dropped packets or connections after reporting the current values.
 +
 An example of the output is:
 +
@@ -915,20 +1084,22 @@ The columns are as follows:
 . The average interval between NTP packets.
 . The average interval between NTP packets after limiting the response rate.
 . Time since the last NTP packet was received
-. The number of command packets received from the client.
-. The number of command packets dropped to limit the response rate.
-. The average interval between command packets.
-. Time since the last command packet was received.
+. The number of command packets or NTS-KE connections received/accepted from
+  the client.
+. The number of command packets or NTS-KE connections dropped to limit the
+  response rate.
+. The average interval between command packets or NTS-KE connections.
+. Time since the last command packet or NTS-KE connection was
+  received/accepted.
 
 [[serverstats]]*serverstats*::
-The *serverstats* command displays how many valid NTP and command requests
-*chronyd* as a server received from clients, how many of them were dropped to
-limit the response rate as configured by the
-<<chrony.conf.adoc#ratelimit,*ratelimit*>> and
-<<chrony.conf.adoc#cmdratelimit,*cmdratelimit*>> directives, and how many
+The *serverstats* command displays how many valid NTP and command requests, and
+NTS-KE connections, *chronyd* operating as a server received from clients, and
+how many of them were dropped due to rate limiting. It also displays how many
 client log records were dropped due to the memory limit configured by the
-<<chrony.conf.adoc#clientloglimit,*clientloglimit*>> directive. An example of
-the output is shown below.
+<<chrony.conf.adoc#clientloglimit,*clientloglimit*>> directive and how many of
+the NTP requests (from those which were not dropped) were authenticated. An
+example of the output is shown below.
 +
 ----
 NTP packets received       : 1598
@@ -936,6 +1107,9 @@ NTP packets dropped        : 8
 Command packets received   : 19
 Command packets dropped    : 0
 Client log records dropped : 0
+NTS-KE connections accepted: 3
+NTS-KE connections dropped : 0
+Authenticated NTP packets  : 189
 ----
 
 [[allow]]*allow* [*all*] [_subnet_]::
@@ -1121,7 +1295,7 @@ more than 1 second away from the system clock):
   error).
 . Save the RTC parameters to the RTC file (specified with the
   <<chrony.conf.adoc#rtcfile,*rtcfile*>> directive in the configuration file).
-::
+{blank}::
 +
 The last step is done as a precaution against the computer suffering a power
 failure before either the daemon exits or the <<writertc,*writertc*>> command
@@ -1177,12 +1351,12 @@ also re-reads the server NTS keys if
 <<chrony.conf.adoc#ntsrotate,automatic rotation>> is disabled in the
 configuration file.
 
-[[reset]]*reset*::
-The *reset* command causes *chronyd* to drop all measurements and switch to the
-unsynchronised state. This command can help *chronyd* with recovery when the
-measurements are known to be no longer valid or accurate, e.g. due to moving
-the computer to a different network, or resuming the computer from a low-power
-state (which resets the system clock).
+[[reset]]*reset* *sources*::
+The *reset sources* command causes *chronyd* to drop all measurements and
+switch to the unsynchronised state. This command can help *chronyd* with
+recovery when the measurements are known to be no longer valid or accurate,
+e.g. due to moving the computer to a different network, or resuming the
+computer from a low-power state (which resets the system clock).
 
 [[shutdown]]*shutdown*::
 The *shutdown* command causes *chronyd* to exit. This is equivalent to sending

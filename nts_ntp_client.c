@@ -43,8 +43,10 @@
 #include "siv.h"
 #include "util.h"
 
+/* Maximum length of all cookies to avoid IP fragmentation */
 #define MAX_TOTAL_COOKIE_LENGTH (8 * 108)
 
+/* Magic string of files containing keys and cookies */
 #define DUMP_IDENTIFIER "NNC0\n"
 
 struct NNC_Instance_Record {
@@ -60,6 +62,7 @@ struct NNC_Instance_Record {
   double last_nke_success;
 
   NKE_Context context;
+  unsigned int context_id;
   NKE_Cookie cookies[NTS_MAX_COOKIES];
   int num_cookies;
   int cookie_index;
@@ -85,6 +88,8 @@ reset_instance(NNC_Instance inst)
   inst->last_nke_success = 0.0;
 
   memset(&inst->context, 0, sizeof (inst->context));
+  inst->context_id = 0;
+  memset(inst->cookies, 0, sizeof (inst->cookies));
   inst->num_cookies = 0;
   inst->cookie_index = 0;
   inst->nak_response = 0;
@@ -134,16 +139,14 @@ NNC_DestroyInstance(NNC_Instance inst)
 static int
 check_cookies(NNC_Instance inst)
 {
-  /* Force NKE if a NAK was received since last valid auth */
-  if (inst->nak_response && !inst->ok_response && inst->num_cookies > 0) {
+  /* Force a new NTS-KE session if a NAK was received without a valid response,
+     or the keys encrypting the cookies need to be refreshed */
+  if (inst->num_cookies > 0 &&
+      ((inst->nak_response && !inst->ok_response) ||
+       SCH_GetLastEventMonoTime() - inst->last_nke_success > CNF_GetNtsRefresh())) {
     inst->num_cookies = 0;
     DEBUG_LOG("Dropped cookies");
   }
-
-  /* Force NKE if the keys encrypting the cookies are too old */
-  if (inst->num_cookies > 0 &&
-      SCH_GetLastEventMonoTime() - inst->last_nke_success > CNF_GetNtsRefresh())
-    inst->num_cookies = 0;
 
   return inst->num_cookies > 0;
 }
@@ -201,10 +204,11 @@ get_cookies(NNC_Instance inst)
   double now;
   int got_data;
 
-  assert(!check_cookies(inst));
+  assert(inst->num_cookies == 0);
 
   now = SCH_GetLastEventMonoTime();
 
+  /* Create and start a new NTS-KE session if not already present */
   if (!inst->nke) {
     if (now < inst->next_nke_attempt) {
       DEBUG_LOG("Limiting NTS-KE request rate (%f seconds)",
@@ -229,9 +233,13 @@ get_cookies(NNC_Instance inst)
 
   update_next_nke_attempt(inst, now);
 
+  /* Wait until the session stops */
   if (NKC_IsActive(inst->nke))
     return 0;
 
+  assert(sizeof (inst->cookies) / sizeof (inst->cookies[0]) == NTS_MAX_COOKIES);
+
+  /* Get the new keys, cookies and NTP address if the session was successful */
   got_data = NKC_GetNtsData(inst->nke, &inst->context,
                             inst->cookies, &inst->num_cookies, NTS_MAX_COOKIES,
                             &ntp_address);
@@ -246,16 +254,19 @@ get_cookies(NNC_Instance inst)
     SIV_DestroyInstance(inst->siv);
   inst->siv = NULL;
 
+  inst->context_id++;
+
+  /* Force a new session if the NTP address is used by another source, with
+     an expectation that it will eventually get a non-conflicting address */
   if (!set_ntp_address(inst, &ntp_address)) {
     inst->num_cookies = 0;
     return 0;
   }
 
+  inst->last_nke_success = now;
   inst->cookie_index = 0;
 
   inst->nak_response = 0;
-
-  inst->last_nke_success = now;
 
   return 1;
 }
@@ -265,11 +276,13 @@ get_cookies(NNC_Instance inst)
 int
 NNC_PrepareForAuth(NNC_Instance inst)
 {
+  /* Try to reload saved keys and cookies (once for the NTS-KE address) */
   if (!inst->load_attempt) {
     load_cookies(inst);
     inst->load_attempt = 1;
   }
 
+  /* Get new cookies if there are not any, or they are no longer usable */
   if (!check_cookies(inst)) {
     if (!get_cookies(inst))
       return 0;
@@ -284,8 +297,9 @@ NNC_PrepareForAuth(NNC_Instance inst)
     return 0;
   }
 
-  UTI_GetRandomBytes(&inst->uniq_id, sizeof (inst->uniq_id));
-  UTI_GetRandomBytes(&inst->nonce, sizeof (inst->nonce));
+  /* Prepare data for NNC_GenerateRequestAuth() */
+  UTI_GetRandomBytes(inst->uniq_id, sizeof (inst->uniq_id));
+  UTI_GetRandomBytes(inst->nonce, sizeof (inst->nonce));
 
   return 1;
 }
@@ -311,7 +325,7 @@ NNC_GenerateRequestAuth(NNC_Instance inst, NTP_Packet *packet,
                     MAX_TOTAL_COOKIE_LENGTH / (cookie->length + 4));
 
   if (!NEF_AddField(packet, info, NTP_EF_NTS_UNIQUE_IDENTIFIER,
-                    &inst->uniq_id, sizeof (inst->uniq_id)))
+                    inst->uniq_id, sizeof (inst->uniq_id)))
     return 0;
 
   if (!NEF_AddField(packet, info, NTP_EF_NTS_COOKIE,
@@ -331,7 +345,25 @@ NNC_GenerateRequestAuth(NNC_Instance inst, NTP_Packet *packet,
 
   inst->num_cookies--;
   inst->cookie_index = (inst->cookie_index + 1) % NTS_MAX_COOKIES;
+  inst->nak_response = 0;
   inst->ok_response = 0;
+
+  return 1;
+}
+
+/* ================================================== */
+
+static int
+parse_encrypted_efs(NNC_Instance inst, unsigned char *plaintext, int length)
+{
+  int ef_length, parsed;
+
+  for (parsed = 0; parsed < length; parsed += ef_length) {
+    if (!NEF_ParseSingleField(plaintext, length, parsed, &ef_length, NULL, NULL, NULL)) {
+      DEBUG_LOG("Could not parse encrypted EF");
+      return 0;
+    }
+  }
 
   return 1;
 }
@@ -349,7 +381,7 @@ extract_cookies(NNC_Instance inst, unsigned char *plaintext, int length)
   for (parsed = 0; parsed < length; parsed += ef_length) {
     if (!NEF_ParseSingleField(plaintext, length, parsed,
                               &ef_length, &ef_type, &ef_body, &ef_body_length))
-      break;
+      return 0;
 
     if (ef_type != NTP_EF_NTS_COOKIE)
       continue;
@@ -365,6 +397,9 @@ extract_cookies(NNC_Instance inst, unsigned char *plaintext, int length)
       continue;
 
     index = (inst->cookie_index + inst->num_cookies) % NTS_MAX_COOKIES;
+    assert(index >= 0 && index < NTS_MAX_COOKIES);
+    assert(sizeof (inst->cookies) / sizeof (inst->cookies[0]) == NTS_MAX_COOKIES);
+
     memcpy(inst->cookies[index].cookie, ef_body, ef_body_length);
     inst->cookies[index].length = ef_body_length;
     inst->num_cookies++;
@@ -391,7 +426,7 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
   if (info->ext_fields == 0 || info->mode != MODE_SERVER)
     return 0;
 
-  /* Accept only one response per request */
+  /* Accept at most one response per request */
   if (inst->ok_response)
     return 0;
 
@@ -404,7 +439,8 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
   for (parsed = NTP_HEADER_LENGTH; parsed < info->length; parsed += ef_length) {
     if (!NEF_ParseField(packet, info->length, parsed,
                         &ef_length, &ef_type, &ef_body, &ef_body_length))
-      break;
+      /* This is not expected as the packet already passed NAU_ParsePacket() */
+      return 0;
 
     switch (ef_type) {
       case NTP_EF_NTS_UNIQUE_IDENTIFIER:
@@ -426,6 +462,9 @@ NNC_CheckResponseAuth(NNC_Instance inst, NTP_Packet *packet,
 
         if (!NNA_DecryptAuthEF(packet, info, inst->siv, parsed,
                                plaintext, sizeof (plaintext), &plaintext_length))
+          return 0;
+
+        if (!parse_encrypted_efs(inst, plaintext, plaintext_length))
           return 0;
 
         has_valid_auth = 1;
@@ -507,9 +546,9 @@ save_cookies(NNC_Instance inst)
   context_time = inst->last_nke_success - SCH_GetLastEventMonoTime();
   context_time += UTI_TimespecToDouble(&now);
 
-  if (fprintf(f, "%s%.1f\n%s %d\n%d ",
+  if (fprintf(f, "%s%.1f\n%s %d\n%u %d ",
               DUMP_IDENTIFIER, context_time, UTI_IPToString(&inst->ntp_address->ip_addr),
-              inst->ntp_address->port, (int)inst->context.algorithm) < 0 ||
+              inst->ntp_address->port, inst->context_id, (int)inst->context.algorithm) < 0 ||
       !UTI_BytesToHex(inst->context.s2c.key, inst->context.s2c.length, buf, sizeof (buf)) ||
       fprintf(f, "%s ", buf) < 0 ||
       !UTI_BytesToHex(inst->context.c2s.key, inst->context.c2s.length, buf, sizeof (buf)) ||
@@ -538,12 +577,13 @@ error:
 
 /* ================================================== */
 
-#define MAX_WORDS 3
+#define MAX_WORDS 4
 
 static void
 load_cookies(NNC_Instance inst)
 {
   char line[2 * NKE_MAX_COOKIE_LENGTH + 2], *dump_dir, *filename, *words[MAX_WORDS];
+  unsigned int context_id;
   int i, algorithm, port;
   double context_time;
   struct timespec now;
@@ -573,14 +613,14 @@ load_cookies(NNC_Instance inst)
         sscanf(words[0], "%lf", &context_time) != 1 ||
       !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 2 ||
         !UTI_StringToIP(words[0], &ntp_addr.ip_addr) || sscanf(words[1], "%d", &port) != 1 ||
-      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 3 ||
-        sscanf(words[0], "%d", &algorithm) != 1)
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 4 ||
+        sscanf(words[0], "%u", &context_id) != 1 || sscanf(words[1], "%d", &algorithm) != 1)
     goto error;
 
   inst->context.algorithm = algorithm;
-  inst->context.s2c.length = UTI_HexToBytes(words[1], inst->context.s2c.key,
+  inst->context.s2c.length = UTI_HexToBytes(words[2], inst->context.s2c.key,
                                             sizeof (inst->context.s2c.key));
-  inst->context.c2s.length = UTI_HexToBytes(words[2], inst->context.c2s.key,
+  inst->context.c2s.length = UTI_HexToBytes(words[3], inst->context.c2s.key,
                                             sizeof (inst->context.c2s.key));
 
   if (inst->context.s2c.length != SIV_GetKeyLength(algorithm) ||
@@ -608,6 +648,7 @@ load_cookies(NNC_Instance inst)
   if (context_time > 0)
     context_time = 0;
   inst->last_nke_success = context_time + SCH_GetLastEventMonoTime();
+  inst->context_id = context_id;
 
   DEBUG_LOG("Loaded %d cookies for %s", i, filename);
   return;
@@ -626,4 +667,22 @@ void
 NNC_DumpData(NNC_Instance inst)
 {
   save_cookies(inst);
+}
+
+/* ================================================== */
+
+void
+NNC_GetReport(NNC_Instance inst, RPT_AuthReport *report)
+{
+  report->key_id = inst->context_id;
+  report->key_type = inst->context.algorithm;
+  report->key_length = 8 * inst->context.s2c.length;
+  report->ke_attempts = inst->nke_attempts;
+  if (report->key_length > 0)
+    report->last_ke_ago = SCH_GetLastEventMonoTime() - inst->last_nke_success;
+  else
+    report->last_ke_ago = -1;
+  report->cookies = inst->num_cookies;
+  report->cookie_length = inst->num_cookies > 0 ? inst->cookies[inst->cookie_index].length : 0;
+  report->nak = inst->nak_response;
 }
