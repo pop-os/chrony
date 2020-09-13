@@ -3,4 +3,4 @@
 chrony: non-standard-file-perm usr/share/chrony/chrony.keys 0640 != 0644
 
 # NetworkManager does not execute dispatcher scripts in /usr/libexec.
-chrony: executable-in-usr-lib usr/lib/NetworkManager/dispatcher.d/20-chrony
+chrony: executable-in-usr-lib usr/lib/NetworkManager/dispatcher.d/20-chrony-onoffline
