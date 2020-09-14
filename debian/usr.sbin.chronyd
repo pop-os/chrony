@@ -16,6 +16,11 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   capability net_admin,
 
   capability net_bind_service,
+
+  # Needed to allow sockets to be bound to a device using the SO_BINDTODEVICE
+  # socket option
+  capability net_raw,
+
   capability setgid,
   capability setuid,
   capability sys_nice,
