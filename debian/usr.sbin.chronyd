@@ -5,19 +5,22 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   #include <abstractions/base>
   #include <abstractions/nameservice>
 
-  capability sys_time,
-  capability net_bind_service,
-  capability setuid,
-  capability setgid,
-  capability sys_nice,
-  capability sys_resource,
-  # for /run/chrony to be created
+  # For /run/chrony to be created
   capability chown,
-  # Needed to support HW timestamping
-  capability net_admin,
+
   # Give “root” the ability to read and write the PID file
   capability dac_override,
   capability dac_read_search,
+
+  # Needed to support HW timestamping
+  capability net_admin,
+
+  capability net_bind_service,
+  capability setgid,
+  capability setuid,
+  capability sys_nice,
+  capability sys_resource,
+  capability sys_time,
 
   /usr/sbin/chronyd mr,
 
