@@ -23,16 +23,6 @@ case "$1" in
                     --no-create-home _chrony
         fi
 
-        # Change the owner of "/var/l{ib,og}/chrony" directories and their
-        # subfiles to "_chrony" only if the user has not set the "user"
-        # directive in chrony.conf
-        if ! grep "^user" /etc/chrony/chrony.conf > /dev/null 2>&1; then
-            chown _chrony:_chrony /var/lib/chrony
-            if [ -d /var/log/chrony ]; then
-                chown _chrony:_chrony /var/log/chrony
-            fi
-        fi
-
         if command -v ucf >/dev/null
         then
             ucf --three-way /usr/share/chrony/chrony.conf /etc/chrony/chrony.conf
