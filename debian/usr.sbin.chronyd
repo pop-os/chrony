@@ -30,6 +30,7 @@
   # the stability and accuracy of the clock by compensating the temperature
   # changes measured by a sensor close to the oscillator.
   @{sys}/class/hwmon/hwmon[0-9]*/temp[0-9]*_input r,
+  @{sys}/devices/virtual/thermal/thermal_zone[0-9]*/hwmon[0-9]*/temp[0-9]*_input r,
 
   # Support all paths suggested in the man page (LP: #1771028). Assume these
   # are common use cases; others should be set as local include (see below).
