@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-08-25
+.\"      Date: 2020-09-16
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2020-08-25" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2020-09-16" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -41,7 +41,7 @@ running.
 If no commands are specified on the command line, \fBchronyc\fP will expect input
 from the user. The prompt \fIchronyc>\fP will be displayed when it is being run
 from a terminal. If \fBchronyc\fP\(cqs input or output are redirected from or to a file,
-the prompt is not shown.
+the prompt will not be shown.
 .sp
 There are two ways \fBchronyc\fP can access \fBchronyd\fP. One is the Internet
 Protocol (IPv4 or IPv6) and the other is a Unix domain socket, which is
@@ -62,9 +62,7 @@ default, the commands are accepted only from localhost (127.0.0.1 or ::1).
 .sp
 All other commands are allowed only through the Unix domain socket. When sent
 over the network, \fBchronyd\fP will respond with a \(oqNot authorised\(cq error, even
-if it is from localhost. In chrony versions before 2.2 they were allowed
-from the network if they were authenticated with a password, but that is no
-longer supported.
+if it is from localhost.
 .sp
 Having full access to \fBchronyd\fP via \fBchronyc\fP is more or less equivalent to
 being able to modify the \fBchronyd\fP\(cqs configuration file and restart it.
@@ -219,13 +217,15 @@ speeding up or slowing down the system clock until the error has been removed,
 and then returning to the system clock\(cqs normal speed. A consequence of this is
 that there will be a period when the system clock (as read by other programs)
 will be different from \fBchronyd\fP\(cqs estimate of the current true time (which it
-reports to NTP clients when it is operating in server mode). The value reported
+reports to NTP clients when it is operating as a server). The value reported
 on this line is the difference due to this effect.
 .RE
 .sp
 \fBLast offset\fP
 .RS 4
-This is the estimated local offset on the last clock update.
+This is the estimated local offset on the last clock update. A positive value
+indicates the local time (as previously estimated true time) was ahead of the
+time sources.
 .RE
 .sp
 \fBRMS offset\fP
@@ -399,7 +399,7 @@ and \fI#\fP indicates a locally connected reference clock.
 .sp
 \fBS\fP
 .RS 4
-This column indicates the state of the source.
+This column indicates the selection state of the source.
 .sp
 .RS 4
 .ie n \{\
@@ -409,7 +409,8 @@ This column indicates the state of the source.
 .  sp -1
 .  IP \(bu 2.3
 .\}
-\fI*\fP indicates the source to which \fBchronyd\fP is currently synchronised.
+\fI*\fP indicates the best source which is currently selected for
+synchronisation.
 .RE
 .sp
 .RS 4
@@ -420,8 +421,8 @@ This column indicates the state of the source.
 .  sp -1
 .  IP \(bu 2.3
 .\}
-\fI+\fP indicates acceptable sources which are combined with the selected
-source.
+\fI+\fP indicates other sources selected for synchronisation, which are combined
+with the best source.
 .RE
 .sp
 .RS 4
@@ -432,8 +433,8 @@ source.
 .  sp -1
 .  IP \(bu 2.3
 .\}
-\fI\-\fP indicates acceptable sources which are excluded by the combining
-algorithm.
+\fI\-\fP indicates a source which is considered to be selectable for
+synchronisation, but not currently selected.
 .RE
 .sp
 .RS 4
@@ -444,21 +445,9 @@ algorithm.
 .  sp -1
 .  IP \(bu 2.3
 .\}
-\fI?\fP indicates sources to which connectivity has been lost or whose packets
-do not pass all tests. It is also shown at start\-up, until at least 3 samples
-have been gathered from it.
-.RE
-.sp
-.RS 4
-.ie n \{\
-\h'-04'\(bu\h'+03'\c
-.\}
-.el \{\
-.  sp -1
-.  IP \(bu 2.3
-.\}
-\fIx\fP indicates a clock which \fBchronyd\fP thinks is a falseticker (i.e. its
-time is inconsistent with a majority of other sources).
+\fIx\fP indicates a source which \fBchronyd\fP thinks is a falseticker (i.e. its
+time is inconsistent with a majority of other sources, or sources specified
+with the \fBtrust\fP option).
 .RE
 .sp
 .RS 4
@@ -471,6 +460,25 @@ time is inconsistent with a majority of other sources).
 .\}
 \fI~\fP indicates a source whose time appears to have too much variability.
 .RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI?\fP indicates a source which is not considered to be selectable for
+synchronisation for other reasons (e.g. unreachable, not synchronised, or
+does not have enough measurements).
+.RE
+.RE
+.sp
+
+.RS 4
+The \fBselectdata\fP command can be used to get more details about
+the selection state.
 .RE
 .sp
 \fBName/IP address\fP
@@ -2301,10 +2309,7 @@ purged. An example of how to do this is shown below.
 .nf
 # mv /var/log/chrony/measurements.log /var/log/chrony/measurements1.log
 # chronyc cyclelogs
-# ls \-l /var/log/chrony
-\-rw\-r\-\-r\-\-   1 root     root            0 Jun  8 18:17 measurements.log
-\-rw\-r\-\-r\-\-   1 root     root        12345 Jun  8 18:17 measurements1.log
-# rm \-f measurements1.log
+# rm /var/log/chrony/measurements1.log
 .fi
 .if n .RE
 .RE
@@ -2336,7 +2341,9 @@ The \fBreset sources\fP command causes \fBchronyd\fP to drop all measurements an
 switch to the unsynchronised state. This command can help \fBchronyd\fP with
 recovery when the measurements are known to be no longer valid or accurate,
 e.g. due to moving the computer to a different network, or resuming the
-computer from a low\-power state (which resets the system clock).
+computer from a low\-power state (which resets the system clock). \fBchronyd\fP will
+drop the measurements automatically when it detects the clock has made an
+unexpected jump, but the detection is not completely reliable.
 .RE
 .sp
 \fBshutdown\fP
@@ -2428,7 +2435,15 @@ keygen 73 SHA1 256
 .sp
 which generates a 256\-bit SHA1 key with number 73. The printed line should
 then be securely transferred and added to the key files on both server and
-client, or peers.
+client, or peers. A different key should be generated for each client or peer.
+.sp
+An example using the AES128 cipher is:
+.sp
+.if n .RS 4
+.nf
+keygen 151 AES128
+.fi
+.if n .RE
 .RE
 .sp
 \fBexit\fP, \fBquit\fP

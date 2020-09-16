@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2018
+ * Copyright (C) Miroslav Lichvar  2009-2020
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -2095,15 +2095,6 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
     CLG_LogAuthNtpRequest();
   }
 
-  /* If it is an NTPv4 packet with a long MAC and no extension fields,
-     respond with an NTPv3 packet to avoid breaking RFC 7822 and keep
-     the length symmetric.  Otherwise, respond with the same version. */
-  if (info.version == 4 && info.ext_fields == 0 && info.auth.mode == NTP_AUTH_SYMMETRIC &&
-      info.auth.mac.length > NTP_MAX_V4_MAC_LENGTH)
-    version = 3;
-  else
-    version = info.version;
-
   local_ntp_rx = local_ntp_tx = NULL;
   tx_ts = NULL;
   interleaved = 0;
@@ -2132,6 +2123,9 @@ NCR_ProcessRxUnknown(NTP_Remote_Address *remote_addr, NTP_Local_Address *local_a
      the interval is shorter than the rate limiting interval */
   poll = CLG_GetNtpMinPoll();
   poll = MAX(poll, message->poll);
+
+  /* Respond with the same version */
+  version = info.version;
 
   /* Send a reply */
   transmit_packet(my_mode, interleaved, poll, version, kod, NULL,

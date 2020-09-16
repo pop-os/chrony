@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-08-25
+.\"      Date: 2020-09-16
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2020-08-25" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2020-09-16" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -62,7 +62,7 @@ IPv6 sockets will be created.
 \fB\-f\fP \fIfile\fP
 .RS 4
 This option can be used to specify an alternate location for the configuration
-file. The default value is \fI@SYSCONFDIR@/chrony.conf\fP.
+file. The compiled\-in default value is \fI@SYSCONFDIR@/chrony.conf\fP.
 .RE
 .sp
 \fB\-n\fP
@@ -168,13 +168,25 @@ running, but still allow it to adjust the frequency of the system clock.
 .RS 4
 This option sets the name of the system user to which \fBchronyd\fP will switch
 after start in order to drop root privileges. It overrides the
-\fBuser\fP directive. The default value is
+\fBuser\fP directive. The compiled\-in default value is
 \fI@DEFAULT_USER@\fP.
 .sp
 On Linux, \fBchronyd\fP needs to be compiled with support for the \fBlibcap\fP library.
 On macOS, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
 The child process retains root privileges, but can only perform a very limited
 range of privileged system calls on behalf of the parent.
+.RE
+.sp
+\fB\-U\fP
+.RS 4
+This option disables a check for root privileges to allow \fBchronyd\fP to be
+started under a non\-root user, assuming the process will have all capabilities
+(e.g. provided by the service manager) and access to all files, directories,
+and devices, needed to operate correctly in the specified configuration. Note
+that different capabilities might be needed with different configurations and
+different Linux kernel versions. Starting \fBchronyd\fP under a non\-root user is
+not recommended when the configuration is not known, or at least limited to
+specific directives.
 .RE
 .sp
 \fB\-F\fP \fIlevel\fP
@@ -185,10 +197,10 @@ process is killed when a forbidden system call is made, in level \-1 the SIGSYS
 signal is thrown instead and in level 0 the filter is disabled. The default
 value is 0.
 .sp
-It\(cqs recommended to enable the filter only when it\(cqs known to work on the
+It is recommended to enable the filter only when it is known to work on the
 version of the system where \fBchrony\fP is installed as the filter needs to allow
 also system calls made from libraries that \fBchronyd\fP is using (e.g. libc) and
-different versions or implementations of the libraries may make different
+different versions or implementations of the libraries might make different
 system calls. If the filter is missing some system call, \fBchronyd\fP could be
 killed even in normal operation.
 .RE
@@ -213,10 +225,8 @@ This mode is only supported on Linux.
 This option disables the control of the system clock. \fBchronyd\fP will not try to
 make any adjustments of the clock. It will assume the clock is free running and
 still track its offset and frequency relative to the estimated true time. This
-option allows \fBchronyd\fP to run without the capability to adjust or set the
-system clock (e.g. in some containers) in order to operate as an NTP server. It
-is not recommended to run \fBchronyd\fP (with or without \fB\-x\fP) when another process
-is controlling the system clock.
+option allows \fBchronyd\fP to be started without the capability to adjust or set
+the system clock (e.g. in some containers) to operate as an NTP server.
 .RE
 .sp
 \fB\-v\fP

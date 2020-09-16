@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2011-2016, 2018
+ * Copyright (C) Miroslav Lichvar  2011-2016, 2018, 2020
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -1499,22 +1499,21 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timespec *now)
       case SRC_JITTERY:
         report->state = RPT_JITTERY;
         break;
-      case SRC_UNTRUSTED:
       case SRC_WAITS_SOURCES:
       case SRC_NONPREFERRED:
       case SRC_WAITS_UPDATE:
       case SRC_DISTANT:
       case SRC_OUTLIER:
-        report->state = RPT_OUTLIER;
+        report->state = RPT_SELECTABLE;
         break;
       case SRC_UNSELECTED:
-        report->state = RPT_CANDIDATE;
+        report->state = RPT_UNSELECTED;
         break;
       case SRC_SELECTED:
-        report->state = RPT_SYNC;
+        report->state = RPT_SELECTED;
         break;
       default:
-        report->state = RPT_UNREACH;
+        report->state = RPT_NONSELECTABLE;
         break;
     }
 

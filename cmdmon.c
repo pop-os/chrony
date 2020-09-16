@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2016, 2018
+ * Copyright (C) Miroslav Lichvar  2009-2016, 2018-2020
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -294,9 +294,15 @@ CAM_OpenUnixSocket(void)
 /* ================================================== */
 
 static void
-transmit_reply(int sock_fd, SCK_Message *message)
+transmit_reply(int sock_fd, int request_length, SCK_Message *message)
 {
   message->length = PKL_ReplyLength((CMD_Reply *)message->data);
+
+  if (request_length < message->length) {
+    DEBUG_LOG("Response longer than request req_len=%d res_len=%d",
+              request_length, message->length);
+    return;
+  }
 
   /* Don't require responses to non-link-local addresses to use the same
      interface */
@@ -572,11 +578,8 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
     tx_message->data.source_data.stratum = htons(report.stratum);
     tx_message->data.source_data.poll    = htons(report.poll);
     switch (report.state) {
-      case RPT_SYNC:
-        tx_message->data.source_data.state   = htons(RPY_SD_ST_SYNC);
-        break;
-      case RPT_UNREACH:
-        tx_message->data.source_data.state   = htons(RPY_SD_ST_UNREACH);
+      case RPT_NONSELECTABLE:
+        tx_message->data.source_data.state   = htons(RPY_SD_ST_NONSELECTABLE);
         break;
       case RPT_FALSETICKER:
         tx_message->data.source_data.state   = htons(RPY_SD_ST_FALSETICKER);
@@ -584,11 +587,14 @@ handle_source_data(CMD_Request *rx_message, CMD_Reply *tx_message)
       case RPT_JITTERY:
         tx_message->data.source_data.state   = htons(RPY_SD_ST_JITTERY);
         break;
-      case RPT_CANDIDATE:
-        tx_message->data.source_data.state   = htons(RPY_SD_ST_CANDIDATE);
+      case RPT_SELECTABLE:
+        tx_message->data.source_data.state   = htons(RPY_SD_ST_SELECTABLE);
         break;
-      case RPT_OUTLIER:
-        tx_message->data.source_data.state   = htons(RPY_SD_ST_OUTLIER);
+      case RPT_UNSELECTED:
+        tx_message->data.source_data.state   = htons(RPY_SD_ST_UNSELECTED);
+        break;
+      case RPT_SELECTED:
+        tx_message->data.source_data.state   = htons(RPY_SD_ST_SELECTED);
         break;
     }
     switch (report.mode) {
@@ -1427,7 +1433,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
 
     if (rx_message.version >= PROTO_VERSION_MISMATCH_COMPAT_SERVER) {
       tx_message.status = htons(STT_BADPKTVERSION);
-      transmit_reply(sock_fd, sck_message);
+      transmit_reply(sock_fd, read_length, sck_message);
     }
     return;
   }
@@ -1437,7 +1443,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
     DEBUG_LOG("Command packet has invalid command %d", rx_command);
 
     tx_message.status = htons(STT_INVALID);
-    transmit_reply(sock_fd, sck_message);
+    transmit_reply(sock_fd, read_length, sck_message);
     return;
   }
 
@@ -1446,7 +1452,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
               expected_length);
 
     tx_message.status = htons(STT_BADPKTLENGTH);
-    transmit_reply(sock_fd, sck_message);
+    transmit_reply(sock_fd, read_length, sck_message);
     return;
   }
 
@@ -1733,19 +1739,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
   }
 
   /* Transmit the response */
-  {
-    /* Include a simple way to lose one message in three to test resend */
-
-    static int do_it=1;
-
-    if (do_it) {
-      transmit_reply(sock_fd, sck_message);
-    }
-
-#if 0
-    do_it = ((do_it + 1) % 3);
-#endif
-  }
+  transmit_reply(sock_fd, read_length, sck_message);
 }
 
 /* ================================================== */
