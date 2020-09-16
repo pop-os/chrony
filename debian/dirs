@@ -5,4 +5,3 @@ etc/ppp/ip-down.d
 etc/ppp/ip-up.d
 usr/lib/NetworkManager/dispatcher.d
 var/lib/chrony
-var/log/chrony
