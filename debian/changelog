@@ -1,3 +1,11 @@
+chrony (3.5.1-2) unstable; urgency=medium
+
+  [ Matt Corallo ]
+  * debian/usr.sbin.chronyd:
+    - Fix temperature reading. (Closes: #970421)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 16 Sep 2020 12:32:23 +0200
+
 chrony (3.5.1-1) unstable; urgency=medium
 
   * Import upstream version 3.5.1:
