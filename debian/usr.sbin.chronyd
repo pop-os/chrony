@@ -15,16 +15,24 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   # Needed to support HW timestamping
   capability net_admin,
 
+  # Needed to allow NTP server sockets to be bound to a privileged port
   capability net_bind_service,
 
-  # Needed to allow sockets to be bound to a device using the SO_BINDTODEVICE
-  # socket option
+  # Needed to allow an NTP socket to be bound to a device using the
+  # SO_BINDTODEVICE socket option on kernels before 5.7
   capability net_raw,
 
   capability setgid,
   capability setuid,
+
+  # Needed to set the SCHED_FIFO real-time scheduler at the specified priority
+  # using the '-P' option
   capability sys_nice,
+
+  # Needed to lock chronyd into RAM
   capability sys_resource,
+
+  # Needed to set the system/real-time clock
   capability sys_time,
 
   /usr/sbin/chronyd mr,
