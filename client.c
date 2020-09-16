@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Lonnie Abelbeck  2016, 2018
- * Copyright (C) Miroslav Lichvar  2009-2018
+ * Copyright (C) Miroslav Lichvar  2009-2020
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -44,12 +44,7 @@
 #include "util.h"
 
 #ifdef FEAT_READLINE
-#ifdef USE_EDITLINE
 #include <editline/readline.h>
-#else
-#include <readline/readline.h>
-#include <readline/history.h>
-#endif
 #endif
 
 /* ================================================== */
@@ -1267,7 +1262,7 @@ give_help(void)
 }
 
 /* ================================================== */
-/* Tab-completion when editline/readline is available */
+/* Tab-completion when editline is available */
 
 #ifdef FEAT_READLINE
 
@@ -2146,8 +2141,8 @@ process_cmd_sources(char *line)
   if (verbose) {
     printf("\n");
     printf("  .-- Source mode  '^' = server, '=' = peer, '#' = local clock.\n");
-    printf(" / .- Source state '*' = current synced, '+' = combined , '-' = not combined,\n");
-    printf("| /   '?' = unreachable, 'x' = time may be in error, '~' = time too variable.\n");
+    printf(" / .- Source state '*' = current best, '+' = combined, '-' = not combined,\n");
+    printf("| /             'x' = may be in error, '~' = too variable, '?' = unusable.\n");
     printf("||                                                 .- xxxx [ yyyy ] +/- zzzz\n");
     printf("||      Reachability register (octal) -.           |  xxxx = adjusted offset,\n");
     printf("||      Log2(Polling interval) --.      |          |  yyyy = measured offset,\n");
@@ -2189,10 +2184,10 @@ process_cmd_sources(char *line)
     }
 
     switch (ntohs(reply.data.source_data.state)) {
-      case RPY_SD_ST_SYNC:
+      case RPY_SD_ST_SELECTED:
         state_ch = '*';
         break;
-      case RPY_SD_ST_UNREACH:
+      case RPY_SD_ST_NONSELECTABLE:
         state_ch = '?';
         break;
       case RPY_SD_ST_FALSETICKER:
@@ -2201,10 +2196,10 @@ process_cmd_sources(char *line)
       case RPY_SD_ST_JITTERY:
         state_ch = '~';
         break;
-      case RPY_SD_ST_CANDIDATE:
+      case RPY_SD_ST_UNSELECTED:
         state_ch = '+';
         break;
-      case RPY_SD_ST_OUTLIER:
+      case RPY_SD_ST_SELECTABLE:
         state_ch = '-';
         break;
       default:
@@ -3476,7 +3471,7 @@ static void
 display_gpl(void)
 {
     printf("chrony version %s\n"
-           "Copyright (C) 1997-2003, 2007, 2009-2019 Richard P. Curnow and others\n"
+           "Copyright (C) 1997-2003, 2007, 2009-2020 Richard P. Curnow and others\n"
            "chrony comes with ABSOLUTELY NO WARRANTY.  This is free software, and\n"
            "you are welcome to redistribute it under certain conditions.  See the\n"
            "GNU General Public License version 2 for details.\n\n",

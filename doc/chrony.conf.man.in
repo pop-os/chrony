@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-08-25
+.\"      Date: 2020-09-16
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2020-08-25" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2020-09-16" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -35,12 +35,14 @@ chrony.conf \- chronyd configuration file
 .SH "DESCRIPTION"
 .sp
 This file configures the \fBchronyd\fP daemon. The compiled\-in location is
-\fI@SYSCONFDIR@/chrony.conf\fP, but other locations can be specified on the
+\fI@SYSCONFDIR@/chrony.conf\fP. Other locations can be specified on the
 \fBchronyd\fP command line with the \fB\-f\fP option.
 .sp
 Each directive in the configuration file is placed on a separate line. The
-following sections describe each of the directives in turn. The directives can
-occur in any order in the file and they are not case\-sensitive.
+following sections describe each of the directives in turn. The directives are
+not case\-sensitive. Generally, the directives can occur in any order in the file
+and if a directive is specified multiple times, only the last one will be
+effective. Exceptions are noted in the descriptions.
 .sp
 The configuration directives can also be specified directly on the \fBchronyd\fP
 command line. In this case each argument is parsed as a new line and the
@@ -63,9 +65,10 @@ source. The client\-server relationship is strictly hierarchical: a client might
 synchronise its system time to that of the server, but the server\(cqs system time
 will never be influenced by that of a client.
 .sp
-The \fBserver\fP directive is immediately followed by either the name of the
-server, or its IP address. The \fBserver\fP directive supports the following
-options:
+This directive can be used multiple times to specify multiple servers.
+.sp
+The directive is immediately followed by either the name of the
+server, or its IP address. It supports the following options:
 .sp
 \fBminpoll\fP \fIpoll\fP
 .RS 4
@@ -365,6 +368,8 @@ directive, except that it is used to specify a pool of NTP servers rather than
 a single NTP server. The pool name is expected to resolve to multiple addresses
 which might change over time.
 .sp
+This directive can be used multiple times to specify multiple pools.
+.sp
 All options valid in the \fBserver\fP directive can be used in this
 directive too. There is one option specific to the \fBpool\fP directive:
 .sp
@@ -402,6 +407,8 @@ association allows the peers to be both servers and clients to each other. This
 is mainly useful when the NTP implementation of the peer (e.g. \fBntpd\fP) supports
 ephemeral symmetric associations and does not need to be configured with an
 address of this host. \fBchronyd\fP does not support ephemeral associations.
+.sp
+This directive can be used multiple times to specify multiple peers.
 .sp
 The following options of the \fBserver\fP directive do not work in the \fBpeer\fP
 directive: \fBiburst\fP, \fBburst\fP, \fBnts\fP, \fBpresend\fP.
@@ -500,6 +507,8 @@ time source. It has two mandatory parameters, a driver name and a
 driver\-specific parameter. The two parameters are followed by zero or more
 refclock options. Some drivers have special options, which can be appended to
 the driver\-specific parameter using the \fB:\fP character.
+.sp
+This directive can be used multiple times to specify multiple reference clocks.
 .sp
 There are four drivers included in \fBchronyd\fP:
 .sp
@@ -823,12 +832,13 @@ time to be provided.)
 .sp
 \fBacquisitionport\fP \fIport\fP
 .RS 4
-By default, \fBchronyd\fP uses a separate client socket for each configured server
-and their source port is chosen arbitrarily by the operating system. However,
-you can use the \fBacquisitionport\fP directive to explicitly specify a port and
-use only one socket (per IPv4 or IPv6 address family) for all configured servers.
-This can be useful for getting through some firewalls. If set to 0, the source
-port of the socket will be chosen arbitrarily.
+By default, \fBchronyd\fP as an NTP client opens a new socket for each request with
+the source port chosen randomly by the operating system. The \fBacquisitionport\fP
+directive can be used to specify the source port and use only one socket (per
+IPv4 or IPv6 address family) for all configured servers. This can be useful for
+getting through some firewalls. It should not be used if not necessary as there
+is a small impact on security of the client. If set to 0, the source port of
+the permanent socket will be chosen randomly by the operating system.
 .sp
 It can be set to the same port as is used by the NTP server (which can be
 configured with the \fBport\fP directive) to use only one socket for all
@@ -849,8 +859,8 @@ You could then persuade the firewall administrator to open that port.
 \fBbindacqaddress\fP \fIaddress\fP
 .RS 4
 The \fBbindacqaddress\fP directive specifies a local IP address to which
-\fBchronyd\fP will bind its NTP client sockets. The syntax is similar to the
-\fBbindaddress\fP and \fBbindcmdaddress\fP
+\fBchronyd\fP will bind its NTP and NTS\-KE client sockets. The syntax is similar to
+the \fBbindaddress\fP and \fBbindcmdaddress\fP
 directives.
 .sp
 For each of the IPv4 and IPv6 protocols, only one \fBbindacqaddress\fP directive
@@ -1186,6 +1196,31 @@ distances are in milliseconds.
 .RE
 .SS "System clock"
 .sp
+\fBclockprecision\fP \fIprecision\fP
+.RS 4
+The \fBclockprecision\fP directive specifies the precision of the system clock (in
+seconds). It is used by \fBchronyd\fP to estimate the minimum noise in NTP
+measurements and randomise low\-order bits of timestamps in NTP responses. By
+default, the precision is measured on start as the minimum time to read the
+clock.
+.sp
+The measured value works well in most cases. However, it generally
+overestimates the precision and it can be sensitive to the CPU speed, which can
+change over time to save power. In some cases with a high\-precision clocksource
+(e.g. the Time Stamp Counter of the CPU) and hardware timestamping, setting the
+precision on the server to a smaller value can improve stability of clients\(aq
+NTP measurements. The server\(cqs precision is reported on clients by the
+\fBntpdata\fP command.
+.sp
+An example setting the precision to 8 nanoseconds is:
+.sp
+.if n .RS 4
+.nf
+clockprecision 8e\-9
+.fi
+.if n .RE
+.RE
+.sp
 \fBcorrtimeratio\fP \fIratio\fP
 .RS 4
 When \fBchronyd\fP is slewing the system clock to correct an offset, the rate at
@@ -1343,7 +1378,7 @@ A recommended configuration to enable a server leap smear is:
 .nf
 leapsecmode slew
 maxslewrate 1000
-smoothtime 400 0.001 leaponly
+smoothtime 400 0.001024 leaponly
 .fi
 .if n .RE
 .sp
@@ -1352,11 +1387,19 @@ the smoothing process. The second directive limits the slewing rate of the
 local clock to 1000 ppm, which improves the stability of the smoothing process
 when the local correction starts and ends. The third directive enables the
 server time smoothing process. It will start when the clock gets to 00:00:00
-UTC and it will take 17 hours 34 minutes to finish. The frequency offset will
-be changing by 0.001 ppm per second and will reach a maximum of 31.623 ppm. The
-\fBleaponly\fP option makes the duration of the leap smear constant and allows the
-clients to safely synchronise with multiple identically configured leap
-smearing servers.
+UTC and it will take 62500 seconds (about 17.36 hours) to finish. The frequency
+offset will be changing by 0.001024 ppm per second and will reach a maximum of
+32 ppm in 31250 seconds. The \fBleaponly\fP option makes the duration of the leap
+smear constant and allows the clients to safely synchronise with multiple
+identically configured leap smearing servers.
+.sp
+The duration of the leap smear can be calculated from the specified wander as
+.sp
+.if n .RS 4
+.nf
+duration = sqrt(4 / wander)
+.fi
+.if n .RE
 .RE
 .sp
 \fBleapsectz\fP \fItimezone\fP
@@ -1549,7 +1592,7 @@ The frequency compensation is calculated (in ppm) as
 .sp
 .if n .RS 4
 .nf
-k0 + (T \- T0) * k1 + (T \- T0)^2 * k2
+comp = k0 + (T \- T0) * k1 + (T \- T0)^2 * k2
 .fi
 .if n .RE
 .sp
@@ -1608,11 +1651,14 @@ Valid measurements with corresponding compensations are logged to the
 \fBallow\fP [\fBall\fP] [\fIsubnet\fP]
 .RS 4
 The \fBallow\fP directive is used to designate a particular subnet from which NTP
-clients are allowed to access the computer as an NTP server.
+clients are allowed to access the computer as an NTP server. It also controls
+access of NTS\-KE clients when NTS is enabled on the server.
 .sp
 The default is that no clients are allowed access, i.e. \fBchronyd\fP operates
 purely as an NTP client. If the \fBallow\fP directive is used, \fBchronyd\fP will be
 both a client of its servers, and a server to other clients.
+.sp
+This directive can be used multiple times.
 .sp
 Examples of the use of the directive are as follows:
 .sp
@@ -1688,9 +1734,10 @@ client access by this computer for it to work.
 \fBdeny\fP [\fBall\fP] [\fIsubnet\fP]
 .RS 4
 This is similar to the \fBallow\fP directive, except that it denies NTP
-client access to a particular subnet or host, rather than allowing it.
+and NTS\-KE client access to a particular subnet or host, rather than allowing
+it.
 .sp
-The syntax is identical.
+The syntax is identical and the directive can be used multiple times too.
 .sp
 There is also a \fBdeny all\fP directive with similar behaviour to the \fBallow all\fP
 directive.
@@ -1698,10 +1745,10 @@ directive.
 .sp
 \fBbindaddress\fP \fIaddress\fP
 .RS 4
-The \fBbindaddress\fP directive binds the socket on which \fBchronyd\fP listens for NTP
-requests to a local address of the computer. On systems other than Linux, the
-address of the computer needs to be already configured when \fBchronyd\fP is
-started.
+The \fBbindaddress\fP directive binds the sockets on which \fBchronyd\fP listens for
+NTP and NTS\-KE requests to a local address of the computer. On systems other
+than Linux, the address of the computer needs to be already configured when
+\fBchronyd\fP is started.
 .sp
 An example of the use of the directive is:
 .sp
@@ -1718,9 +1765,9 @@ should serve NTP on multiple network interfaces.
 .sp
 \fBbinddevice\fP \fIinterface\fP
 .RS 4
-The \fBbinddevice\fP directive binds the NTP server sockets to a network device
-specified by the interface name. This directive can specify only one interface
-and it is supported on Linux only.
+The \fBbinddevice\fP directive binds the NTP and NTS\-KE server sockets to a network
+device specified by the interface name. This directive can specify only one
+interface and it is supported on Linux only.
 .sp
 An example of the directive is:
 .sp
@@ -1737,6 +1784,8 @@ The \fBbroadcast\fP directive is used to declare a broadcast address to which
 chronyd should send packets in the NTP broadcast mode (i.e. make \fBchronyd\fP act
 as a broadcast server). Broadcast clients on that subnet will be able to
 synchronise.
+.sp
+This directive can be used multiple times to specify multiple addresses.
 .sp
 The syntax is as follows:
 .sp
@@ -1856,7 +1905,9 @@ configuration and to be synchronised to one another, without confusing clients
 that poll more than one server. Each server needs to be configured to poll all
 other servers with the \fBlocal\fP directive. This ensures only the server with the
 smallest reference ID has the local reference active and others are
-synchronised to it. When that server fails, another will take over.
+synchronised to it. If that server stops responding, the server with the second
+smallest reference ID will take over when its local reference mode activates
+(root distance reaches the threshold configured by the \fBdistance\fP option).
 .sp
 The \fBorphan\fP mode is compatible with the \fBntpd\fP\(cqs orphan mode (enabled by the
 \fBtos orphan\fP command).
@@ -1870,7 +1921,7 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
-local stratum 10 orphan
+local stratum 10 orphan distance 0.1
 .fi
 .if n .RE
 .RE
@@ -2278,7 +2329,8 @@ The \fBrtcautotrim\fP directive is used to keep the RTC close to the system cloc
 automatically. When the system clock is synchronised and the estimated error
 between the two clocks is larger than the specified threshold, \fBchronyd\fP will
 trim the RTC as if the \fBtrimrtc\fP command in \fBchronyc\fP
-was issued.
+was issued. The trimming operation is accurate to only about 1 second, which is
+the minimum effective threshold.
 .sp
 This directive is effective only with the \fBrtcfile\fP directive.
 .sp
@@ -3429,6 +3481,8 @@ name, only the first file in the order of the specified directories will be
 included. This enables a fragmented configuration where existing fragments can
 be replaced by adding files to a different directory.
 .sp
+This directive can be used multiple times.
+.sp
 An example of the directive is:
 .sp
 .if n .RS 4
@@ -3448,6 +3502,8 @@ reloaded by the \fBreload sources\fP command in
 received from a DHCP server, which can be written to a file specific to the
 network interface by a networking script.
 .sp
+This directive can be used multiple times.
+.sp
 An example of the directive is:
 .sp
 .if n .RS 4
@@ -3463,6 +3519,8 @@ The \fBinclude\fP directive includes a configuration file, or multiple configura
 files if a wildcard pattern is specified. Unlike with the \fBconfdir\fP directive,
 the full name of the files needs to be specified and at least one file is
 required to exist.
+.sp
+This directive can be used multiple times.
 .sp
 An example of the directive is:
 .sp
@@ -3503,8 +3561,9 @@ indicated in the \fImeasurements.log\fP file if enabled by the \fBlog
 measurements\fP directive, and the \fBntpdata\fP report in
 \fBchronyc\fP.
 .sp
-If the specified interface is \fI*\fP, \fBchronyd\fP will try to enable HW timestamping
-on all available interfaces.
+This directive can be used multiple times to enable HW timestamping on multiple
+interfaces. If the specified interface is \fI*\fP, \fBchronyd\fP will try to enable HW
+timestamping on all available interfaces.
 .sp
 The \fBhwtimestamp\fP directive has the following options:
 .sp
@@ -3831,6 +3890,22 @@ in this case look like:
 .if n .RS 4
 .nf
 pool pool.ntp.org iburst
+driftfile @CHRONYVARDIR@/drift
+makestep 1.0 3
+rtcsync
+.fi
+.if n .RE
+.sp
+If the servers (or pool) support the Network Time Security (NTS)
+authentication mechanism and \fBchronyd\fP is compiled with NTS support, the \fBnts\fP
+option will enable a secure synchronisation to the servers. The configuration
+file could look like:
+.sp
+.if n .RS 4
+.nf
+server foo.example.net iburst nts
+server bar.example.net iburst nts
+server baz.example.net iburst nts
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 rtcsync
