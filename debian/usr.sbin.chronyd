@@ -38,7 +38,6 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   /usr/sbin/chronyd mr,
 
   /etc/chrony/{,**} r,
-  /{,var/}run/chrony/chronyd.pid w,
   /{,var/}run/chrony/{,*} rw,
   /var/lib/chrony/{,*} rw,
   /var/log/chrony/{,*} rw,
