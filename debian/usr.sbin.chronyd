@@ -42,8 +42,7 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   /{,var/}run/chrony/{,*} rw,
   /var/lib/chrony/{,*} r,
   /var/lib/chrony/* w,
-  /var/log/chrony/{,*} r,
-  /var/log/chrony/* w,
+  /var/log/chrony/{,*} rw,
 
   # Using the “tempcomp” directive gives chronyd the ability to improve
   # the stability and accuracy of the clock by compensating the temperature
