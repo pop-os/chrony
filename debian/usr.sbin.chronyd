@@ -40,8 +40,7 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   /etc/chrony/{,**} r,
   /{,var/}run/chrony/chronyd.pid w,
   /{,var/}run/chrony/{,*} rw,
-  /var/lib/chrony/{,*} r,
-  /var/lib/chrony/* w,
+  /var/lib/chrony/{,*} rw,
   /var/log/chrony/{,*} rw,
 
   # Using the “tempcomp” directive gives chronyd the ability to improve
