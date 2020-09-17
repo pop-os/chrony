@@ -38,9 +38,9 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   /usr/sbin/chronyd mr,
 
   /etc/chrony/{,**} r,
-  /{,var/}run/chrony/{,*} rw,
   /var/lib/chrony/{,*} rw,
   /var/log/chrony/{,*} rw,
+  /{,var/}run/chrony/{,*} rw,
   /{,var/}run/chrony-dhcp/{,*} r,
 
   # Using the “tempcomp” directive gives chronyd the ability to improve
