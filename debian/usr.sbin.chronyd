@@ -22,6 +22,7 @@ profile chronyd /usr/sbin/chronyd flags=(attach_disconnected) {
   # SO_BINDTODEVICE socket option on kernels before 5.7
   capability net_raw,
 
+  # Needed to drop privileges
   capability setgid,
   capability setuid,
 
