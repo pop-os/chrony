@@ -23,7 +23,6 @@ DAEMON=/usr/sbin/chronyd
 NAME="chronyd"
 DESC="time daemon"
 PIDFILE=/run/chrony/chronyd.pid
-CHRONY_HELPER=/usr/libexec/chrony/chrony-helper
 
 [ -x "$DAEMON" ] || exit 0
 
@@ -42,9 +41,6 @@ case "$1" in
         else
             log_daemon_msg "Starting $DESC" "$NAME"
             start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- $DAEMON_OPTS
-            if [ -x $CHRONY_HELPER ]; then
-                $CHRONY_HELPER update-daemon
-            fi
             log_end_msg $?
         fi
         ;;
