@@ -12,7 +12,6 @@ Type=forking
 PIDFile=/run/chrony/chronyd.pid
 EnvironmentFile=-/etc/default/chrony
 ExecStart=/usr/sbin/chronyd $DAEMON_OPTS
-ExecStartPost=-/usr/libexec/chrony/chrony-helper update-daemon
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=full
