@@ -32,6 +32,16 @@ case "$1" in
                 ucfr chrony /etc/chrony/chrony.keys
             fi
         fi
+
+        # Migrate NTP sources obtained from DHCP to /run/chrony-dhcp
+        if [ -n "$2" ] && dpkg --compare-versions "$2" lt 4.0~pre4-1; then
+            mkdir -p /run/chrony-dhcp
+            for file in $(find /var/lib/dhcp/ -type f -name "chrony.servers.*"); do
+                sed 's/.*/server &/' < "$file" > /run/chrony-dhcp/"${file##*servers.}.sources"
+            done
+        fi
+
+
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
