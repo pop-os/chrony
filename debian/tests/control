@@ -4,8 +4,7 @@ Restrictions: isolation-container, build-needed, skippable, needs-root, needs-in
 
 Tests: time-sources-from-dhcp-servers
 Depends: @, isc-dhcp-server, isc-dhcp-client, iproute2, kmod
-# allow-stderr is needed until systemd fixed LP: 1873031
-Restrictions: isolation-machine, needs-root, allow-stderr
+Restrictions: isolation-machine, needs-root
 
 Features: test-name=run_system_tests
 Test-Command: debian/tests/upstream-system-tests
