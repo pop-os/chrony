@@ -1,0 +1,14 @@
+__test_fail() {
+    printf 'FAIL\n' >&2
+    return 1
+}
+
+__test_ok() {
+    printf 'OK\n'
+    return 0
+}
+
+__test_skip() {
+    [ -n "$1" ] && printf 'SKIP (%s)\n' "$1" || printf 'SKIP\n'
+    exit 77
+}
