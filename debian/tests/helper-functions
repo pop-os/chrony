@@ -9,6 +9,6 @@ __test_ok() {
 }
 
 __test_skip() {
-    [ -n "$1" ] && printf 'SKIP (%s)\n' "$1" || printf 'SKIP\n'
+    [ -n "$1" ] && printf 'SKIP: (%s)\n' "$1" || printf 'SKIP\n'
     exit 77
 }
