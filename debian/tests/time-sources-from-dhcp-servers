@@ -25,7 +25,7 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
 }
 EOF
 
-sed -i 's/INTERFACESv4=""/INTERFACESv4="dummy0"/' /etc/default/isc-dhcp-server
+sed -i '/INTERFACESv4=/s/".*"/"dummy0"/' /etc/default/isc-dhcp-server
 }
 
 chk_time_src() {
