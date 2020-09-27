@@ -39,6 +39,13 @@ case "$1" in
             for file in $(find /var/lib/dhcp/ -type f -name "chrony.servers.*"); do
                 sed 's/.*/server &/' < "$file" > /run/chrony-dhcp/"${file##*servers.}.sources"
             done
+
+            # Remove the staled PID file resulting from migrating its path from
+            # /run to /run/chrony/. Overriding dh_installinit and
+            # dh_systemd_start to use the --no-restart-after-upgrade option
+            # was a possibility but chronyd would have been down even longer
+            # during the upgrade.
+            rm -f /run/chronyd.pid
         fi
 
 
