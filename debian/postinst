@@ -47,8 +47,6 @@ case "$1" in
             # during the upgrade.
             rm -f /run/chronyd.pid
         fi
-
-
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
