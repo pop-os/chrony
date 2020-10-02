@@ -10,8 +10,7 @@ testdir=$PWD/test/system
 logdir="$testdir/tmp/*"
 
 # some tests need chrony installed, but make sure to avoid the test daemon is
-# fighting with the systems chrony/systemd-timesyncd services over the clock
-systemctl stop systemd-timesyncd.service 2>/dev/null || true
+# fighting with the systems chrony service over the clock
 systemctl stop chrony.service 2>/dev/null || true
 
 run_test() {
