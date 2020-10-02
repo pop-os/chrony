@@ -1,3 +1,112 @@
+chrony (4.0~pre4-1) experimental; urgency=medium
+
+  * Import upstream version 4.0-pre4:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * Merge branch 'master' into experimental.
+
+  * debian/chrony.conf:
+    - Use NTP sources from /run/chrony-dhcp.
+    - Save NTS keys and cookies in /var/lib/chrony/.
+
+  * debian/chrony-dnssrv@.service:
+    - Update "chrony-helper" path.
+
+  * debian/chrony.dhcp:
+    - Save NTP servers from DHCP to /run/chrony-dhcp/$interface.sources.
+
+  * debian/chrony.lintian-overrides:
+    - Override executable-in-usr-lib for NetworkManager dispatcher scripts.
+    - Update NetworkManager dispatcher script name.
+
+  * debian/chrony.ppp.ip-{down,up}:
+    - Update PID file path.
+
+  * debian/chrony.service:
+    - Update PID file path.
+    - Do not run 'chrony-helper update-daemon' after starting chronyd. Not
+    needed anymore.
+
+  * debian/control:
+    - Build-depend on libgnutls28-dev to support NTS.
+    - Build-depend on gnutls-bin for the test suite.
+    - Bump debhelper-compat to 13.
+
+  * debian/copyright:
+    - Update copyright years.
+
+  * debian/dirs:
+    - Remove var/log/chrony as it will be created automatically if it doesn’t
+    exist.
+
+  * debian/if-{post-down,up}:
+    - Update PID file path.
+
+  * debian/init:
+    - Update PID file path.
+    - Drop the unnecessary '--remove pidfile' option from the stop target.
+    - Do not run 'chrony-helper update-daemon' after starting chronyd. Not
+    needed anymore.
+
+  * debian/install:
+    - Move "chrony-helper" to "/usr/libexec/chrony".
+
+  * debian/links:
+    - Update source and destination filenames.
+
+  * debian/patches/:
+    - Drop patches applied upstream.
+    - Add nm-dispatcher-dhcp_Move-server_dir-to-run.patch.
+
+  * debian/postinst:
+    - Drop migration code from pre-Stretch.
+    - Migrate NTP sources obtained from DHCP to /run/chrony-dhcp on upgrade
+    from chrony < 4.0~pre4-1.
+    - Remove staled PID file when upgrading from chrony < 4.0~pre4-1.
+
+  * debian/rules:
+    - Change the default PID file location from /run to /run/chrony.
+    - Drop dh_missing --fail-missing. This is the default in debhelper 13.
+    - Enable seccomp support by default on riscv64.
+    - Update NetworkManager dispatcher script name from 20-chrony to
+    20-chrony-onoffline.
+    - Add DHCP NetworkManager dispatcher script to allow chronyd to use
+    NTP sources obtained from NM's internal DHCP client.
+
+  * debian/tests/:
+    - Add some helper functions. Some tests will be updated thereafter
+    to use them.
+
+  * debian/tests/time-sources-from-dhcp-servers:
+    - Adapt to the new way of using time sources from DHCP.
+    - Improve sed invocation.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Update clknetsim version.
+    - Cosmetic changes.
+
+  * debian/tests/upstream-system-tests:
+    - No need to stop systemd-timesyncd anymore since it is no more
+    co-installable with chrony anymore.
+
+  * debian/usr.sbin.chronyd:
+    - Update PID file path.
+    - Add dac_override and dac_read_search capabilities to give "root" the
+    ability to write the PID file in /run/chrony/.
+    - Prefix flag definition by "flags=".
+    - Sort the capabilities.
+    - Grant CAP_NET_RAW capability to allow an NTP socket to be bound to a
+    device using the SO_BINDTODEVICE socket option on kernels before 5.7.
+    - Add comments regarding capabilities.
+    - Let chronyd create /var/l{ib,og}/chrony.
+    - Remove a superfluous rule.
+    - Allow reading of NTP sources in /run/chrony-dhcp/.
+
+  * debian/watch:
+    - Make use of special strings.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 02 Oct 2020 17:23:02 +0200
+
 chrony (3.5.1-1) unstable; urgency=medium
 
   * Import upstream version 3.5.1:
