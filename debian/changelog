@@ -3,7 +3,7 @@ chrony (4.0~pre4-1) experimental; urgency=medium
   * Import upstream version 4.0-pre4:
     - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
 
-  * Merge branch 'master' into experimental.
+  * Merge branch 'master' into experimental. (Closes: #970421)
 
   * debian/chrony.conf:
     - Use NTP sources from /run/chrony-dhcp.
@@ -105,7 +105,7 @@ chrony (4.0~pre4-1) experimental; urgency=medium
   * debian/watch:
     - Make use of special strings.
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 02 Oct 2020 17:23:02 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 02 Oct 2020 21:21:08 +0200
 
 chrony (3.5.1-1) unstable; urgency=medium
 
