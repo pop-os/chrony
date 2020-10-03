@@ -1,3 +1,12 @@
+chrony (4.0~pre4-2) experimental; urgency=medium
+
+  * debian/postinst:
+    - Fix user and group ownership of "/var/lib/chrony" to allow chronyd
+    to write in it. This will also fix a regression in the 104-systemdirs
+    test.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 03 Oct 2020 11:20:02 +0200
+
 chrony (4.0~pre4-1) experimental; urgency=medium
 
   * Import upstream version 4.0-pre4:
