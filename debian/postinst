@@ -33,6 +33,12 @@ case "$1" in
             fi
         fi
 
+        # Change the user and group ownership of "/var/lib/chrony" iif the user
+        # has not set the "user" directive in chrony.conf
+        if ! grep -q "^user" /etc/chrony/chrony.conf 2> /dev/null; then
+            chown _chrony:_chrony /var/lib/chrony
+        fi
+
         if [ -n "$2" ] && dpkg --compare-versions "$2" lt 4.0~pre4-1; then
             # Migrate NTP sources obtained from DHCP to /run/chrony-dhcp
             mkdir -p /run/chrony-dhcp
