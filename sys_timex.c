@@ -69,6 +69,25 @@ static int sys_tai_offset;
 /* ================================================== */
 
 static double
+convert_timex_frequency(const struct timex *txc)
+{
+  double freq_ppm;
+
+  freq_ppm = txc->freq / FREQ_SCALE;
+
+#ifdef MACOSX
+  /* Temporary workaround for Apple bug treating freq as unsigned number */
+  if (freq_ppm > 32767) {
+    freq_ppm -= 65536;
+  }
+#endif
+
+  return -freq_ppm;
+}
+
+/* ================================================== */
+
+static double
 read_frequency(void)
 {
   struct timex txc;
@@ -77,7 +96,7 @@ read_frequency(void)
 
   SYS_Timex_Adjust(&txc, 0);
 
-  return txc.freq / -FREQ_SCALE;
+  return convert_timex_frequency(&txc);
 }
 
 /* ================================================== */
@@ -92,7 +111,7 @@ set_frequency(double freq_ppm)
 
   SYS_Timex_Adjust(&txc, 0);
 
-  return txc.freq / -FREQ_SCALE;
+  return convert_timex_frequency(&txc);
 }
 
 /* ================================================== */
@@ -256,10 +275,8 @@ SYS_Timex_Adjust(struct timex *txc, int ignore_error)
   state = NTP_ADJTIME(txc);
 
   if (state < 0) {
-    if (!ignore_error)
-      LOG_FATAL(NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
-    else
-      DEBUG_LOG(NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
+    LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
+        NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
   }
 
   return state;
