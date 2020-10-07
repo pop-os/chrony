@@ -742,18 +742,10 @@ process_header(struct msghdr *msg, int msg_length, int sock_fd, int flags,
                SCK_Message *message)
 {
   struct cmsghdr *cmsg;
+  int r = 1;
 
-  if (msg->msg_iovlen != 1) {
-    DEBUG_LOG("Unexpected iovlen");
-    return 0;
-  }
-
-  if (msg->msg_namelen > sizeof (union sockaddr_all)) {
-    DEBUG_LOG("Truncated source address");
-    return 0;
-  }
-
-  if (msg->msg_namelen > sizeof (((struct sockaddr *)msg->msg_name)->sa_family)) {
+  if (msg->msg_namelen <= sizeof (union sockaddr_all) &&
+      msg->msg_namelen > sizeof (((struct sockaddr *)msg->msg_name)->sa_family)) {
     switch (((struct sockaddr *)msg->msg_name)->sa_family) {
       case AF_INET:
 #ifdef FEAT_IPV6
@@ -767,26 +759,38 @@ process_header(struct msghdr *msg, int msg_length, int sock_fd, int flags,
         message->remote_addr.path = ((struct sockaddr_un *)msg->msg_name)->sun_path;
         break;
       default:
+        init_message_addresses(message, SCK_ADDR_UNSPEC);
         DEBUG_LOG("Unexpected address");
-        return 0;
+        r = 0;
+        break;
     }
   } else {
     init_message_addresses(message, SCK_ADDR_UNSPEC);
+
+    if (msg->msg_namelen > sizeof (union sockaddr_all)) {
+      DEBUG_LOG("Truncated source address");
+      r = 0;
+    }
   }
 
   init_message_nonaddress(message);
 
-  message->data = msg->msg_iov[0].iov_base;
-  message->length = msg_length;
+  if (msg->msg_iovlen == 1) {
+    message->data = msg->msg_iov[0].iov_base;
+    message->length = msg_length;
+  } else {
+    DEBUG_LOG("Unexpected iovlen");
+    r = 0;
+  }
 
   if (msg->msg_flags & MSG_TRUNC) {
     log_message(sock_fd, 1, message, "Truncated", NULL);
-    return 0;
+    r = 0;
   }
 
   if (msg->msg_flags & MSG_CTRUNC) {
     log_message(sock_fd, 1, message, "Truncated cmsg in", NULL);
-    return 0;
+    r = 0;
   }
 
   for (cmsg = CMSG_FIRSTHDR(msg); cmsg; cmsg = CMSG_NXTHDR(msg, cmsg)) {
@@ -873,25 +877,31 @@ process_header(struct msghdr *msg, int msg_length, int sock_fd, int flags,
       if (err.ee_errno != ENOMSG || err.ee_info != SCM_TSTAMP_SND ||
           err.ee_origin != SO_EE_ORIGIN_TIMESTAMPING) {
         log_message(sock_fd, 1, message, "Unexpected extended error in", NULL);
-        return 0;
+        r = 0;
       }
     }
 #endif
 
     if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
       if (!(flags & SCK_FLAG_MSG_DESCRIPTOR) || cmsg->cmsg_len != CMSG_LEN(sizeof (int))) {
-        unsigned int i;
+        int i, fd;
 
         DEBUG_LOG("Unexpected SCM_RIGHTS");
-        for (i = 0; CMSG_LEN((i + 1) * sizeof (int)) <= cmsg->cmsg_len; i++)
-          close(((int *)CMSG_DATA(cmsg))[i]);
-        return 0;
+        for (i = 0; CMSG_LEN((i + 1) * sizeof (int)) <= cmsg->cmsg_len; i++) {
+          memcpy(&fd, (char *)CMSG_DATA(cmsg) + i * sizeof (int), sizeof (fd));
+          close(fd);
+        }
+        r = 0;
+      } else {
+        memcpy(&message->descriptor, CMSG_DATA(cmsg), sizeof (message->descriptor));
       }
-      message->descriptor = *(int *)CMSG_DATA(cmsg);
     }
   }
 
-  return 1;
+  if (!r && message->descriptor != INVALID_SOCK_FD)
+    close(message->descriptor);
+
+  return r;
 }
 
 /* ================================================== */
@@ -901,7 +911,7 @@ receive_messages(int sock_fd, int flags, int max_messages, int *num_messages)
 {
   struct MessageHeader *hdr;
   SCK_Message *messages;
-  unsigned int i, n;
+  unsigned int i, n, n_ok;
   int ret, recv_flags = 0;
 
   assert(initialised);
@@ -945,18 +955,20 @@ receive_messages(int sock_fd, int flags, int max_messages, int *num_messages)
 
   received_messages = n;
 
-  for (i = 0; i < n; i++) {
+  for (i = n_ok = 0; i < n; i++) {
     hdr = ARR_GetElement(recv_headers, i);
-    if (!process_header(&hdr->msg_hdr, hdr->msg_len, sock_fd, flags, &messages[i]))
-      return NULL;
+    if (!process_header(&hdr->msg_hdr, hdr->msg_len, sock_fd, flags, &messages[n_ok]))
+      continue;
 
-    log_message(sock_fd, 1, &messages[i],
+    log_message(sock_fd, 1, &messages[n_ok],
                 flags & SCK_FLAG_MSG_ERRQUEUE ? "Received error" : "Received", NULL);
+
+    n_ok++;
   }
 
-  *num_messages = n;
+  *num_messages = n_ok;
 
-  return messages;
+  return n_ok > 0 ? messages : NULL;
 }
 
 /* ================================================== */

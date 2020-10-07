@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-09-16
+.\"      Date: 2020-10-07
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2020-09-16" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2020-10-07" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -229,9 +229,14 @@ option allows \fBchronyd\fP to be started without the capability to adjust or se
 the system clock (e.g. in some containers) to operate as an NTP server.
 .RE
 .sp
-\fB\-v\fP
+\fB\-v\fP, \fB\-\-version\fP
 .RS 4
 With this option \fBchronyd\fP will print version number to the terminal and exit.
+.RE
+.sp
+\fB\-h\fP, \fB\-\-help\fP
+.RS 4
+With this option \fBchronyd\fP will print a help message to the terminal and exit.
 .RE
 .SH "FILES"
 .sp

@@ -306,7 +306,8 @@ transmit_reply(int sock_fd, int request_length, SCK_Message *message)
 
   /* Don't require responses to non-link-local addresses to use the same
      interface */
-  if (!SCK_IsLinkLocalIPAddress(&message->remote_addr.ip.ip_addr))
+  if (message->addr_type == SCK_ADDR_IP &&
+      !SCK_IsLinkLocalIPAddress(&message->remote_addr.ip.ip_addr))
     message->if_index = INVALID_IF_INDEX;
 
   if (!SCK_SendMessage(sock_fd, message, 0))
@@ -1326,6 +1327,7 @@ handle_select_data(CMD_Request *rx_message, CMD_Reply *tx_message)
   UTI_IPHostToNetwork(&report.ip_addr, &tx_message->data.select_data.ip_addr);
   tx_message->data.select_data.state_char = report.state_char;
   tx_message->data.select_data.authentication = report.authentication;
+  tx_message->data.select_data.leap = report.leap;
   tx_message->data.select_data.conf_options = htons(convert_select_options(report.conf_options));
   tx_message->data.select_data.eff_options = htons(convert_select_options(report.eff_options));
   tx_message->data.select_data.last_sample_ago = htonl(report.last_sample_ago);

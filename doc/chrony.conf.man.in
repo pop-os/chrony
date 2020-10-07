@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-09-16
+.\"      Date: 2020-10-07
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2020-09-16" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2020-10-07" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -2015,9 +2015,12 @@ to the clients, which means they should use the same server for NTS\-KE and NTP.
 \fBntsrotate\fP \fIinterval\fP
 .RS 4
 This directive specifies the rotation interval (in seconds) of the server key
-which encrypts the NTS cookies. New keys are generated automatically. The
-server keeps two previous keys to give the clients time to get new cookies
-encrypted by the latest key. The default interval is 604800 seconds (1 week).
+which encrypts the NTS cookies. New keys are generated automatically from the
+\fI/dev/urandom\fP device. The server keeps two previous keys to give the clients
+time to get new cookies encrypted by the latest key. The interval is measured
+as the server\(cqs operating time, i.e. the actual interval can be longer if
+\fBchronyd\fP is not running continuously. The default interval is 604800 seconds
+(1 week).
 .sp
 The automatic rotation of the keys can be disabled by setting \fBntsrotate\fP to 0.
 In this case the keys are assumed to be managed externally. \fBchronyd\fP will not
@@ -3849,7 +3852,7 @@ facilities.
 .  IP \(bu 2.3
 .\}
 Use public servers from the \c
-.URL "http://www.pool.ntp.org/" "pool.ntp.org" " "
+.URL "https://www.pool.ntp.org/" "pool.ntp.org" " "
 project.
 .RE
 .sp
@@ -4165,7 +4168,7 @@ information to be saved.
 .SS "Public NTP server"
 .sp
 \fBchronyd\fP can be configured to operate as a public NTP server, e.g. to join the
-.URL "http://www.pool.ntp.org/en/join.html" "pool.ntp.org" " "
+.URL "https://www.pool.ntp.org/en/join.html" "pool.ntp.org" " "
 project. The configuration
 is similar to the NTP client with permanent connection, except it needs to
 allow client access from all addresses. It is recommended to find at least four

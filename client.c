@@ -1002,35 +1002,16 @@ process_cmd_dfreq(CMD_Request *msg, char *line)
 /* ================================================== */
 
 static void
-cvt_to_sec_usec(double x, long *sec, long *usec) {
-  long s, us;
-  s = (long) x;
-  us = (long)(0.5 + 1.0e6 * (x - (double) s));
-  while (us >= 1000000) {
-    us -= 1000000;
-    s += 1;
-  }
-  while (us < 0) {
-    us += 1000000;
-    s -= 1;
-  }
-  
-  *sec = s;
-  *usec = us;
-}
-
-/* ================================================== */
-
-static void
 process_cmd_doffset(CMD_Request *msg, char *line)
 {
+  struct timeval tv;
   double doffset;
-  long sec, usec;
+
   msg->command = htons(REQ_DOFFSET);
   if (sscanf(line, "%lf", &doffset) == 1) {
-    cvt_to_sec_usec(doffset, &sec, &usec);
-    msg->data.doffset.sec = htonl(sec);
-    msg->data.doffset.usec = htonl(usec);
+    UTI_DoubleToTimeval(doffset, &tv);
+    msg->data.doffset.sec = htonl(tv.tv_sec);
+    msg->data.doffset.usec = htonl(tv.tv_usec);
   } else {
     msg->data.doffset.sec = htonl(0);
     msg->data.doffset.usec = htonl(0);
@@ -1882,19 +1863,19 @@ print_report(const char *format, ...)
         integer = va_arg(ap, int);
         switch (integer) {
           case LEAP_Normal:
-            string = "Normal";
+            string = width != 1 ? "Normal" : "N";
             break;
           case LEAP_InsertSecond:
-            string = "Insert second";
+            string = width != 1 ? "Insert second" : "+";
             break;
           case LEAP_DeleteSecond:
-            string = "Delete second";
+            string = width != 1 ? "Delete second" : "-";
             break;
           case LEAP_Unsynchronised:
-            string = "Not synchronised";
+            string = width != 1 ? "Not synchronised" : "?";
             break;
           default:
-            string = "Invalid";
+            string = width != 1 ? "Invalid" : "?";
             break;
         }
         printf("%s", string);
@@ -2049,7 +2030,7 @@ get_source_name(IPAddr *ip_addr, char *buf, int size)
 
   /* Make sure the name is printable */
   for (i = 0; i < size && buf[i] != '\0'; i++) {
-    if (!isgraph(buf[i]))
+    if (!isgraph((unsigned char)buf[i]))
       return 0;
   }
 
@@ -2576,9 +2557,9 @@ process_cmd_selectdata(char *line)
     printf(    "|                        |    |     |                       |\n");
   }
 
-  print_header("S Name/IP Address        Auth COpts EOpts Last Score     Interval   ");
+  print_header("S Name/IP Address        Auth COpts EOpts Last Score     Interval  Leap");
 
-  /*           "S NNNNNNNNNNNNNNNNNNNNNNNNN A OOOO- OOOO- LLLL SSSSS LLLLLLL LLLLLLL" */
+  /*           "S NNNNNNNNNNNNNNNNNNNNNNNNN A OOOO- OOOO- LLLL SSSSS IIIIIII IIIIIII  L" */
 
   for (i = 0; i < n_sources; i++) {
     request.command = htons(REQ_SELECT_DATA);
@@ -2596,7 +2577,7 @@ process_cmd_selectdata(char *line)
     conf_options = ntohs(reply.data.select_data.conf_options);
     eff_options = ntohs(reply.data.select_data.eff_options);
 
-    print_report("%c %-25s %c %c%c%c%c%c %c%c%c%c%c %I %5.1f %+S %+S\n",
+    print_report("%c %-25s %c %c%c%c%c%c %c%c%c%c%c %I %5.1f %+S %+S  %1L\n",
                  reply.data.select_data.state_char,
                  name,
                  reply.data.select_data.authentication ? 'Y' : 'N',
@@ -2614,6 +2595,7 @@ process_cmd_selectdata(char *line)
                  UTI_FloatNetworkToHost(reply.data.select_data.score),
                  UTI_FloatNetworkToHost(reply.data.select_data.lo_limit),
                  UTI_FloatNetworkToHost(reply.data.select_data.hi_limit),
+                 reply.data.select_data.leap,
                  REPORT_END);
   }
 
@@ -3483,8 +3465,22 @@ display_gpl(void)
 static void
 print_help(const char *progname)
 {
-      printf("Usage: %s [-h HOST] [-p PORT] [-n] [-N] [-c] [-d] [-4|-6] [-m] [COMMAND]\n",
-             progname);
+      printf("Usage: %s [OPTION]... [COMMAND]...\n\n"
+             "Options:\n"
+             "  -4\t\tUse IPv4 addresses only\n"
+             "  -6\t\tUse IPv6 addresses only\n"
+             "  -n\t\tDon't resolve hostnames\n"
+             "  -N\t\tPrint original source names\n"
+             "  -c\t\tEnable CSV format\n"
+#if DEBUG > 0
+             "  -d\t\tEnable debug messages\n"
+#endif
+             "  -m\t\tAccept multiple commands\n"
+             "  -h HOST\tSpecify server (%s)\n"
+             "  -p PORT\tSpecify UDP port (%d)\n"
+             "  -v, --version\tPrint version and exit\n"
+             "      --help\tPrint usage and exit\n",
+             progname, DEFAULT_COMMAND_SOCKET",127.0.0.1,::1", DEFAULT_CANDM_PORT);
 }
 
 /* ================================================== */
@@ -3506,7 +3502,7 @@ main(int argc, char **argv)
   int opt, ret = 1, multi = 0, family = IPADDR_UNSPEC;
   int port = DEFAULT_CANDM_PORT;
 
-  /* Parse (undocumented) long command-line options */
+  /* Parse long command-line options */
   for (optind = 1; optind < argc; optind++) {
     if (!strcmp("--help", argv[optind])) {
       print_help(progname);

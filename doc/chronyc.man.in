@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-09-16
+.\"      Date: 2020-10-07
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2020-09-16" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2020-10-07" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -141,9 +141,15 @@ This option is ignored and is provided only for compatibility.
 This option is ignored and is provided only for compatibility.
 .RE
 .sp
-\fB\-v\fP
+\fB\-v\fP, \fB\-\-version\fP
 .RS 4
 With this option \fBchronyc\fP displays its version number on the terminal and
+exits.
+.RE
+.sp
+\fB\-\-help\fP
+.RS 4
+With this option \fBchronyc\fP displays a help message on the terminal and
 exits.
 .RE
 .SH "COMMANDS"
@@ -622,11 +628,11 @@ An example of the output is shown below.
 .sp
 .if n .RS 4
 .nf
-S Name/IP Address        Auth COpts EOpts Last Score     Interval
-====================================================================
-D foo.example.net           Y \-\-\-\-\- \-\-TR\-    4   1.0   \-61ms   +62ms
-* bar.example.net           N \-\-\-\-\- \-\-\-\-\-    0   1.0 \-6846us +7305us
-+ baz.example.net           N \-\-\-\-\- \-\-\-\-\-   10   1.0 \-7381us +7355us
+S Name/IP Address        Auth COpts EOpts Last Score     Interval  Leap
+=======================================================================
+D foo.example.net           Y \-\-\-\-\- \-\-TR\-    4   1.0   \-61ms   +62ms  N
+* bar.example.net           N \-\-\-\-\- \-\-\-\-\-    0   1.0 \-6846us +7305us  N
++ baz.example.net           N \-\-\-\-\- \-\-\-\-\-   10   1.0 \-7381us +7355us  N
 .fi
 .if n .RE
 .sp
@@ -920,6 +926,55 @@ be reselected and the scores will be reset to 1.
 This column displays the lower and upper endpoint of the interval which was
 expected to contain the true offset of the local clock considering the root
 distance at the time of the selection.
+.RE
+.sp
+\fBLeap\fP
+.RS 4
+This column displays the current leap status of the source.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fIN\fP indicates the normal status (no leap second).
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI+\fP indicates that a leap second will be inserted at the end of the month.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI\-\fP indicates that a leap second will be deleted at the end of the month.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fI?\fP indicates the unknown status (i.e. no valid measurement was made).
+.RE
 .RE
 .RE
 .sp

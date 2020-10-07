@@ -426,7 +426,7 @@ SYS_Linux_Finalise(void)
 
 #ifdef FEAT_PRIVDROP
 void
-SYS_Linux_DropRoot(uid_t uid, gid_t gid, int clock_control)
+SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control)
 {
   char cap_text[256];
   cap_t cap;
@@ -449,6 +449,10 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid, int clock_control)
                  !SYS_Linux_CheckKernelVersion(5, 7) ? "cap_net_raw=ep" : "",
                clock_control ? "cap_sys_time=ep" : "") >= sizeof (cap_text))
     assert(0);
+
+  /* Helpers don't need any capabilities */
+  if (context != SYS_MAIN_PROCESS)
+    cap_text[0] = '\0';
 
   if ((cap = cap_from_text(cap_text)) == NULL) {
     LOG_FATAL("cap_from_text() failed");
@@ -480,7 +484,7 @@ void check_seccomp_applicability(void)
 /* ================================================== */
 
 void
-SYS_Linux_EnableSystemCallFilter(int level, SYS_SystemCallContext context)
+SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
 {
   const int syscalls[] = {
     /* Clock */

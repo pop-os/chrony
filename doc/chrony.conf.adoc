@@ -1608,9 +1608,12 @@ to the clients, which means they should use the same server for NTS-KE and NTP.
 
 [[ntsrotate]]*ntsrotate* _interval_::
 This directive specifies the rotation interval (in seconds) of the server key
-which encrypts the NTS cookies. New keys are generated automatically. The
-server keeps two previous keys to give the clients time to get new cookies
-encrypted by the latest key. The default interval is 604800 seconds (1 week).
+which encrypts the NTS cookies. New keys are generated automatically from the
+_/dev/urandom_ device. The server keeps two previous keys to give the clients
+time to get new cookies encrypted by the latest key. The interval is measured
+as the server's operating time, i.e. the actual interval can be longer if
+*chronyd* is not running continuously. The default interval is 604800 seconds
+(1 week).
 +
 The automatic rotation of the keys can be disabled by setting *ntsrotate* to 0.
 In this case the keys are assumed to be managed externally. *chronyd* will not
@@ -2511,7 +2514,7 @@ the following methods:
   stratum 1 and stratum 2 servers. You should find one or more servers that are
   near to you. Check that their access policy allows you to use their
   facilities.
-* Use public servers from the http://www.pool.ntp.org/[pool.ntp.org] project.
+* Use public servers from the https://www.pool.ntp.org/[pool.ntp.org] project.
 
 Assuming that your NTP servers are called _foo.example.net_, _bar.example.net_
 and _baz.example.net_, your _chrony.conf_ file could contain as a minimum:
@@ -2803,7 +2806,7 @@ information to be saved.
 === Public NTP server
 
 *chronyd* can be configured to operate as a public NTP server, e.g. to join the
-http://www.pool.ntp.org/en/join.html[pool.ntp.org] project. The configuration
+https://www.pool.ntp.org/en/join.html[pool.ntp.org] project. The configuration
 is similar to the NTP client with permanent connection, except it needs to
 allow client access from all addresses. It is recommended to find at least four
 good servers (e.g. from the pool, or on the NTP homepage). If the server has a
