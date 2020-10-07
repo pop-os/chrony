@@ -1,3 +1,12 @@
+chrony (4.0-1) experimental; urgency=medium
+
+  * Import upstream version 4.0:
+    - This release adds support for the Network Time Security (NTS)
+    authentication mechanism (RFC 8915).
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Wed, 07 Oct 2020 19:14:51 +0200
+
 chrony (4.0~pre4-2) experimental; urgency=medium
 
   * debian/postinst:
