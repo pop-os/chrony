@@ -9,10 +9,9 @@ ConditionCapability=CAP_SYS_TIME
 
 [Service]
 Type=forking
-PIDFile=/run/chronyd.pid
+PIDFile=/run/chrony/chronyd.pid
 EnvironmentFile=-/etc/default/chrony
 ExecStart=/usr/sbin/chronyd $DAEMON_OPTS
-ExecStartPost=-/usr/lib/chrony/chrony-helper update-daemon
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=full

@@ -62,6 +62,8 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
   src->params.filter_length = 0;
   src->params.interleaved = 0;
   src->params.sel_options = 0;
+  src->params.nts = 0;
+  src->params.nts_port = SRC_DEFAULT_NTSPORT;
   src->params.authkey = INACTIVE_AUTHKEY;
   src->params.max_delay = SRC_DEFAULT_MAXDELAY;
   src->params.max_delay_ratio = SRC_DEFAULT_MAXDELAYRATIO;
@@ -140,11 +142,16 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
     } else if (!strcasecmp(cmd, "minstratum")) {
       if (sscanf(line, "%d%n", &src->params.min_stratum, &n) != 1)
         return 0;
+    } else if (!strcasecmp(cmd, "nts")) {
+      src->params.nts = 1;
+    } else if (!strcasecmp(cmd, "ntsport")) {
+      if (sscanf(line, "%d%n", &src->params.nts_port, &n) != 1)
+        return 0;
     } else if (!strcasecmp(cmd, "offset")) {
       if (sscanf(line, "%lf%n", &src->params.offset, &n) != 1)
         return 0;
     } else if (!strcasecmp(cmd, "port")) {
-      if (sscanf(line, "%hu%n", &src->port, &n) != 1)
+      if (sscanf(line, "%d%n", &src->port, &n) != 1)
         return 0;
     } else if (!strcasecmp(cmd, "polltarget")) {
       if (sscanf(line, "%d%n", &src->params.poll_target, &n) != 1)
@@ -261,7 +268,7 @@ CPS_SplitWord(char *line)
 /* ================================================== */
 
 int
-CPS_ParseKey(char *line, uint32_t *id, const char **hash, char **key)
+CPS_ParseKey(char *line, uint32_t *id, const char **type, char **key)
 {
   char *s1, *s2, *s3, *s4;
 
@@ -278,10 +285,10 @@ CPS_ParseKey(char *line, uint32_t *id, const char **hash, char **key)
     return 0;
 
   if (*s3) {
-    *hash = s2;
+    *type = s2;
     *key = s3;
   } else {
-    *hash = "MD5";
+    *type = "MD5";
     *key = s2;
   }
 

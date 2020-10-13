@@ -1,30 +1,48 @@
 # Last Modified: Sat Jan 20 10:45:05 2018
 #include <tunables/global>
 
-/usr/sbin/chronyd (attach_disconnected) {
+/usr/sbin/chronyd flags=(attach_disconnected) {
   #include <abstractions/base>
   #include <abstractions/nameservice>
 
-  capability sys_time,
-  capability net_bind_service,
-  capability setuid,
-  capability setgid,
-  capability sys_nice,
-  capability sys_resource,
-  # for /run/chrony to be created
+  # For /run/chrony to be created
   capability chown,
+
+  # Give “root” the ability to read and write the PID file
+  capability dac_override,
+  capability dac_read_search,
+
   # Needed to support HW timestamping
   capability net_admin,
+
+  # Needed to allow NTP server sockets to be bound to a privileged port
+  capability net_bind_service,
+
+  # Needed to allow an NTP socket to be bound to a device using the
+  # SO_BINDTODEVICE socket option on kernels before 5.7
+  capability net_raw,
+
+  # Needed to drop privileges
+  capability setgid,
+  capability setuid,
+
+  # Needed to set the SCHED_FIFO real-time scheduler at the specified priority
+  # using the '-P' option
+  capability sys_nice,
+
+  # Needed to lock chronyd into RAM
+  capability sys_resource,
+
+  # Needed to set the system/real-time clock
+  capability sys_time,
 
   /usr/sbin/chronyd mr,
 
   /etc/chrony/{,**} r,
-  /{,var/}run/chronyd.pid w,
+  /var/lib/chrony/{,*} rw,
+  /var/log/chrony/{,*} rw,
   /{,var/}run/chrony/{,*} rw,
-  /var/lib/chrony/{,*} r,
-  /var/lib/chrony/* w,
-  /var/log/chrony/{,*} r,
-  /var/log/chrony/* w,
+  /{,var/}run/chrony-dhcp/{,*} r,
 
   # Using the “tempcomp” directive gives chronyd the ability to improve
   # the stability and accuracy of the clock by compensating the temperature

@@ -1,13 +1,13 @@
 #!/bin/sh
-#Upstream makes use of “clknetsim” to test how well “chronyd” controls the
-#system clocks in various conditions. Due to “clknetsim” not being available
-#in Debian, let’s use autopkgtest facility to build it in a container and
-#test “chronyd” from there.
+# Upstream makes use of “clknetsim” to test how well “chronyd” controls the
+# system clocks in various conditions. Due to “clknetsim” not being available
+# in Debian, let’s use autopkgtest facility to build it in a container and
+# test “chronyd” from there.
 
 set -e
 
 testdir="$PWD/test/simulation"
-clknetsim_ver=79ffe44
+clknetsim_ver=c4ccc2d
 clknetsim_src=https://github.com/mlichvar/clknetsim/archive/"$clknetsim_ver"/clknetsim-"$clknetsim_ver".tar.gz
 clknetsim_archive=$(basename "$clknetsim_src")
 

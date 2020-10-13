@@ -6,10 +6,12 @@ Uploaders: Joachim Wiedorn <joodebian@joonet.de>
 Standards-Version: 4.5.0
 Build-Depends: asciidoctor (>= 1.5.3-1~),
                bison,
-               debhelper-compat (= 12),
+               debhelper-compat (= 13),
                dh-apparmor,
+               gnutls-bin <!nocheck>,
                libcap-dev [linux-any],
                libedit-dev,
+               libgnutls28-dev,
                libseccomp-dev (>= 2.4.3-1~) [amd64 arm64 armel armhf hppa i386 mips mipsel mips64el powerpc powerpcspe ppc64 ppc64el riscv64 s390x x32],
                net-tools <!nocheck>,
                nettle-dev,

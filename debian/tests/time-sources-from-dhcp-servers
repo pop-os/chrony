@@ -4,8 +4,6 @@
 
 set -e
 
-added_servers="/run/chrony-helper/added_servers"
-
 prepare_iface() {
     modprobe dummy
     ip link add name dummy0 type dummy
@@ -27,7 +25,11 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
 }
 EOF
 
-sed -i 's/INTERFACESv4=""/INTERFACESv4="dummy0"/' /etc/default/isc-dhcp-server
+sed -i '/INTERFACESv4=/s/".*"/"dummy0"/' /etc/default/isc-dhcp-server
+}
+
+chk_time_src() {
+    chronyc -n sources | grep -q -F '192.168.1.50'
 }
 
 printf "Preparing the dummy network interface and dhcpd configuration…\n"
@@ -36,7 +38,7 @@ if prepare_iface && dhcpd_config; then
 fi
 
 printf "Check if the NTP server is made available to chronyd…\n"
-grep -q 192.168.1.50 $added_servers && printf "SUCCESS!\n\n"
+chk_time_src && printf "SUCCESS!\n\n"
 
 printf "Release the current lease and check if the NTP server has been correctly removed…\n"
-dhclient -r dummy0 > /dev/null 2>&1 && [ ! -d "$added_servers" ] && printf "SUCCESS!\n\n"
+dhclient -r dummy0 > /dev/null 2>&1 && ! chk_time_src && printf "SUCCESS!\n\n"
