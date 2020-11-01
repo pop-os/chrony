@@ -41,8 +41,8 @@
   /etc/chrony/{,**} r,
   /var/lib/chrony/{,*} rw,
   /var/log/chrony/{,*} rw,
-  /{,var/}run/chrony/{,*} rw,
-  /{,var/}run/chrony-dhcp/{,*} r,
+  @{run}/chrony/{,*} rw,
+  @{run}/chrony-dhcp/{,*} r,
 
   # Using the “tempcomp” directive gives chronyd the ability to improve
   # the stability and accuracy of the clock by compensating the temperature
@@ -54,8 +54,8 @@
   # are common use cases; others should be set as local include (see below).
   # Configs using a 'chrony.' prefix like the tempcomp config file example
   /etc/chrony.* r,
-  # Example gpsd socket is outside /{,var/}run/chrony/
-  /{,var/}run/chrony.tty{,*}.sock rw,
+  # Example gpsd socket is outside @{run}/chrony/
+  @{run}/chrony.tty{,*}.sock rw,
   # To sign replies to MS-SNTP clients by the smbd daemon
   /var/lib/samba/ntp_signd/socket rw,
 
