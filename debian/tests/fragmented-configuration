@@ -1,0 +1,17 @@
+#!/bin/sh
+# Make sure that fragmented configuration works as expected.
+
+set -e
+
+. debian/tests/helper-functions
+
+printf 'Add "leapsectz right/UTC" to the chronyd configuration: '
+echo "leapsectz right/UTC" > /etc/chrony/conf.d/use-system-tz-database.conf && __test_ok || __test_fail
+
+printf "Restart chronyd: "
+systemctl --quiet restart chrony.service && __test_ok || __test_fail
+
+printf "Check that chronyd uses the system TZ database: "
+chronyd -p 2> /dev/null | grep -q "leapsectz right/UTC" && __test_ok || __test_fail
+
+exit 0
