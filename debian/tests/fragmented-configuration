@@ -5,13 +5,13 @@ set -e
 
 . debian/tests/helper-functions
 
-printf 'Add "leapsectz right/UTC" to the chronyd configuration: '
-echo "leapsectz right/UTC" > /etc/chrony/conf.d/use-system-tz-database.conf && __test_ok || __test_fail
+printf 'Setting "authselectmode prefer" as authentication policy: '
+echo "authselectmode prefer" > /etc/chrony/conf.d/authentication-policy.conf && __test_ok || __test_fail
 
 printf "Restart chronyd: "
 systemctl --quiet restart chrony.service && __test_ok || __test_fail
 
-printf "Check that chronyd uses the system TZ database: "
-chronyd -p 2> /dev/null | grep -q "leapsectz right/UTC" && __test_ok || __test_fail
+printf "Checking that chronyd uses the defined authentication policy: "
+chronyd -p 2> /dev/null | grep -q "authselectmode prefer" && __test_ok || __test_fail
 
 exit 0
