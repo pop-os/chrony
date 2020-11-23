@@ -18,3 +18,7 @@ Restrictions: build-needed, isolation-machine, needs-root
 
 Tests: fragmented-configuration
 Restrictions: isolation-container, needs-root
+
+Tests: dynamically-add-source
+Depends: @, dpkg-dev
+Restrictions: isolation-container, needs-root
