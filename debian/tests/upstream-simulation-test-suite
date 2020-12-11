@@ -13,6 +13,9 @@ clknetsim_archive=$(basename "$clknetsim_src")
 
 export CLKNETSIM_PATH="$AUTOPKGTEST_TMP"
 
+# Always use the same seed to get deterministic results
+export CLKNETSIM_RANDOM_SEED=24505
+
 DEB_HOST_MULTIARCH=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
 
 # The simulation tests are only supported on Linux.
