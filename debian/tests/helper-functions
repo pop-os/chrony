@@ -1,3 +1,15 @@
+__no_system_clock_control() {
+    if ! dpkg-vendor --derives-from Ubuntu; then
+        sed -i '/^DAEMON_OPTS=/s/"\(.*\)"/"\1 -x"/' /etc/default/chrony
+        mkdir -p /etc/systemd/system/chrony.service.d
+        cat <<EOF > /etc/systemd/system/chrony.service.d/override.conf
+[Unit]
+ConditionCapability=
+EOF
+        systemctl daemon-reload
+    fi
+}
+
 __test_fail() {
     printf 'FAIL\n' >&2
     return 1
