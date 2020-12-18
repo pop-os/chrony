@@ -1,27 +1,14 @@
 #!/bin/sh
 # Make sure that NTP sources from /etc/chrony/sources.d are usable.
 
-set -e
+set -eu
 
 . debian/tests/helper-functions
 
-check_source() {
-    chronyc sources | grep -Fq "192.0.2.1" && __test_ok || __test_fail
-}
+server_addr="192.0.2.1"
 
-prepare_chronyd() {
-    # Disable the control of the system clock.
-    sed -i '/DAEMON_OPTS=/s/"\(.*\)"/"\1 -x"/' /etc/default/chrony
-
-    # Override the systemd service unit to allow chronyd to run even if
-    # CAP_SYS_TIME is missing in the container.
-    mkdir -p /etc/systemd/system/chrony.service.d
-    cat <<EOF > /etc/systemd/system/chrony.service.d/override.conf
-[Unit]
-ConditionCapability=
-EOF
-    systemctl daemon-reload
-    restart_chronyd
+check_sources() {
+    chronyc sources | grep -q "$server_addr" && __test_ok || __test_fail
 }
 
 reload_sources() {
@@ -32,27 +19,24 @@ restart_chronyd() {
     systemctl --quiet restart chrony.service
 }
 
-# Not needed on Ubuntu (and its derivatives) since it uses a wrapper to handle
-# special cases in containers, notably if CAP_SYS_TIME is missing.
-if ! dpkg-vendor --derives-from Ubuntu; then
-    printf "Preparing chronyd: "
-    prepare_chronyd && __test_ok || __test_fail
-fi
-
-printf "Adding a dummy server to the list of NTP sources: "
-printf "server 192.0.2.1" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
-
-printf "Reloading the NTP sources: "
-reload_sources
-
-printf "Checking for the dummy server availability: "
-check_source
+printf "Preparing chronyd configuration: "
+__no_system_clock_control && __test_ok || __test_fail
 
 printf "Restarting chronyd: "
 restart_chronyd && __test_ok || __test_fail
 
-printf "Checking for the dummy server availability after restarting chronyd : "
+printf "Adding a dummy server to the list of NTP sources: "
+printf "server $server_addr" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
+
+printf "Reloading NTP sources: "
+reload_sources
+
+printf "Checking for dummy server availability: "
+check_sources
+
+printf "Checking for dummy server availability after restarting chronyd: "
+restart_chronyd
 sleep 2
-check_source
+check_sources
 
 exit 0
