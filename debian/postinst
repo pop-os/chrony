@@ -33,10 +33,15 @@ case "$1" in
             fi
         fi
 
-        # Change the user and group ownership of "/var/lib/chrony" iif the user
-        # has not set the "user" directive in chrony.conf
+        # Change the user and group ownership of "/var/l{ib,og}/chrony" iif
+        # the user has not set the "user" directive in chrony.conf. Also, update
+        # these directories' mode bits to 0750 to follow upstream.
         if ! grep -q "^user" /etc/chrony/chrony.conf 2> /dev/null; then
-            chown _chrony:_chrony /var/lib/chrony
+            for d in /var/lib/chrony /var/log/chrony; do
+                if ! dpkg-statoverride --list "$d" >/dev/null; then
+                    dpkg-statoverride --update --add _chrony _chrony 0750 "$d"
+                fi
+            done
         fi
 
         if [ -n "$2" ] && dpkg --compare-versions "$2" lt 4.0~pre4-1; then
