@@ -1,3 +1,70 @@
+chrony (4.0-3) unstable; urgency=medium
+
+  * debian/:
+    - chronyd's configuration can now be fragmented. Please see
+    /etc/chrony/conf.d/README for more information.
+    - NTP sources can be specified in /etc/chrony/sources.d. Please see
+    /etc/chrony/sources.d/README for more information.
+
+  * debian/chrony.conf:
+    - Include configuration files found in /etc/chrony/conf.d.
+    - Use NTP sources found in /etc/chrony/sources.d.
+    - Get TAI-UTC offset and leap seconds from the system tz database by using
+    the "leapsectz right/UTC" directive. This directive must be commented out
+    when using time sources serving leap-smeared time. (Closes: #974845)
+    - Add missing comment.
+
+  * debian/chrony.default:
+    - Switch the seccomp filter to level 1.
+
+  * debian/chrony.lintian-overrides:
+    - Override breakout-link.
+
+  * debian/control:
+    - Add tzdata to the dependencies.
+    - Bump Standards-Version to 4.5.1 (no changes required).
+
+  * debian/copyright:
+    - Update copyright year for debian/*.
+
+  * debian/postinst:
+    - Use dpkg-statoverride to manage mode bits and ownership of
+    /var/l{ib,og}/chrony.
+
+  * debian/postrm:
+    - Remove overrides for /var/l{ib,og}/chrony on purge.
+
+  * debian/rules:
+    - Drop '--without-readline' option. GNU readline support has been dropped
+    upstream due to license incompatibility.
+    - Replace -F -1 by -F 1 in the sed invocation.
+
+  * debian/tests/:
+    - Add fragmented-configuration autopkgtest.
+    - Add dynamically-add-source autopkgtest.
+    - Add ntp-server-and-nts-auth autopkgtest.
+
+  * debian/tests/control:
+    - Mark ntp-server-and-nts-auth as skippable.
+
+  * debian/tests/fragmented-configuration:
+    - Use another directive for the test since "leapsectz right/UTC" is now
+    used by default.
+
+  * debian/tests/helper-functions:
+    - Add __no_system_clock_control() function.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Always use the same seed to get deterministic results.
+
+  * debian/upstream/metadata:
+    - Remove obsolete field Name. Thanks to Debian Janitor <janitor@jelmer.uk>.
+
+  * debian/usr.sbin.chronyd:
+    - Make use of the @{run} variable.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 18 Jan 2021 21:58:52 +0100
+
 chrony (4.0-2) unstable; urgency=medium
 
   * Merge branch 'experimental' into 'master'.
