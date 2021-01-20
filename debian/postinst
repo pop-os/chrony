@@ -11,17 +11,13 @@ set -e
 case "$1" in
     configure)
 
-        if ! getent passwd _chrony > /dev/null 2>&1
-        then
-            echo "Creating '_chrony' system user/group for the chronyd daemon…"
-            adduser --force-badname \
-                    --system \
-                    --group \
-                    --quiet \
-                    --gecos "Chrony daemon" \
-                    --home /var/lib/chrony \
-                    --no-create-home _chrony
-        fi
+        adduser --force-badname \
+                --system \
+                --group \
+                --quiet \
+                --gecos "Chrony daemon" \
+                --home /var/lib/chrony \
+                --no-create-home _chrony
 
         if command -v ucf >/dev/null
         then
