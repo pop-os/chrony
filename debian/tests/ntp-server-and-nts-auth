@@ -2,7 +2,7 @@
 # Check that chronyd is able to authenticate NTP packets when NTS is enabled
 # on the server.
 
-set -eu
+set -e
 
 . debian/tests/helper-functions
 

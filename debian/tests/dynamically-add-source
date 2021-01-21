@@ -1,7 +1,7 @@
 #!/bin/sh
 # Make sure that NTP sources from /etc/chrony/sources.d are usable.
 
-set -eu
+set -e
 
 . debian/tests/helper-functions
 
