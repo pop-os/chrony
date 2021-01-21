@@ -50,7 +50,7 @@ create_cert_template && __test_ok || __test_skip "unable to create certificate t
 
 generate_cert && __test_ok || __test_skip "unable to generate self-signed certificate"
 
-server_config && __test_ok || __test_fail
+server_config && __test_ok || __test_skip
 
 printf "Checking if server authenticates NTP packets: "
 chronyc -c authdata | grep -q "$server_addr,NTS" && __test_ok || __test_fail
