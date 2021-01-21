@@ -21,7 +21,7 @@ Restrictions: isolation-container, needs-root
 
 Tests: dynamically-add-source
 Depends: @, dpkg-dev
-Restrictions: isolation-container, needs-root
+Restrictions: isolation-container, needs-root, skippable
 
 Tests: ntp-server-and-nts-auth
 Depends: @, dpkg-dev, gnutls-bin
