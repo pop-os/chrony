@@ -7,16 +7,16 @@ chrony (4.0-4) unstable; urgency=medium
     - Run adduser unconditionally.
     - Use 'chronyd -p' to check the whole configuration.
 
+  * debian/tests/:
+    - Prevent dynamically-add-source and ntp-server-and-nts-auth tests from
+    failing on chronyd's preparation step.
+    - Don't pass 'set -u' to dynamically-add-source and
+    ntp-server-and-nts-auth scripts.
+
   * debian/tests/control:
     - Mark dynamically-add-source as skippable.
 
-  * debian/tests/dynamically-add-source:
-    - Do not fail on chronyd's preparation step.
-
-  * debian/tests/ntp-server-and-nts-auth:
-    - Do not fail on chronyd's preparation step.
-
- -- Vincent Blut <vincent.debian@free.fr>  Thu, 21 Jan 2021 18:23:46 +0100
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 21 Jan 2021 20:02:39 +0100
 
 chrony (4.0-3) unstable; urgency=medium
 
