@@ -18,7 +18,7 @@ Build-Depends: asciidoctor (>= 1.5.3-1~),
                pps-tools (>= 0.20120406+g0deb9c7e-2) [linux-any],
                procps <!nocheck>
 Homepage: https://chrony.tuxfamily.org
-Vcs-Git: https://salsa.debian.org/debian/chrony.git
+Vcs-Git: https://salsa.debian.org/debian/chrony.git -b debian/latest
 Vcs-Browser: https://salsa.debian.org/debian/chrony
 Rules-Requires-Root: no
 
