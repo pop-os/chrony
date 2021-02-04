@@ -15,6 +15,9 @@ ExecStart=/usr/sbin/chronyd $DAEMON_OPTS
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=full
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
 
 [Install]
 Alias=chronyd.service
