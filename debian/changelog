@@ -1,3 +1,32 @@
+chrony (4.0-5) unstable; urgency=medium
+
+  * Follow DEP-14 branch naming conventions:
+    master -> debian/latest
+    upstream -> upstream/latest
+
+  * debian/chrony.service:
+    - Enable some hardening settings.
+
+  * debian/control:
+    - Remove Joachim Wiedorn from the Uploaders field. This decision was taken
+    in agreement with him. Thanks a lot, Joachim, for your work on chrony and
+    for your benevolence when you handed me its maintenance.
+    - Point Vcs-Git to the debian/latest branch.
+
+  * debian/dirs:
+    - Do not create the /etc/apparmor.d/force-complain directory. Not needed
+    anymore.
+
+  * debian/postrm:
+    - Remove /run/chrony-dhcp on purge.
+
+  * debian/preinst:
+    - Drop old migration code snippet. It was used to put the newly provided
+    AppArmor profile in complain mode when upgrading chrony to prevent
+    regressions this profile could have caused. (Closes: #905485)
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 04 Feb 2021 19:49:22 +0100
+
 chrony (4.0-4) unstable; urgency=medium
 
   * debian/chrony.examples:
