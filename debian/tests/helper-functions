@@ -24,3 +24,11 @@ __test_skip() {
     [ -n "$1" ] && printf 'SKIP: (%s)\n' "$1" || printf 'SKIP\n'
     exit 77
 }
+
+# Ubuntu's default config is fully populated causing issues with the test
+# If any of those tests run on Ubuntu, clear some and restart the daemon
+# to pick this up before entering the tests.
+if grep -q "^pool.*ubuntu.pool.ntp.org" /etc/chrony/chrony.conf; then
+    sudo sed -i -e '/^pool.*ubuntu.pool.ntp.org/d' /etc/chrony/chrony.conf
+    restart_chronyd
+fi
