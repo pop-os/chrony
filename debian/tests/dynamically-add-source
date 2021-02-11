@@ -7,18 +7,6 @@ set -e
 
 server_addr="192.0.2.1"
 
-check_sources() {
-    chronyc sources | grep -q "$server_addr" && __test_ok || __test_fail
-}
-
-reload_sources() {
-    chronyc reload sources > /dev/null 2>&1 && __test_ok || __test_fail
-}
-
-restart_chronyd() {
-    systemctl --quiet restart chrony.service
-}
-
 printf "Preparing chronyd configuration: "
 __no_system_clock_control && __test_ok || __test_skip
 
@@ -26,14 +14,14 @@ printf "Adding a dummy server to the list of NTP sources: "
 printf "server $server_addr" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
 
 printf "Reloading NTP sources: "
-reload_sources
+__reload_sources
 
 printf "Checking for dummy server availability: "
-check_sources
+__check_sources "$server_addr"
 
 printf "Checking for dummy server availability after restarting chronyd: "
-restart_chronyd
+__restart_chronyd
 sleep 2
-check_sources
+__check_sources "$server_addr"
 
 exit 0
