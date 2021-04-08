@@ -1,0 +1,33 @@
+From 966e6fd939df724235a93e7a89dd7cf67178f99d Mon Sep 17 00:00:00 2001
+From: Foster Snowhill <forst@forstwoof.ru>
+Date: Sun, 4 Apr 2021 15:12:17 +0200
+Subject: sys_linux: allow setsockopt(SOL_IP, IP_TOS) in seccomp
+
+This system call is required by the DSCP marking feature introduced in commit
+6a5665ca5877 ("conf: add dscp directive").
+
+Before this change, enabling seccomp filtering (chronyd -F 1) and specifying a
+custom DSCP value in the configuration (for example "dscp 46") caused the
+process to be killed by seccomp due to IP_TOS not being allowed by the filter.
+
+Tested before and after the change on Ubuntu 21.04, kernel 5.11.0-13-generic.
+IP_TOS is available since Linux 1.0, so I didn't add any ifdefs for it.
+
+Signed-off-by: Foster Snowhill <forst@forstwoof.ru>
+
+Bug: https://listengine.tuxfamily.org/chrony.tuxfamily.org/chrony-dev/2021/04/msg00000.html
+Applied-Upstream: https://git.tuxfamily.org/chrony/chrony.git/commit/?id=966e6fd939df724235a93e7a89dd7cf67178f99d
+Last-Update: 2021-04-08
+Index: chrony/sys_linux.c
+===================================================================
+--- chrony.orig/sys_linux.c
++++ chrony/sys_linux.c
+@@ -615,7 +615,7 @@ SYS_Linux_EnableSystemCallFilter(int lev
+   };
+ 
+   const static int socket_options[][2] = {
+-    { SOL_IP, IP_PKTINFO }, { SOL_IP, IP_FREEBIND },
++    { SOL_IP, IP_PKTINFO }, { SOL_IP, IP_FREEBIND }, { SOL_IP, IP_TOS },
+ #ifdef FEAT_IPV6
+     { SOL_IPV6, IPV6_V6ONLY }, { SOL_IPV6, IPV6_RECVPKTINFO },
+ #endif
