@@ -1,2 +1,1 @@
-allow-IP_TOS-socket-option-in-seccomp-filter.patch
 nm-dispatcher-dhcp_Move-server_dir-to-run.patch
