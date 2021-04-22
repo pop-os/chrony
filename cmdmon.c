@@ -62,6 +62,9 @@ static int sock_fdu;
 static int sock_fd4;
 static int sock_fd6;
 
+/* Flag indicating the IPv4 socket is bound to an address */
+static int bound_sock_fd4;
+
 /* Flag indicating whether this module has been initialised or not */
 static int initialised = 0;
 
@@ -140,6 +143,7 @@ static const char permissions[] = {
   PERMIT_AUTH, /* CLIENT_ACCESSES_BY_INDEX3 */
   PERMIT_AUTH, /* SELECT_DATA */
   PERMIT_AUTH, /* RELOAD_SOURCES */
+  PERMIT_AUTH, /* DOFFSET2 */
 };
 
 /* ================================================== */
@@ -178,6 +182,9 @@ open_socket(int family)
             UTI_IPSockAddrToString(&local_addr));
         return INVALID_SOCK_FD;
       }
+
+      if (family == IPADDR_INET4)
+        bound_sock_fd4 = local_addr.ip_addr.addr.in4 != INADDR_ANY;
 
       break;
     case IPADDR_UNSPEC:
@@ -244,6 +251,8 @@ CAM_Initialise(void)
 
   initialised = 1;
 
+  bound_sock_fd4 = 0;
+
   sock_fdu = INVALID_SOCK_FD;
   sock_fd4 = open_socket(IPADDR_INET4);
   sock_fd6 = open_socket(IPADDR_INET6);
@@ -309,6 +318,12 @@ transmit_reply(int sock_fd, int request_length, SCK_Message *message)
   if (message->addr_type == SCK_ADDR_IP &&
       !SCK_IsLinkLocalIPAddress(&message->remote_addr.ip.ip_addr))
     message->if_index = INVALID_IF_INDEX;
+
+#if !defined(HAVE_IN_PKTINFO) && defined(IP_SENDSRCADDR)
+  /* On FreeBSD a local IPv4 address cannot be specified on bound socket */
+  if (message->local_addr.ip.family == IPADDR_INET4 && (sock_fd != sock_fd4 || bound_sock_fd4))
+    message->local_addr.ip.family = IPADDR_UNSPEC;
+#endif
 
   if (!SCK_SendMessage(sock_fd, message, 0))
     return;
@@ -735,6 +750,7 @@ handle_add_source(CMD_Request *rx_message, CMD_Reply *tx_message)
   params.filter_length = ntohl(rx_message->data.ntp_source.filter_length);
   params.authkey = ntohl(rx_message->data.ntp_source.authkey);
   params.nts_port = ntohl(rx_message->data.ntp_source.nts_port);
+  params.cert_set = ntohl(rx_message->data.ntp_source.cert_set);
   params.max_delay = UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay);
   params.max_delay_ratio =
     UTI_FloatNetworkToHost(rx_message->data.ntp_source.max_delay_ratio);
@@ -751,6 +767,7 @@ handle_add_source(CMD_Request *rx_message, CMD_Reply *tx_message)
   params.interleaved = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_INTERLEAVED ? 1 : 0;
   params.burst = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_BURST ? 1 : 0;
   params.nts = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_NTS ? 1 : 0;
+  params.copy = ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_COPY ? 1 : 0;
   params.sel_options =
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_PREFER ? SRC_SELECT_PREFER : 0) |
     (ntohl(rx_message->data.ntp_source.flags) & REQ_ADDSRC_NOSELECT ? SRC_SELECT_NOSELECT : 0) |
@@ -841,13 +858,14 @@ handle_dfreq(CMD_Request *rx_message, CMD_Reply *tx_message)
 static void
 handle_doffset(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
-  long sec, usec;
   double doffset;
-  sec = (int32_t)ntohl(rx_message->data.doffset.sec);
-  usec = (int32_t)ntohl(rx_message->data.doffset.usec);
-  doffset = (double) sec + 1.0e-6 * (double) usec;
-  LOG(LOGS_INFO, "Accumulated delta offset of %.6f seconds", doffset);
-  LCL_AccumulateOffset(doffset, 0.0);
+
+  doffset = UTI_FloatNetworkToHost(rx_message->data.doffset.doffset);
+  if (!LCL_AccumulateOffset(doffset, 0.0)) {
+    tx_message->status = htons(STT_FAILED);
+  } else {
+    LOG(LOGS_INFO, "Accumulated delta offset of %.6f seconds", doffset);
+  }
 }
 
 /* ================================================== */
@@ -1622,7 +1640,7 @@ read_from_cmd_socket(int sock_fd, int event, void *anything)
           handle_dfreq(&rx_message, &tx_message);
           break;
 
-        case REQ_DOFFSET:
+        case REQ_DOFFSET2:
           handle_doffset(&rx_message, &tx_message);
           break;
 

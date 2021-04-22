@@ -225,9 +225,13 @@ create_tls_session(int server_mode, int sock_fd, const char *server_name,
   }
 
   if (!server_mode) {
-    r = gnutls_server_name_set(session, GNUTLS_NAME_DNS, server_name, strlen(server_name));
-    if (r < 0)
-      goto error;
+    assert(server_name);
+
+    if (!UTI_IsStringIP(server_name)) {
+      r = gnutls_server_name_set(session, GNUTLS_NAME_DNS, server_name, strlen(server_name));
+      if (r < 0)
+        goto error;
+    }
 
     flags = 0;
 
@@ -637,11 +641,13 @@ deinit_gnutls(void)
 
 /* ================================================== */
 
-void *
-NKSN_CreateCertCredentials(char *cert, char *key, char *trusted_certs)
+static NKSN_Credentials
+create_credentials(const char **certs, const char **keys, int n_certs_keys,
+                   const char **trusted_certs, uint32_t *trusted_certs_ids,
+                   int n_trusted_certs, uint32_t trusted_cert_set)
 {
   gnutls_certificate_credentials_t credentials = NULL;
-  int r;
+  int i, r;
 
   init_gnutls();
 
@@ -649,29 +655,50 @@ NKSN_CreateCertCredentials(char *cert, char *key, char *trusted_certs)
   if (r < 0)
     goto error;
 
-  if (cert && key) {
-    r = gnutls_certificate_set_x509_key_file(credentials, cert, key,
-                                             GNUTLS_X509_FMT_PEM);
-    if (r < 0)
-      goto error;
+  if (certs && keys) {
+    if (trusted_certs || trusted_certs_ids)
+      assert(0);
+
+    for (i = 0; i < n_certs_keys; i++) {
+      r = gnutls_certificate_set_x509_key_file(credentials, certs[i], keys[i],
+                                               GNUTLS_X509_FMT_PEM);
+      if (r < 0)
+        goto error;
+    }
   } else {
-    if (!CNF_GetNoSystemCert()) {
+    if (certs || keys || n_certs_keys > 0)
+      assert(0);
+
+    if (trusted_cert_set == 0 && !CNF_GetNoSystemCert()) {
       r = gnutls_certificate_set_x509_system_trust(credentials);
       if (r < 0)
         goto error;
     }
 
-    if (trusted_certs) {
-      r = gnutls_certificate_set_x509_trust_file(credentials, trusted_certs,
-                                                 GNUTLS_X509_FMT_PEM);
-      if (r < 0)
-        goto error;
+    if (trusted_certs && trusted_certs_ids) {
+      for (i = 0; i < n_trusted_certs; i++) {
+        struct stat buf;
+
+        if (trusted_certs_ids[i] != trusted_cert_set)
+          continue;
+
+        if (stat(trusted_certs[i], &buf) == 0 && S_ISDIR(buf.st_mode))
+          r = gnutls_certificate_set_x509_trust_dir(credentials, trusted_certs[i],
+                                                    GNUTLS_X509_FMT_PEM);
+        else
+          r = gnutls_certificate_set_x509_trust_file(credentials, trusted_certs[i],
+                                                     GNUTLS_X509_FMT_PEM);
+        if (r < 0)
+          goto error;
+
+        DEBUG_LOG("Added %d trusted certs from %s", r, trusted_certs[i]);
+      }
     }
   }
 
   credentials_counter++;
 
-  return credentials;
+  return (NKSN_Credentials)credentials;
 
 error:
   LOG(LOGS_ERR, "Could not set credentials : %s", gnutls_strerror(r));
@@ -683,10 +710,27 @@ error:
 
 /* ================================================== */
 
-void
-NKSN_DestroyCertCredentials(void *credentials)
+NKSN_Credentials
+NKSN_CreateServerCertCredentials(const char **certs, const char **keys, int n_certs_keys)
 {
-  gnutls_certificate_free_credentials(credentials);
+  return create_credentials(certs, keys, n_certs_keys, NULL, NULL, 0, 0);
+}
+
+/* ================================================== */
+
+NKSN_Credentials
+NKSN_CreateClientCertCredentials(const char **certs, uint32_t *ids,
+                                 int n_certs_ids, uint32_t trusted_cert_set)
+{
+  return create_credentials(NULL, NULL, 0, certs, ids, n_certs_ids, trusted_cert_set);
+}
+
+/* ================================================== */
+
+void
+NKSN_DestroyCertCredentials(NKSN_Credentials credentials)
+{
+  gnutls_certificate_free_credentials((gnutls_certificate_credentials_t)credentials);
   credentials_counter--;
   deinit_gnutls();
 }
@@ -734,12 +778,13 @@ NKSN_DestroyInstance(NKSN_Instance inst)
 
 int
 NKSN_StartSession(NKSN_Instance inst, int sock_fd, const char *label,
-                  void *credentials, double timeout)
+                  NKSN_Credentials credentials, double timeout)
 {
   assert(inst->state == KE_STOPPED);
 
   inst->tls_session = create_tls_session(inst->server, sock_fd, inst->server_name,
-                                         credentials, priority_cache);
+                                         (gnutls_certificate_credentials_t)credentials,
+                                         priority_cache);
   if (!inst->tls_session)
     return 0;
 

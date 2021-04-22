@@ -33,13 +33,13 @@ test_code () {
     echo "int main(int argc, char **argv) {"
     echo "$code"
     echo "return 0; }"
-  ) > docheck.c
+  ) > conftest.c
 
-  echo "docheck.c:" >> config.log
-  cat docheck.c >> config.log
-  echo $MYCC $MYCFLAGS $MYCPPFLAGS $cflags -o docheck docheck.c $ldflags \
+  echo "conftest.c:" >> config.log
+  cat conftest.c >> config.log
+  echo $MYCC $MYCFLAGS $MYCPPFLAGS $cflags -o conftest conftest.c $ldflags \
     $MYLDFLAGS >> config.log
-  $MYCC $MYCFLAGS $MYCPPFLAGS $cflags -o docheck docheck.c $ldflags \
+  $MYCC $MYCFLAGS $MYCPPFLAGS $cflags -o conftest conftest.c $ldflags \
     $MYLDFLAGS >> config.log 2>&1
 
   if [ $? -eq 0 ]
@@ -50,7 +50,7 @@ test_code () {
     echo "No"
     result=1
   fi
-  rm -f docheck.c docheck
+  rm -f conftest.c conftest
   echo >> config.log
   return $result
 }
@@ -655,6 +655,20 @@ then
   fi
 fi
 
+if ! test_code 'O_NOFOLLOW flag' 'sys/types.h sys/stat.h fcntl.h' '' "$LIBS" \
+  'return open("/dev/null", O_NOFOLLOW);'
+then
+  if test_code 'O_NOFOLLOW flag with _GNU_SOURCE' 'sys/types.h sys/stat.h fcntl.h' \
+    '-D_GNU_SOURCE' "$LIBS" \
+    'return open("/dev/null", O_NOFOLLOW);'
+  then
+    add_def _GNU_SOURCE
+  else
+    echo "error: open() does not support O_NOFOLLOW flag"
+    exit 1
+  fi
+fi
+
 if [ $try_clock_gettime = "1" ]; then
   if test_code 'clock_gettime()' 'time.h' '' '' \
     'clock_gettime(CLOCK_REALTIME, NULL);'
@@ -670,10 +684,11 @@ if [ $try_clock_gettime = "1" ]; then
   fi
 fi
 
-if test_code 'getaddrinfo()' 'sys/types.h sys/socket.h netdb.h' '' "$LIBS" \
+if ! test_code 'getaddrinfo()' 'sys/types.h sys/socket.h netdb.h' '' "$LIBS" \
   'return getaddrinfo(0, 0, 0, 0);'
 then
-  add_def HAVE_GETADDRINFO
+  echo "error: getaddrinfo() not found"
+  exit 1
 fi
 
 if [ $feat_asyncdns = "1" ] && \

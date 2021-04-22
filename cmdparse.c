@@ -64,7 +64,9 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
   src->params.sel_options = 0;
   src->params.nts = 0;
   src->params.nts_port = SRC_DEFAULT_NTSPORT;
+  src->params.copy = 0;
   src->params.authkey = INACTIVE_AUTHKEY;
+  src->params.cert_set = SRC_DEFAULT_CERTSET;
   src->params.max_delay = SRC_DEFAULT_MAXDELAY;
   src->params.max_delay_ratio = SRC_DEFAULT_MAXDELAYRATIO;
   src->params.max_delay_dev_ratio = SRC_DEFAULT_MAXDELAYDEVRATIO;
@@ -90,6 +92,8 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
       src->params.auto_offline = 1;
     } else if (!strcasecmp(cmd, "burst")) {
       src->params.burst = 1;
+    } else if (!strcasecmp(cmd, "copy")) {
+      src->params.copy = 1;
     } else if (!strcasecmp(cmd, "iburst")) {
       src->params.iburst = 1;
     } else if (!strcasecmp(cmd, "offline")) {
@@ -102,6 +106,9 @@ CPS_ParseNTPSourceAdd(char *line, CPS_NTP_Source *src)
       src->params.sel_options |= SRC_SELECT_REQUIRE;
     } else if (!strcasecmp(cmd, "trust")) {
       src->params.sel_options |= SRC_SELECT_TRUST;
+    } else if (!strcasecmp(cmd, "certset")) {
+      if (sscanf(line, "%"SCNu32"%n", &src->params.cert_set, &n) != 1)
+        return 0;
     } else if (!strcasecmp(cmd, "key")) {
       if (sscanf(line, "%"SCNu32"%n", &src->params.authkey, &n) != 1 ||
           src->params.authkey == INACTIVE_AUTHKEY)

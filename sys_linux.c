@@ -537,6 +537,7 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
     SCMP_SYS(fchownat),
     SCMP_SYS(fstat),
     SCMP_SYS(fstat64),
+    SCMP_SYS(fstatat64),
     SCMP_SYS(getdents),
     SCMP_SYS(getdents64),
     SCMP_SYS(lseek),
@@ -547,11 +548,16 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
     SCMP_SYS(readlinkat),
     SCMP_SYS(rename),
     SCMP_SYS(renameat),
+#ifdef __NR_renameat2
     SCMP_SYS(renameat2),
+#endif
     SCMP_SYS(stat),
     SCMP_SYS(stat64),
     SCMP_SYS(statfs),
     SCMP_SYS(statfs64),
+#ifdef __NR_statx
+    SCMP_SYS(statx),
+#endif
     SCMP_SYS(unlink),
     SCMP_SYS(unlinkat),
 
@@ -615,7 +621,7 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
   };
 
   const static int socket_options[][2] = {
-    { SOL_IP, IP_PKTINFO }, { SOL_IP, IP_FREEBIND },
+    { SOL_IP, IP_PKTINFO }, { SOL_IP, IP_FREEBIND }, { SOL_IP, IP_TOS },
 #ifdef FEAT_IPV6
     { SOL_IPV6, IPV6_V6ONLY }, { SOL_IPV6, IPV6_RECVPKTINFO },
 #endif

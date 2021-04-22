@@ -54,7 +54,6 @@ static int initialised = 0;
 /* ================================================== */
 /* Structure used to hold info for selecting between sources */
 struct SelectInfo {
-  int stratum;
   int select_ok;
   double std_dev;
   double root_distance;
@@ -132,7 +131,10 @@ struct SRC_Instance_Record {
 
   struct SelectInfo sel_info;
 
-  /* Latest leap status */
+  /* Current stratum */
+  int stratum;
+
+  /* Current leap status */
   NTP_Leap leap;
 
   /* Flag indicating the source has a leap second vote */
@@ -174,6 +176,9 @@ static double max_jitter;
 static double reselect_distance;
 static double stratum_weight;
 static double combine_limit;
+
+/* Identifier of the dump file */
+#define DUMP_IDENTIFIER "SRC0\n"
 
 /* ================================================== */
 /* Forward prototype */
@@ -313,6 +318,7 @@ SRC_ResetInstance(SRC_Instance instance)
   instance->distant = 0;
   instance->status = SRC_BAD_STATS;
   instance->sel_score = 1.0;
+  instance->stratum = 0;
   instance->leap = LEAP_Unsynchronised;
   instance->leap_vote = 0;
 
@@ -371,8 +377,10 @@ get_leap_status(void)
 /* ================================================== */
 
 void
-SRC_SetLeapStatus(SRC_Instance inst, NTP_Leap leap)
+SRC_UpdateStatus(SRC_Instance inst, int stratum, NTP_Leap leap)
 {
+  inst->stratum = stratum;
+
   if (REF_IsLeapSecondClose(NULL, 0.0))
     return;
 
@@ -398,9 +406,9 @@ SRC_AccumulateSample(SRC_Instance inst, NTP_Sample *sample)
 
   assert(initialised);
 
-  DEBUG_LOG("src=%s ts=%s offset=%e delay=%e disp=%e stratum=%d",
+  DEBUG_LOG("src=%s ts=%s offset=%e delay=%e disp=%e",
             source_to_string(inst), UTI_TimespecToString(&sample->time), -sample->offset,
-            sample->root_delay, sample->root_dispersion, sample->stratum);
+            sample->root_delay, sample->root_dispersion);
 
   if (REF_IsLeapSecondClose(&sample->time, sample->offset)) {
     LOG(LOGS_INFO, "Dropping sample around leap second");
@@ -581,7 +589,7 @@ log_selection_source(const char *format, SRC_Instance inst)
   name = source_to_string(inst);
   ntp_name = inst->type == SRC_NTP ? NSR_GetName(inst->ip_addr) : NULL;
 
-  if (ntp_name && strcmp(name, ntp_name) != 0)
+  if (ntp_name)
     snprintf(buf, sizeof (buf), "%s (%s)", name, ntp_name);
   else
     snprintf(buf, sizeof (buf), "%s", name);
@@ -808,7 +816,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
 
     si = &sources[i]->sel_info;
-    SST_GetSelectionData(sources[i]->stats, &now, &si->stratum,
+    SST_GetSelectionData(sources[i]->stats, &now,
                          &si->lo_limit, &si->hi_limit, &si->root_distance,
                          &si->std_dev, &first_sample_ago,
                          &si->last_sample_ago, &si->select_ok);
@@ -890,10 +898,10 @@ SRC_SelectSource(SRC_Instance updated_inst)
        source can settle down to a state where only one server is serving its
        local unsychronised time and others are synchronised to it. */
 
-    if (si->stratum >= orphan_stratum && sources[i]->type == SRC_NTP) {
+    if (sources[i]->stratum >= orphan_stratum && sources[i]->type == SRC_NTP) {
       mark_source(sources[i], SRC_ORPHAN);
 
-      if (si->stratum == orphan_stratum && sources[i]->reachability &&
+      if (sources[i]->stratum == orphan_stratum && sources[i]->reachability &&
           (orphan_source == INVALID_SOURCE ||
            sources[i]->ref_id < sources[orphan_source]->ref_id))
         orphan_source = i;
@@ -1131,10 +1139,10 @@ SRC_SelectSource(SRC_Instance updated_inst)
   /* Find minimum stratum */
 
   index = sel_sources[0];
-  min_stratum = sources[index]->sel_info.stratum;
+  min_stratum = sources[index]->stratum;
   for (i = 1; i < n_sel_sources; i++) {
     index = sel_sources[i];
-    stratum = sources[index]->sel_info.stratum;
+    stratum = sources[index]->stratum;
     if (stratum < min_stratum)
       min_stratum = stratum;
   }
@@ -1147,7 +1155,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
 
   if (selected_source_index != INVALID_SOURCE)
     sel_src_distance = sources[selected_source_index]->sel_info.root_distance +
-      (sources[selected_source_index]->sel_info.stratum - min_stratum) * stratum_weight;
+      (sources[selected_source_index]->stratum - min_stratum) * stratum_weight;
 
   for (i = 0; i < n_sources; i++) {
     /* Reset score for non-selectable sources */
@@ -1159,7 +1167,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
     }
 
     distance = sources[i]->sel_info.root_distance +
-      (sources[i]->sel_info.stratum - min_stratum) * stratum_weight;
+      (sources[i]->stratum - min_stratum) * stratum_weight;
     if (sources[i]->type == SRC_NTP)
       distance += reselect_distance;
 
@@ -1247,7 +1255,7 @@ SRC_SelectSource(SRC_Instance updated_inst)
   combined = combine_sources(n_sel_sources, &ref_time, &src_offset, &src_offset_sd,
                              &src_frequency, &src_frequency_sd, &src_skew);
 
-  REF_SetReference(sources[selected_source_index]->sel_info.stratum,
+  REF_SetReference(sources[selected_source_index]->stratum,
                    leap_status, combined,
                    sources[selected_source_index]->ref_id,
                    sources[selected_source_index]->ip_addr,
@@ -1320,24 +1328,60 @@ add_dispersion(double dispersion, void *anything)
 
 /* ================================================== */
 
-static
-FILE *open_dumpfile(SRC_Instance inst, char mode)
+static int
+get_dumpfile(SRC_Instance inst, char *filename, size_t len)
 {
-  char filename[64], *dumpdir;
+  /* Use the IP address, or reference ID with reference clocks */
+  switch (inst->type) {
+    case SRC_NTP:
+      if (!UTI_IsIPReal(inst->ip_addr) ||
+          snprintf(filename, len, "%s", source_to_string(inst)) >= len)
+        return 0;
+      break;
+    case SRC_REFCLOCK:
+      if (snprintf(filename, len, "refid:%08"PRIx32, inst->ref_id) >= len)
+        return 0;
+      break;
+    default:
+      assert(0);
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+static void
+save_source(SRC_Instance inst)
+{
+  char filename[64], *dumpdir, *ntp_name;
+  FILE *f;
 
   dumpdir = CNF_GetDumpDir();
   if (!dumpdir)
-    return NULL;
+    return;
 
-  /* Include IP address in the name for NTP sources, or reference ID in hex */
-  if (inst->type == SRC_NTP && UTI_IsIPReal(inst->ip_addr))
-    snprintf(filename, sizeof (filename), "%s", source_to_string(inst));
-  else if (inst->type == SRC_REFCLOCK)
-    snprintf(filename, sizeof (filename), "refid:%08"PRIx32, inst->ref_id);
-  else
-    return NULL;
+  if (!get_dumpfile(inst, filename, sizeof (filename)))
+    return;
 
-  return UTI_OpenFile(dumpdir, filename, ".dat", mode, 0644);
+  f = UTI_OpenFile(dumpdir, filename, ".dat", 'w', 0644);
+  if (!f)
+    return;
+
+  ntp_name = inst->type == SRC_NTP ? NSR_GetName(inst->ip_addr) : ".";
+
+  if (fprintf(f, "%s%s\n%d %o %d %d %d\n",
+              DUMP_IDENTIFIER, ntp_name, inst->authenticated,
+              (unsigned int)inst->reachability, inst->reachability_size,
+              inst->stratum, (int)inst->leap) < 0 ||
+      !SST_SaveToFile(inst->stats, f)) {
+    fclose(f);
+    if (!UTI_RemoveFile(dumpdir, filename, ".dat"))
+      ;
+    return;
+  }
+
+  fclose(f);
 }
 
 /* ================================================== */
@@ -1346,16 +1390,60 @@ FILE *open_dumpfile(SRC_Instance inst, char mode)
 void
 SRC_DumpSources(void)
 {
-  FILE *out;
   int i;
 
-  for (i = 0; i < n_sources; i++) {
-    out = open_dumpfile(sources[i], 'w');
-    if (!out)
-      continue;
-    SST_SaveToFile(sources[i]->stats, out);
-    fclose(out);
+  for (i = 0; i < n_sources; i++)
+    save_source(sources[i]);
+}
+
+/* ================================================== */
+
+#define MAX_WORDS 1
+
+static void
+load_source(SRC_Instance inst)
+{
+  char filename[64], line[256], *dumpdir, *ntp_name, *words[MAX_WORDS];
+  int auth, leap, reach_size, stratum;
+  unsigned int reach;
+  FILE *f;
+
+  dumpdir = CNF_GetDumpDir();
+  if (!dumpdir)
+    return;
+
+  if (!get_dumpfile(inst, filename, sizeof (filename)))
+    return;
+
+  f = UTI_OpenFile(dumpdir, filename, ".dat", 'r', 0);
+  if (!f)
+    return;
+
+  ntp_name = inst->type == SRC_NTP ? NSR_GetName(inst->ip_addr) : NULL;
+
+  if (!fgets(line, sizeof (line), f) || strcmp(line, DUMP_IDENTIFIER) != 0 ||
+      !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 1 ||
+        (inst->type == SRC_NTP && (!ntp_name || strcmp(words[0], ntp_name) != 0)) ||
+      !fgets(line, sizeof (line), f) ||
+        sscanf(words[0], "%d %o %d %d %d",
+               &auth, &reach, &reach_size, &stratum, &leap) != 5 ||
+        (!auth && inst->authenticated) ||
+        stratum < 0 || stratum >= NTP_MAX_STRATUM ||
+        leap < LEAP_Normal || leap >= LEAP_Unsynchronised ||
+      !SST_LoadFromFile(inst->stats, f)) {
+    LOG(LOGS_WARN, "Could not load dump file for %s", source_to_string(inst));
+    fclose(f);
+    return;
   }
+
+  inst->reachability = reach & ((1U << SOURCE_REACH_BITS) - 1);
+  inst->reachability_size = CLAMP(0, reach_size, SOURCE_REACH_BITS);
+  inst->stratum = stratum;
+  inst->leap = leap;
+
+  LOG(LOGS_INFO, "Loaded dump file for %s", source_to_string(inst));
+
+  fclose(f);
 }
 
 /* ================================================== */
@@ -1363,21 +1451,17 @@ SRC_DumpSources(void)
 void
 SRC_ReloadSources(void)
 {
-  FILE *in;
   int i;
 
   for (i = 0; i < n_sources; i++) {
-    in = open_dumpfile(sources[i], 'r');
-    if (!in)
-      continue;
-    if (!SST_LoadFromFile(sources[i]->stats, in))
-      LOG(LOGS_WARN, "Could not load dump file for %s",
-          source_to_string(sources[i]));
-    else
-      LOG(LOGS_INFO, "Loaded dump file for %s",
-          source_to_string(sources[i]));
-    fclose(in);
+    load_source(sources[i]);
+
+    /* Allow an immediate update of the reference */
+    sources[i]->updates++;
   }
+
+  /* Select sources and set the reference */
+  SRC_SelectSource(NULL);
 }
 
 /* ================================================== */
@@ -1491,6 +1575,8 @@ SRC_ReportSource(int index, RPT_SourceReport *report, struct timespec *now)
       report->ip_addr.addr.in4 = src->ref_id;
       report->ip_addr.family = IPADDR_INET4;
     }
+
+    report->stratum = src->stratum;
 
     switch (src->status) {
       case SRC_FALSETICKER:
