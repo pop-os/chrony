@@ -153,14 +153,13 @@ extern int CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface);
 
 extern char *CNF_GetNtsDumpDir(void);
 extern char *CNF_GetNtsNtpServer(void);
-extern char *CNF_GetNtsServerCertFile(void);
-extern char *CNF_GetNtsServerKeyFile(void);
+extern int CNF_GetNtsServerCertAndKeyFiles(const char ***certs, const char ***keys);
 extern int CNF_GetNtsServerPort(void);
 extern int CNF_GetNtsServerProcesses(void);
 extern int CNF_GetNtsServerConnections(void);
 extern int CNF_GetNtsRefresh(void);
 extern int CNF_GetNtsRotate(void);
-extern char *CNF_GetNtsTrustedCertFile(void);
+extern int CNF_GetNtsTrustedCertsPaths(const char ***paths, uint32_t **ids);
 extern int CNF_GetNoSystemCert(void);
 extern int CNF_GetNoCertTimeCheck(void);
 

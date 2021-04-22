@@ -61,7 +61,7 @@ static ARR_Instance server_addresses;
 
 static int sock_fd = -1;
 
-static int quit = 0;
+static volatile int quit = 0;
 
 static int on_terminal = 0;
 
@@ -987,35 +987,38 @@ process_cmd_cmdaccheck(CMD_Request *msg, char *line)
 
 /* ================================================== */
 
-static void
+static int
 process_cmd_dfreq(CMD_Request *msg, char *line)
 {
   double dfreq;
+
   msg->command = htons(REQ_DFREQ);
-  if (sscanf(line, "%lf", &dfreq) == 1) {
-    msg->data.dfreq.dfreq = UTI_FloatHostToNetwork(dfreq);
-  } else {
-    msg->data.dfreq.dfreq = UTI_FloatHostToNetwork(0.0);
+
+  if (sscanf(line, "%lf", &dfreq) != 1) {
+    LOG(LOGS_ERR, "Invalid value");
+    return 0;
   }
+
+  msg->data.dfreq.dfreq = UTI_FloatHostToNetwork(dfreq);
+  return 1;
 }
 
 /* ================================================== */
 
-static void
+static int
 process_cmd_doffset(CMD_Request *msg, char *line)
 {
-  struct timeval tv;
   double doffset;
 
-  msg->command = htons(REQ_DOFFSET);
-  if (sscanf(line, "%lf", &doffset) == 1) {
-    UTI_DoubleToTimeval(doffset, &tv);
-    msg->data.doffset.sec = htonl(tv.tv_sec);
-    msg->data.doffset.usec = htonl(tv.tv_usec);
-  } else {
-    msg->data.doffset.sec = htonl(0);
-    msg->data.doffset.usec = htonl(0);
+  msg->command = htons(REQ_DOFFSET2);
+
+  if (sscanf(line, "%lf", &doffset) != 1) {
+    LOG(LOGS_ERR, "Invalid value");
+    return 0;
   }
+
+  msg->data.doffset.doffset = UTI_FloatHostToNetwork(doffset);
+  return 1;
 }
 
 /* ================================================== */
@@ -1095,11 +1098,13 @@ process_cmd_add_source(CMD_Request *msg, char *line)
           (data.params.interleaved ? REQ_ADDSRC_INTERLEAVED : 0) |
           (data.params.burst ? REQ_ADDSRC_BURST : 0) |
           (data.params.nts ? REQ_ADDSRC_NTS : 0) |
+          (data.params.copy ? REQ_ADDSRC_COPY : 0) |
           (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
           (data.params.sel_options & SRC_SELECT_REQUIRE ? REQ_ADDSRC_REQUIRE : 0));
       msg->data.ntp_source.filter_length = htonl(data.params.filter_length);
+      msg->data.ntp_source.cert_set = htonl(data.params.cert_set);
       memset(msg->data.ntp_source.reserved, 0, sizeof (msg->data.ntp_source.reserved));
 
       result = 1;
@@ -2086,7 +2091,7 @@ process_cmd_sourcename(char *line)
   IPAddr ip_addr;
   char name[256];
 
-  if (!UTI_StringToIP(line, &ip_addr)) {
+  if (!parse_source_address(line, &ip_addr)) {
     LOG(LOGS_ERR, "Could not read address");
     return 0;
   }
@@ -3266,12 +3271,12 @@ process_line(char *line)
       do_normal_submit = process_cmd_deny(&tx_message, line);
     }
   } else if (!strcmp(command, "dfreq")) {
-    process_cmd_dfreq(&tx_message, line);
+    do_normal_submit = process_cmd_dfreq(&tx_message, line);
   } else if (!strcmp(command, "dns")) {
     ret = process_cmd_dns(line);
     do_normal_submit = 0;
   } else if (!strcmp(command, "doffset")) {
-    process_cmd_doffset(&tx_message, line);
+    do_normal_submit = process_cmd_doffset(&tx_message, line);
   } else if (!strcmp(command, "dump")) {
     process_cmd_dump(&tx_message, line);
   } else if (!strcmp(command, "exit")) {

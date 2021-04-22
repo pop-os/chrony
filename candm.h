@@ -108,7 +108,8 @@
 #define REQ_CLIENT_ACCESSES_BY_INDEX3 68
 #define REQ_SELECT_DATA 69
 #define REQ_RELOAD_SOURCES 70
-#define N_REQUEST_TYPES 71
+#define REQ_DOFFSET2 71
+#define N_REQUEST_TYPES 72
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -268,6 +269,7 @@ typedef struct {
 #define REQ_ADDSRC_INTERLEAVED 0x80
 #define REQ_ADDSRC_BURST 0x100
 #define REQ_ADDSRC_NTS 0x200
+#define REQ_ADDSRC_COPY 0x400
 
 typedef struct {
   uint32_t type;
@@ -292,7 +294,8 @@ typedef struct {
   Float offset;
   uint32_t flags;
   int32_t filter_length;
-  uint32_t reserved[3];
+  uint32_t cert_set;
+  uint32_t reserved[2];
   int32_t EOR;
 } REQ_NTP_Source;
 
@@ -307,8 +310,7 @@ typedef struct {
 } REQ_Dfreq;
 
 typedef struct {
-  int32_t sec;
-  int32_t usec;
+  Float doffset;
   int32_t EOR;
 } REQ_Doffset;
 
@@ -403,7 +405,7 @@ typedef struct {
    domain socket.
 
    Version 6 (no authentication) : changed format of client accesses by index
-   (using new request/reply types) and manual timestamp, added new fields and
+   (two times), delta offset, and manual timestamp, added new fields and
    flags to NTP source request and report, made length of manual list constant,
    added new commands: authdata, ntpdata, onoffline, refresh, reset,
    selectdata, serverstats, shutdown, sourcename

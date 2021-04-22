@@ -104,6 +104,7 @@ MAI_CleanupAndExit(void)
 {
   if (!initialised) exit(exit_status);
   
+  LCL_CancelOffsetCorrection();
   SRC_DumpSources();
 
   /* Don't update clock when removing sources */
@@ -183,7 +184,7 @@ ntp_source_resolving_end(void)
   NSR_AutoStartSources();
 
   /* Special modes can end only when sources update their reachability.
-     Give up immediatelly if there are no active sources. */
+     Give up immediately if there are no active sources. */
   if (ref_mode != REF_ModeNormal && !SRC_ActiveSources()) {
     REF_SetUnsynchronised();
   }
@@ -491,6 +492,7 @@ int main
         user_check = 0;
         nofork = 1;
         system_log = 0;
+        log_severity = LOGS_WARN;
         break;
       case 'P':
         sched_priority = parse_int_arg(optarg);
@@ -626,6 +628,9 @@ int main
   /* Drop root privileges if the specified user has a non-zero UID */
   if (!geteuid() && (pw->pw_uid || pw->pw_gid))
     SYS_DropRoot(pw->pw_uid, pw->pw_gid, SYS_MAIN_PROCESS);
+
+  if (!geteuid())
+    LOG(LOGS_WARN, "Running with root privileges");
 
   REF_Initialise();
   SST_Initialise();

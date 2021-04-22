@@ -44,6 +44,7 @@
 struct NKC_Instance_Record {
   char *name;
   IPSockAddr address;
+  NKSN_Credentials credentials;
   NKSN_Instance session;
   int destroying;
   int got_response;
@@ -52,14 +53,14 @@ struct NKC_Instance_Record {
   NKE_Context context;
   NKE_Cookie cookies[NKE_MAX_COOKIES];
   int num_cookies;
-  char server_name[NKE_MAX_RECORD_BODY_LENGTH + 1];
+  char server_name[NKE_MAX_RECORD_BODY_LENGTH + 2];
   IPSockAddr ntp_address;
 };
 
 /* ================================================== */
 
-static void *client_credentials = NULL;
-static int client_credentials_refs = 0;
+static NKSN_Credentials default_credentials = NULL;
+static int default_credentials_refs = 0;
 
 /* ================================================== */
 
@@ -253,6 +254,17 @@ handle_message(void *arg)
     if (inst->resolving_name)
       return 0;
     if (!UTI_StringToIP(inst->server_name, &inst->ntp_address.ip_addr)) {
+      int length = strlen(inst->server_name);
+
+      /* Add a trailing dot if not present to force the name to be
+         resolved as a fully qualified domain name */
+      if (length < 1 || length + 1 >= sizeof (inst->server_name))
+        return 0;
+      if (inst->server_name[length - 1] != '.') {
+        inst->server_name[length] = '.';
+        inst->server_name[length + 1] = '\0';
+      }
+
       DNS_Name2IPAddressAsync(inst->server_name, name_resolve_handler, inst);
       inst->resolving_name = 1;
     }
@@ -266,9 +278,12 @@ handle_message(void *arg)
 /* ================================================== */
 
 NKC_Instance
-NKC_CreateInstance(IPSockAddr *address, const char *name)
+NKC_CreateInstance(IPSockAddr *address, const char *name, uint32_t cert_set)
 {
+  const char **trusted_certs;
+  uint32_t *certs_ids;
   NKC_Instance inst;
+  int n_certs;
 
   inst = MallocNew(struct NKC_Instance_Record);
 
@@ -279,10 +294,21 @@ NKC_CreateInstance(IPSockAddr *address, const char *name)
   inst->destroying = 0;
   inst->got_response = 0;
 
-  /* Share the credentials with other client instances */
-  if (!client_credentials)
-    client_credentials = NKSN_CreateCertCredentials(NULL, NULL, CNF_GetNtsTrustedCertFile());
-  client_credentials_refs++;
+  n_certs = CNF_GetNtsTrustedCertsPaths(&trusted_certs, &certs_ids);
+
+  /* Share the credentials among clients using the default set of trusted
+     certificates, which likely contains most certificates */
+  if (cert_set == 0) {
+    if (!default_credentials)
+      default_credentials = NKSN_CreateClientCertCredentials(trusted_certs, certs_ids,
+                                                             n_certs, cert_set);
+    inst->credentials = default_credentials;
+    if (default_credentials)
+      default_credentials_refs++;
+  } else {
+    inst->credentials = NKSN_CreateClientCertCredentials(trusted_certs, certs_ids,
+                                                         n_certs, cert_set);
+  }
 
   return inst;
 }
@@ -296,10 +322,16 @@ NKC_DestroyInstance(NKC_Instance inst)
 
   Free(inst->name);
 
-  client_credentials_refs--;
-  if (client_credentials_refs <= 0 && client_credentials) {
-    NKSN_DestroyCertCredentials(client_credentials);
-    client_credentials = NULL;
+  if (inst->credentials) {
+    if (inst->credentials == default_credentials) {
+      default_credentials_refs--;
+      if (default_credentials_refs <= 0) {
+        NKSN_DestroyCertCredentials(default_credentials);
+        default_credentials = NULL;
+      }
+    } else {
+      NKSN_DestroyCertCredentials(inst->credentials);
+    }
   }
 
   /* If the asynchronous resolver is running, let the handler free
@@ -325,7 +357,7 @@ NKC_Start(NKC_Instance inst)
 
   inst->got_response = 0;
 
-  if (!client_credentials) {
+  if (!inst->credentials) {
     DEBUG_LOG("Missing client credentials");
     return 0;
   }
@@ -347,7 +379,7 @@ NKC_Start(NKC_Instance inst)
   }
 
   /* Start an NTS-KE session */
-  if (!NKSN_StartSession(inst->session, sock_fd, label, client_credentials, CLIENT_TIMEOUT)) {
+  if (!NKSN_StartSession(inst->session, sock_fd, label, inst->credentials, CLIENT_TIMEOUT)) {
     SCK_CloseSocket(sock_fd);
     return 0;
   }

@@ -76,6 +76,8 @@ static void parse_log(char *);
 static void parse_mailonchange(char *);
 static void parse_makestep(char *);
 static void parse_maxchange(char *);
+static void parse_ntsserver(char *, ARR_Instance files);
+static void parse_ntstrustedcerts(char *);
 static void parse_ratelimit(char *line, int *enabled, int *interval,
                             int *burst, int *leak);
 static void parse_refclock(char *);
@@ -252,14 +254,15 @@ static char *user;
 /* NTS server and client configuration */
 static char *nts_dump_dir = NULL;
 static char *nts_ntp_server = NULL;
-static char *nts_server_cert_file = NULL;
-static char *nts_server_key_file = NULL;
+static ARR_Instance nts_server_cert_files; /* array of (char *) */
+static ARR_Instance nts_server_key_files; /* array of (char *) */
 static int nts_server_port = NKE_PORT;
 static int nts_server_processes = 1;
 static int nts_server_connections = 100;
 static int nts_refresh = 2419200; /* 4 weeks */
 static int nts_rotate = 604800; /* 1 week */
-static char *nts_trusted_cert_file = NULL;
+static ARR_Instance nts_trusted_certs_paths; /* array of (char *) */
+static ARR_Instance nts_trusted_certs_ids; /* array of uint32_t */
 
 /* Number of clock updates needed to enable certificate time checks */
 static int no_cert_time_check = 0;
@@ -388,6 +391,11 @@ CNF_Initialise(int r, int client_only)
   ntp_restrictions = ARR_CreateInstance(sizeof (AllowDeny));
   cmd_restrictions = ARR_CreateInstance(sizeof (AllowDeny));
 
+  nts_server_cert_files = ARR_CreateInstance(sizeof (char *));
+  nts_server_key_files = ARR_CreateInstance(sizeof (char *));
+  nts_trusted_certs_paths = ARR_CreateInstance(sizeof (char *));
+  nts_trusted_certs_ids = ARR_CreateInstance(sizeof (uint32_t));
+
   rtc_device = Strdup(DEFAULT_RTC_DEVICE);
   hwclock_file = Strdup(DEFAULT_HWCLOCK_FILE);
   user = Strdup(DEFAULT_USER);
@@ -426,6 +434,12 @@ CNF_Finalise(void)
     Free(((RefclockParameters *)ARR_GetElement(refclock_sources, i))->driver_name);
     Free(((RefclockParameters *)ARR_GetElement(refclock_sources, i))->driver_parameter);
   }
+  for (i = 0; i < ARR_GetSize(nts_server_cert_files); i++)
+    Free(*(char **)ARR_GetElement(nts_server_cert_files, i));
+  for (i = 0; i < ARR_GetSize(nts_server_key_files); i++)
+    Free(*(char **)ARR_GetElement(nts_server_key_files, i));
+  for (i = 0; i < ARR_GetSize(nts_trusted_certs_paths); i++)
+    Free(*(char **)ARR_GetElement(nts_trusted_certs_paths, i));
 
   ARR_DestroyInstance(init_sources);
   ARR_DestroyInstance(ntp_sources);
@@ -436,6 +450,11 @@ CNF_Finalise(void)
 
   ARR_DestroyInstance(ntp_restrictions);
   ARR_DestroyInstance(cmd_restrictions);
+
+  ARR_DestroyInstance(nts_server_cert_files);
+  ARR_DestroyInstance(nts_server_key_files);
+  ARR_DestroyInstance(nts_trusted_certs_paths);
+  ARR_DestroyInstance(nts_trusted_certs_ids);
 
   Free(drift_file);
   Free(dumpdir);
@@ -457,9 +476,6 @@ CNF_Finalise(void)
   Free(tempcomp_point_file);
   Free(nts_dump_dir);
   Free(nts_ntp_server);
-  Free(nts_server_cert_file);
-  Free(nts_server_key_file);
-  Free(nts_trusted_cert_file);
 }
 
 /* ================================================== */
@@ -643,8 +659,6 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "ntsratelimit")) {
     parse_ratelimit(p, &nts_ratelimit_enabled, &nts_ratelimit_interval,
                     &nts_ratelimit_burst, &nts_ratelimit_leak);
-  } else if (!strcasecmp(command, "ntstrustedcerts")) {
-    parse_string(p, &nts_trusted_cert_file);
   } else if (!strcasecmp(command, "ntscachedir") ||
              !strcasecmp(command, "ntsdumpdir")) {
     parse_string(p, &nts_dump_dir);
@@ -659,9 +673,11 @@ CNF_ParseLine(const char *filename, int number, char *line)
   } else if (!strcasecmp(command, "ntsrotate")) {
     parse_int(p, &nts_rotate);
   } else if (!strcasecmp(command, "ntsservercert")) {
-    parse_string(p, &nts_server_cert_file);
+    parse_ntsserver(p, nts_server_cert_files);
   } else if (!strcasecmp(command, "ntsserverkey")) {
-    parse_string(p, &nts_server_key_file);
+    parse_ntsserver(p, nts_server_key_files);
+  } else if (!strcasecmp(command, "ntstrustedcerts")) {
+    parse_ntstrustedcerts(p);
   } else if (!strcasecmp(command, "peer")) {
     parse_source(p, command, 1);
   } else if (!strcasecmp(command, "pidfile")) {
@@ -1159,6 +1175,41 @@ parse_mailonchange(char *line)
 /* ================================================== */
 
 static void
+parse_ntsserver(char *line, ARR_Instance files)
+{
+  char *file = NULL;
+
+  parse_string(line, &file);
+  ARR_AppendElement(files, &file);
+}
+
+/* ================================================== */
+
+static void
+parse_ntstrustedcerts(char *line)
+{
+  uint32_t id;
+  char *path;
+
+  if (get_number_of_args(line) == 2) {
+    path = CPS_SplitWord(line);
+    if (sscanf(line, "%"SCNu32, &id) != 1)
+      command_parse_error();
+  } else {
+    check_number_of_args(line, 1);
+    path = line;
+    id = 0;
+  }
+
+  path = Strdup(path);
+
+  ARR_AppendElement(nts_trusted_certs_paths, &path);
+  ARR_AppendElement(nts_trusted_certs_ids, &id);
+}
+
+/* ================================================== */
+
+static void
 parse_allow_deny(char *line, ARR_Instance restrictions, int allow)
 {
   char *p;
@@ -1643,8 +1694,9 @@ load_source_file(const char *filename)
     return;
 
   while (fgets(line, sizeof (line), f)) {
-    if (strlen(line) >= MAX_LINE_LENGTH)
-      continue;
+    /* Require lines to be terminated */
+    if (line[0] == '\0' || line[strlen(line) - 1] != '\n')
+      break;
 
     CPS_NormalizeLine(line);
     if (line[0] == '\0')
@@ -2515,18 +2567,16 @@ CNF_GetNtsNtpServer(void)
 
 /* ================================================== */
 
-char *
-CNF_GetNtsServerCertFile(void)
+int
+CNF_GetNtsServerCertAndKeyFiles(const char ***certs, const char ***keys)
 {
-  return nts_server_cert_file;
-}
+  *certs = ARR_GetElements(nts_server_cert_files);
+  *keys = ARR_GetElements(nts_server_key_files);
 
-/* ================================================== */
+  if (ARR_GetSize(nts_server_cert_files) != ARR_GetSize(nts_server_key_files))
+    LOG_FATAL("Uneven number of NTS certs and keys");
 
-char *
-CNF_GetNtsServerKeyFile(void)
-{
-  return nts_server_key_file;
+  return ARR_GetSize(nts_server_cert_files);
 }
 
 /* ================================================== */
@@ -2571,10 +2621,16 @@ CNF_GetNtsRotate(void)
 
 /* ================================================== */
 
-char *
-CNF_GetNtsTrustedCertFile(void)
+int
+CNF_GetNtsTrustedCertsPaths(const char ***paths, uint32_t **ids)
 {
-  return nts_trusted_cert_file;
+  *paths = ARR_GetElements(nts_trusted_certs_paths);
+  *ids = ARR_GetElements(nts_trusted_certs_ids);
+
+  if (ARR_GetSize(nts_trusted_certs_paths) != ARR_GetSize(nts_trusted_certs_ids))
+    assert(0);
+
+  return ARR_GetSize(nts_trusted_certs_paths);
 }
 
 /* ================================================== */

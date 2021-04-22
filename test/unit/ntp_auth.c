@@ -141,11 +141,7 @@ test_unit(void)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
   LCL_Initialise();
-
-  TST_SuspendLogging();
   KEY_Initialise();
-  TST_ResumeLogging();
-
   NSD_Initialise();
   NNS_Initialise();
 
@@ -153,8 +149,6 @@ test_unit(void)
   nts_addr.port = 0;
 
   for (i = 0; i < 1000; i++) {
-    TST_SuspendLogging();
-
     key_id = INACTIVE_AUTHKEY;
 
     switch (i % 5) {
@@ -177,7 +171,7 @@ test_unit(void)
         can_auth_res = can_auth_req;
         break;
       case 2:
-        inst = NAU_CreateNtsInstance(&nts_addr, "test", &nts_addr);
+        inst = NAU_CreateNtsInstance(&nts_addr, "test", 0, 0);
         TEST_CHECK(NAU_IsAuthEnabled(inst));
         TEST_CHECK(NAU_GetSuggestedNtpVersion(inst) == 4);
         mode = NTP_AUTH_NTS;
@@ -202,8 +196,6 @@ test_unit(void)
         assert(0);
     }
 
-    TST_ResumeLogging();
-
     DEBUG_LOG("iteration %d auth=%d key_id=%d", i, (int)mode, (int)key_id);
 
     prepare_packet(mode, &req, &req_info, 1);
@@ -218,7 +210,6 @@ test_unit(void)
         NAU_ChangeAddress(inst, &nts_addr.ip_addr);
 
       if (inst->mode == NTP_AUTH_NTS) {
-        TST_SuspendLogging();
         for (j = random() % 5; j > 0; j--)
 #ifdef FEAT_NTS
           TEST_CHECK(!NAU_PrepareRequestAuth(inst));
@@ -226,7 +217,6 @@ test_unit(void)
           TEST_CHECK(NAU_PrepareRequestAuth(inst));
 #endif
         TEST_CHECK(!NAU_GenerateRequestAuth(inst, &req, &req_info));
-        TST_ResumeLogging();
       } else if (can_auth_req) {
         TEST_CHECK(NAU_PrepareRequestAuth(inst));
         TEST_CHECK(NAU_GenerateRequestAuth(inst, &req, &req_info));

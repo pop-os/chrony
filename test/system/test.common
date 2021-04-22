@@ -89,7 +89,13 @@ chronyc=$(command -v chronyc)
 [ -x "$chronyd" ] || test_skip "chronyd not found"
 [ -x "$chronyc" ] || test_skip "chronyc not found"
 
-netstat -aln > /dev/null 2> /dev/null || test_skip "missing netstat"
+if netstat -aln > /dev/null 2> /dev/null; then
+	port_list_command="netstat -aln"
+elif ss -atun > /dev/null 2> /dev/null; then
+	port_list_command="ss -atun"
+else
+	test_skip "missing netstat or ss"
+fi
 
 # Default test testings
 default_minimal_config=0
@@ -180,7 +186,7 @@ get_free_port() {
 
 	while true; do
 		port=$((RANDOM % 10000 + 10000))
-		netstat -aln | grep '^\(tcp\|udp\).*[:.]'"$port " && continue
+		$port_list_command | grep -q '^\(tcp\|udp\).*[:.]'"$port " && continue
 		break
 	done
 
@@ -256,8 +262,23 @@ start_chronyd() {
 }
 
 wait_for_sync() {
+	local prev_length
+
 	test_message 1 0 "waiting for synchronization"
-	sleep 1 && test_ok || test_error
+	prev_length=$msg_length
+
+	for i in $(seq 1 10); do
+		run_chronyc "ntpdata $server" > /dev/null 2>&1 || break
+		if check_chronyc_output "Total RX +: [1-9]" > /dev/null 2>&1; then
+			msg_length=$prev_length
+			test_ok
+			return
+		fi
+		sleep 1
+	done
+
+	msg_length=$prev_length
+	test_error
 }
 
 # Stop the chronyd instance
@@ -322,9 +343,17 @@ check_chronyd_files() {
 
 # Run a chronyc command
 run_chronyc() {
-	test_message 1 0 "running chronyc $*"
+	local host=$chronyc_host options="-n -m"
 
-	$CHRONYC_WRAPPER "$chronyc" -h "$(get_cmdsocket)" -n -m "$@" > "$TEST_DIR/chronyc.out" && \
+	test_message 1 0 "running chronyc $([ -n "$host" ] && echo "@$host ")$*"
+
+	if [ -z "$host" ]; then
+		host="$(get_cmdsocket)"
+	else
+		options="$options -p $(grep cmdport "$(get_conffile)" | awk '{print $2}')"
+	fi
+
+	$CHRONYC_WRAPPER "$chronyc" -h "$host" $options "$@" > "$TEST_DIR/chronyc.out" && \
 		test_ok || test_error
 }
 

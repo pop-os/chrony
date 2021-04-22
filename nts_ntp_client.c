@@ -50,14 +50,20 @@
 #define DUMP_IDENTIFIER "NNC0\n"
 
 struct NNC_Instance_Record {
-  const IPSockAddr *ntp_address;
+  /* Address of NTS-KE server */
   IPSockAddr nts_address;
+  /* Hostname or IP address for certificate verification */
   char *name;
+  /* ID of trusted certificates */
+  uint32_t cert_set;
+  /* Configured NTP port */
+  uint16_t default_ntp_port;
+  /* Address of NTP server (can be negotiated in NTS-KE) */
+  IPSockAddr ntp_address;
 
   NKC_Instance nke;
   SIV_Instance siv;
 
-  int load_attempt;
   int nke_attempts;
   double next_nke_attempt;
   double last_nke_success;
@@ -91,7 +97,6 @@ reset_instance(NNC_Instance inst)
     SIV_DestroyInstance(inst->siv);
   inst->siv = NULL;
 
-  inst->load_attempt = 0;
   inst->nke_attempts = 0;
   inst->next_nke_attempt = 0.0;
   inst->last_nke_success = 0.0;
@@ -111,19 +116,25 @@ reset_instance(NNC_Instance inst)
 /* ================================================== */
 
 NNC_Instance
-NNC_CreateInstance(IPSockAddr *nts_address, const char *name, const IPSockAddr *ntp_address)
+NNC_CreateInstance(IPSockAddr *nts_address, const char *name, uint32_t cert_set, uint16_t ntp_port)
 {
   NNC_Instance inst;
 
   inst = MallocNew(struct NNC_Instance_Record);
 
-  inst->ntp_address = ntp_address;
   inst->nts_address = *nts_address;
-  inst->name = name ? Strdup(name) : NULL;
+  inst->name = Strdup(name);
+  inst->cert_set = cert_set;
+  inst->default_ntp_port = ntp_port;
+  inst->ntp_address.ip_addr = nts_address->ip_addr;
+  inst->ntp_address.port = ntp_port;
   inst->siv = NULL;
   inst->nke = NULL;
 
   reset_instance(inst);
+
+  /* Try to reload saved keys and cookies */
+  load_cookies(inst);
 
   return inst;
 }
@@ -165,13 +176,13 @@ set_ntp_address(NNC_Instance inst, NTP_Remote_Address *negotiated_address)
 {
   NTP_Remote_Address old_address, new_address;
 
-  old_address = *inst->ntp_address;
+  old_address = inst->ntp_address;
   new_address = *negotiated_address;
 
   if (new_address.ip_addr.family == IPADDR_UNSPEC)
-    new_address.ip_addr = old_address.ip_addr;
+    new_address.ip_addr = inst->nts_address.ip_addr;
   if (new_address.port == 0)
-    new_address.port = old_address.port;
+    new_address.port = inst->default_ntp_port;
 
   if (UTI_CompareIPs(&old_address.ip_addr, &new_address.ip_addr, NULL) == 0 &&
       old_address.port == new_address.port)
@@ -183,6 +194,8 @@ set_ntp_address(NNC_Instance inst, NTP_Remote_Address *negotiated_address)
         UTI_IPToString(&old_address.ip_addr), UTI_IPToString(&new_address.ip_addr));
     return 0;
   }
+
+  inst->ntp_address = new_address;
 
   return 1;
 }
@@ -223,13 +236,7 @@ get_cookies(NNC_Instance inst)
       return 0;
     }
 
-    if (!inst->name) {
-      LOG(LOGS_ERR, "Missing name of %s for NTS-KE",
-          UTI_IPToString(&inst->nts_address.ip_addr));
-      return 0;
-    }
-
-    inst->nke = NKC_CreateInstance(&inst->nts_address, inst->name);
+    inst->nke = NKC_CreateInstance(&inst->nts_address, inst->name, inst->cert_set);
 
     inst->nke_attempts++;
     update_next_nke_attempt(inst, now);
@@ -287,12 +294,6 @@ NNC_PrepareForAuth(NNC_Instance inst)
      previous request */
   UTI_GetRandomBytes(inst->uniq_id, sizeof (inst->uniq_id));
   UTI_GetRandomBytes(inst->nonce, sizeof (inst->nonce));
-
-  /* Try to reload saved keys and cookies (once for the NTS-KE address) */
-  if (!inst->load_attempt) {
-    load_cookies(inst);
-    inst->load_attempt = 1;
-  }
 
   /* Get new cookies if there are not any, or they are no longer usable */
   if (!check_cookies(inst)) {
@@ -524,10 +525,13 @@ NNC_ChangeAddress(NNC_Instance inst, IPAddr *address)
   save_cookies(inst);
 
   inst->nts_address.ip_addr = *address;
+  inst->ntp_address.ip_addr = *address;
 
   reset_instance(inst);
 
   DEBUG_LOG("NTS reset");
+
+  load_cookies(inst);
 }
 
 /* ================================================== */
@@ -541,7 +545,7 @@ save_cookies(NNC_Instance inst)
   FILE *f;
   int i;
 
-  if (inst->num_cookies < 1 || !inst->name || !UTI_IsIPReal(&inst->nts_address.ip_addr))
+  if (inst->num_cookies < 1 || !UTI_IsIPReal(&inst->nts_address.ip_addr))
     return;
 
   dump_dir = CNF_GetNtsDumpDir();
@@ -560,7 +564,7 @@ save_cookies(NNC_Instance inst)
 
   if (fprintf(f, "%s%s\n%.1f\n%s %d\n%u %d ",
               DUMP_IDENTIFIER, inst->name, context_time,
-              UTI_IPToString(&inst->ntp_address->ip_addr), inst->ntp_address->port,
+              UTI_IPToString(&inst->ntp_address.ip_addr), inst->ntp_address.port,
               inst->context_id, (int)inst->context.algorithm) < 0 ||
       !UTI_BytesToHex(inst->context.s2c.key, inst->context.s2c.length, buf, sizeof (buf)) ||
       fprintf(f, "%s ", buf) < 0 ||
@@ -623,7 +627,7 @@ load_cookies(NNC_Instance inst)
 
   if (!fgets(line, sizeof (line), f) || strcmp(line, DUMP_IDENTIFIER) != 0 ||
       !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 1 ||
-        !inst->name || strcmp(words[0], inst->name) != 0 ||
+        strcmp(words[0], inst->name) != 0 ||
       !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 1 ||
         sscanf(words[0], "%lf", &context_time) != 1 ||
       !fgets(line, sizeof (line), f) || UTI_SplitString(line, words, MAX_WORDS) != 2 ||

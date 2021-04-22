@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2020-10-07
+.\"      Date: 2021-04-22
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2020-10-07" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2021-04-22" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -86,11 +86,10 @@ DNS lookups. Long addresses will not be truncated to fit into the column.
 .sp
 \fB\-N\fP
 .RS 4
-This option enables printing of the original names of NTP sources that were
-specified in the configuration file, or \fBchronyc\fP commands, and are internally
-used by \fBchronyd\fP. Without the \fB\-n\fP and \fB\-N\fP option, the names of NTP sources
-are obtained from reverse DNS lookups and can be different from the original
-names.
+This option enables printing of original hostnames or IP addresses of NTP
+sources that were specified in the configuration file, or \fBchronyc\fP commands.
+Without the \fB\-n\fP and \fB\-N\fP option, the printed hostnames are obtained from
+reverse DNS lookups and can be different from the specified hostnames.
 .RE
 .sp
 \fB\-c\fP
@@ -2054,11 +2053,8 @@ The syntax is illustrated in the following examples:
 .sp
 .if n .RS 4
 .nf
-allow foo.example.net
-allow all 1.2
-allow 3.4.5
-allow 6.7.8/22
-allow 6.7.8.9/22
+allow 1.2.3.4
+allow all 3.4.5.0/24
 allow 2001:db8:789a::/48
 allow 0/0
 allow ::/0
@@ -2077,11 +2073,8 @@ The syntax is illustrated in the following examples:
 .sp
 .if n .RS 4
 .nf
-deny foo.example.net
-deny all 1.2
-deny 3.4.5
-deny 6.7.8/22
-deny 6.7.8.9/22
+deny 1.2.3.4
+deny all 3.4.5.0/24
 deny 2001:db8:789a::/48
 deny 0/0
 deny ::/0

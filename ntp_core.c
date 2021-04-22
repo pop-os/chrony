@@ -107,6 +107,8 @@ struct NCR_Instance_Record {
   int min_stratum;              /* Increase stratum in received packets to the
                                    minimum */
 
+  int copy;                     /* Boolean suppressing own refid and stratum */
+
   int poll_target;              /* Target number of sourcestats samples */
 
   int version;                  /* Version set in packets for server/peer */
@@ -560,6 +562,7 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
   result->auto_iburst = params->iburst;
   result->auto_burst = params->burst;
   result->auto_offline = params->auto_offline;
+  result->copy = params->copy && result->mode == MODE_CLIENT;
   result->poll_target = params->poll_target;
 
   if (params->nts) {
@@ -571,7 +574,8 @@ NCR_CreateInstance(NTP_Remote_Address *remote_addr, NTP_Source_Type type,
     nts_address.ip_addr = remote_addr->ip_addr;
     nts_address.port = params->nts_port;
 
-    result->auth = NAU_CreateNtsInstance(&nts_address, name, &result->remote_addr);
+    result->auth = NAU_CreateNtsInstance(&nts_address, name, params->cert_set,
+                                         result->remote_addr.port);
   } else if (params->authkey != INACTIVE_AUTHKEY) {
     result->auth = NAU_CreateSymmetricInstance(params->authkey);
   } else {
@@ -703,7 +707,6 @@ NCR_ChangeRemoteAddress(NCR_Instance inst, NTP_Remote_Address *remote_addr, int 
   memset(&inst->report, 0, sizeof (inst->report));
   NCR_ResetInstance(inst);
 
-  /* Update the authentication-specific address before NTP address */
   if (!ntp_only)
     NAU_ChangeAddress(inst->auth, &remote_addr->ip_addr);
 
@@ -1381,9 +1384,8 @@ check_sync_loop(NCR_Instance inst, NTP_Packet *message, NTP_Local_Address *local
   NTP_Leap leap_status;
   uint32_t our_ref_id;
 
-  /* Check if a server socket is open, i.e. a client or peer can actually
-     be synchronised to us */
-  if (!NIO_IsServerSocketOpen())
+  /* Check if a client or peer can be synchronised to us */
+  if (!NIO_IsServerSocketOpen() || REF_GetMode() != REF_ModeNormal)
     return 1;
 
   /* Check if the source indicates that it is synchronised to our address
@@ -1678,7 +1680,6 @@ process_response(NCR_Instance inst, NTP_Local_Address *local_addr,
 
   sample.root_delay = pkt_root_delay + sample.peer_delay;
   sample.root_dispersion = pkt_root_dispersion + sample.peer_dispersion;
-  sample.stratum = MAX(message->stratum, inst->min_stratum);
 
   /* Update the NTP timestamps.  If it's a valid packet from a synchronised
      source, the timestamps may be used later when processing a packet in the
@@ -1761,14 +1762,23 @@ process_response(NCR_Instance inst, NTP_Local_Address *local_addr,
   if (valid_packet) {
     inst->remote_poll = message->poll;
     inst->remote_stratum = message->stratum != NTP_INVALID_STRATUM ?
-                           message->stratum : NTP_MAX_STRATUM;
+                           MIN(message->stratum, NTP_MAX_STRATUM) : NTP_MAX_STRATUM;
 
     inst->prev_local_poll = inst->local_poll;
     inst->prev_tx_count = inst->tx_count;
     inst->tx_count = 0;
 
     SRC_UpdateReachability(inst->source, synced_packet);
-    SRC_SetLeapStatus(inst->source, pkt_leap);
+
+    if (synced_packet) {
+      if (inst->copy && inst->remote_stratum > 0) {
+        /* Assume the reference ID and stratum of the server */
+        inst->remote_stratum--;
+        SRC_SetRefid(inst->source, ntohl(message->reference_id), &inst->remote_addr.ip_addr);
+      }
+
+      SRC_UpdateStatus(inst->source, MAX(inst->remote_stratum, inst->min_stratum), pkt_leap);
+    }
 
     if (good_packet) {
       /* Adjust the polling interval, accumulate the sample, etc. */

@@ -30,19 +30,25 @@
 #include "nts_ke.h"
 #include "siv.h"
 
+typedef struct NKSN_Credentials_Record *NKSN_Credentials;
+
 typedef struct NKSN_Instance_Record *NKSN_Instance;
 
 /* Handler for received NTS-KE messages.  A zero return code stops
    the session. */
 typedef int (*NKSN_MessageHandler)(void *arg);
 
-/* Get client or server credentials using certificates of trusted CAs,
-   or a server certificate and key.  The credentials may be shared between
+/* Get server or client credentials using a server certificate and key,
+   or certificates of trusted CAs.  The credentials may be shared between
    different clients or servers. */
-extern void *NKSN_CreateCertCredentials(char *cert, char *key, char *trusted_certs);
+extern NKSN_Credentials NKSN_CreateServerCertCredentials(const char **certs, const char **keys,
+                                                         int n_certs_keys);
+extern NKSN_Credentials NKSN_CreateClientCertCredentials(const char **certs, uint32_t *ids,
+                                                         int n_certs_ids,
+                                                         uint32_t trusted_cert_set);
 
 /* Destroy the credentials */
-extern void NKSN_DestroyCertCredentials(void *credentials);
+extern void NKSN_DestroyCertCredentials(NKSN_Credentials credentials);
 
 /* Create an instance */
 extern NKSN_Instance NKSN_CreateInstance(int server_mode, const char *server_name,
@@ -53,7 +59,7 @@ extern void NKSN_DestroyInstance(NKSN_Instance inst);
 
 /* Start a new NTS-KE session */
 extern int NKSN_StartSession(NKSN_Instance inst, int sock_fd, const char *label,
-                             void *credentials, double timeout);
+                             NKSN_Credentials credentials, double timeout);
 
 /* Begin an NTS-KE message.  A request should be made right after starting
    the session and response should be made in the message handler. */
