@@ -12,6 +12,6 @@ printf "Restart chronyd: "
 systemctl --quiet restart chrony.service && __test_ok || __test_fail
 
 printf "Checking that chronyd uses the defined authentication policy: "
-chronyd -p 2> /dev/null | grep -q "authselectmode prefer" && __test_ok || __test_fail
+chronyd -p | grep -q "authselectmode prefer" && __test_ok || __test_fail
 
 exit 0
