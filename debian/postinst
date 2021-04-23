@@ -32,7 +32,7 @@ case "$1" in
         # Change the user and group ownership of "/var/l{ib,og}/chrony" iif
         # the chronyd's configuration does not contain the "user" directive.
         # Also, update these directories' mode bits to 0750 to follow upstream.
-        if ! chronyd -p 2>/dev/null | grep -q "^user"; then
+        if ! chronyd -p | grep -q "^user"; then
             for d in /var/lib/chrony /var/log/chrony; do
                 if ! dpkg-statoverride --list "$d" >/dev/null; then
                     dpkg-statoverride --update --add _chrony _chrony 0750 "$d"
