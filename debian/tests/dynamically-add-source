@@ -11,7 +11,7 @@ printf "Preparing chronyd configuration: "
 __no_system_clock_control && __test_ok || __test_skip
 
 printf "Adding a dummy server to the list of NTP sources: "
-printf "server $server_addr" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
+printf "server $server_addr\n" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
 
 printf "Reloading NTP sources: "
 __reload_sources
