@@ -1,3 +1,34 @@
+chrony (4.1~pre1-1) experimental; urgency=medium
+
+  * Import upstream version 4.1-pre1:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * debian/control:
+    - Now that the upstream system tests support 'ss', replace the net-tools
+    build-dependency by iproute2.
+
+  * debian/patches/:
+    - Drop allow-IP_TOS-socket-option-in-seccomp-filter.patch. Applied
+    upstream.
+
+  * debian/postinst:
+    - Do not redirect 'chronyd -p' stderr to /dev/null. Not needed anymore.
+
+  * debian/sources.d/README:
+    - Mention that lines in *.sources files must be terminated by a line break.
+
+  * debian/tests/dynamically-add-source:
+    - Terminate the line in dummy-server.sources with the newline control
+    character.
+
+  * debian/tests/fragmented-configuration:
+    - Do not redirect 'chronyd -p' stderr to /dev/null. Not needed anymore.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Update clknetsim version.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 23 Apr 2021 22:24:05 +0200
+
 chrony (4.0-7) unstable; urgency=medium
 
   * debian/patches/:
