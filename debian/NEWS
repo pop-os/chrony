@@ -1,3 +1,15 @@
+chrony (4.1~pre1-1) experimental; urgency=medium
+
+  Starting with chrony 4.0, it is possible to specify NTP sources in files
+  having the .sources suffix. In Debian, these files can be placed in
+  /etc/chrony/sources.d/ or any other directories specified by the 'sourcedir'
+  directive.
+  I would like to draw your attention that with chrony 4.1, each line of a
+  source file *must* be terminated by a trailing newline. Failing that, the NTP
+  source(s) will be ignored.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 25 Apr 2021 12:44:09 +0200
+
 chrony (3.4-2) unstable; urgency=medium
 
   To reduce the range of operations available to chronyd, and thereby decrease
