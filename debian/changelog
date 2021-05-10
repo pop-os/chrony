@@ -7,6 +7,10 @@ chrony (4.1~pre1-1) experimental; urgency=medium
     - Now that the upstream system tests support 'ss', replace the net-tools
     build-dependency by iproute2.
 
+  * debian/NEWS:
+    - Mention that lines in *.sources files must be terminated by a trailing
+    newline.
+
   * debian/patches/:
     - Drop allow-IP_TOS-socket-option-in-seccomp-filter.patch. Applied
     upstream.
@@ -15,7 +19,8 @@ chrony (4.1~pre1-1) experimental; urgency=medium
     - Do not redirect 'chronyd -p' stderr to /dev/null. Not needed anymore.
 
   * debian/sources.d/README:
-    - Mention that lines in *.sources files must be terminated by a line break.
+    - Mention that lines in *.sources files must be terminated by a trailing
+    newline.
 
   * debian/tests/dynamically-add-source:
     - Terminate the line in dummy-server.sources with the newline control
@@ -27,7 +32,7 @@ chrony (4.1~pre1-1) experimental; urgency=medium
   * debian/tests/upstream-simulation-test-suite:
     - Update clknetsim version.
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 23 Apr 2021 22:24:05 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Mon, 10 May 2021 18:56:53 +0200
 
 chrony (4.0-7) unstable; urgency=medium
 
