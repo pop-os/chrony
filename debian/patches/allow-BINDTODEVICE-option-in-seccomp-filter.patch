@@ -1,0 +1,23 @@
+From b9f5ce83b02e765ad5a65a264e88352528d6b2b3 Mon Sep 17 00:00:00 2001
+From: Miroslav Lichvar <mlichvar@redhat.com>
+Date: Thu, 29 Apr 2021 12:35:49 +0200
+Subject: sys_linux: allow BINDTODEVICE option in seccomp filter
+
+Fixes: 4ef944b73436 ("socket: add support for binding sockets to device")
+
+Applied-Upstream: https://git.tuxfamily.org/chrony/chrony.git/commit/?id=b9f5ce83b02e765ad5a65a264e88352528d6b2b3
+Last-Update: 2021-05-13
+Index: chrony/sys_linux.c
+===================================================================
+--- chrony.orig/sys_linux.c
++++ chrony/sys_linux.c
+@@ -619,6 +619,9 @@ SYS_Linux_EnableSystemCallFilter(int lev
+ #ifdef FEAT_IPV6
+     { SOL_IPV6, IPV6_V6ONLY }, { SOL_IPV6, IPV6_RECVPKTINFO },
+ #endif
++#ifdef SO_BINDTODEVICE
++    { SOL_SOCKET, SO_BINDTODEVICE },
++#endif
+     { SOL_SOCKET, SO_BROADCAST }, { SOL_SOCKET, SO_REUSEADDR },
+ #ifdef SO_REUSEPORT
+     { SOL_SOCKET, SO_REUSEPORT },
