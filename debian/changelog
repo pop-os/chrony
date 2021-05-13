@@ -1,3 +1,15 @@
+chrony (4.0-8) unstable; urgency=medium
+
+  * debian/patches/:
+    - Add allow-BINDTODEVICE-option-in-seccomp-filter.patch to enable support
+    for binding sockets to a device without having to disable the seccomp
+    filter.
+    - Add allow-getuid32-in-seccomp-filter.patch. Upstream found out that
+    getuid32() needed to be allowed in the seccomp filter to enable some NTS
+    operations on i686. This may affect other 32-bits architectures.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 13 May 2021 16:51:41 +0200
+
 chrony (4.0-7) unstable; urgency=medium
 
   * debian/patches/:
