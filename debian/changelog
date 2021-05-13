@@ -1,3 +1,19 @@
+chrony (4.1-1) experimental; urgency=medium
+
+  * Import upstream version 4.1:
+    - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
+
+  * debian/copyright:
+    - Update copyright years.
+
+  * debian/upstream/signing-key.asc:
+    - Update Miroslav Lichvar's key.
+
+  * debian/watch:
+    - Add upstream version mangle to transform -pre to ~pre.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Fri, 14 May 2021 00:25:34 +0200
+
 chrony (4.1~pre1-1) experimental; urgency=medium
 
   * Import upstream version 4.1-pre1:
