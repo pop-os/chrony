@@ -2,7 +2,7 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2020
+ * Copyright (C) Miroslav Lichvar  2020-2021
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -127,9 +127,10 @@ process_response(NKC_Instance inst)
 {
   int next_protocol = -1, aead_algorithm = -1, error = 0;
   int i, critical, type, length;
-  uint16_t data[NKE_MAX_COOKIE_LENGTH / sizeof (uint16_t)];
+  uint16_t data[NKE_MAX_RECORD_BODY_LENGTH / sizeof (uint16_t)];
 
-  assert(NKE_MAX_COOKIE_LENGTH % sizeof (uint16_t) == 0);
+  assert(NKE_MAX_COOKIE_LENGTH <= NKE_MAX_RECORD_BODY_LENGTH);
+  assert(sizeof (data) % sizeof (uint16_t) == 0);
   assert(sizeof (uint16_t) == 2);
 
   inst->num_cookies = 0;
@@ -140,6 +141,13 @@ process_response(NKC_Instance inst)
   while (!error) {
     if (!NKSN_GetRecord(inst->session, &critical, &type, &length, &data, sizeof (data)))
       break;
+
+    if (length > sizeof (data)) {
+      DEBUG_LOG("Record too long type=%d length=%d critical=%d", type, length, critical);
+      if (critical)
+        error = 1;
+      continue;
+    }
 
     switch (type) {
       case NKE_RECORD_NEXT_PROTOCOL:

@@ -2,12 +2,12 @@
 .\"     Title: chronyd
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2021-04-22
+.\"      Date: 2021-05-12
 .\"    Manual: System Administration
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYD" "8" "2021-04-22" "chrony @CHRONY_VERSION@" "System Administration"
+.TH "CHRONYD" "8" "2021-05-12" "chrony @CHRONY_VERSION@" "System Administration"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -191,18 +191,29 @@ specific directives.
 .sp
 \fB\-F\fP \fIlevel\fP
 .RS 4
-This option configures a system call filter when \fBchronyd\fP is compiled with
-support for the Linux secure computing (seccomp) facility. In level 1 the
-process is killed when a forbidden system call is made, in level \-1 the SIGSYS
-signal is thrown instead and in level 0 the filter is disabled. The default
-value is 0.
+This option configures system call filters loaded by \fBchronyd\fP processes if it
+was compiled with support for the Linux secure computing (seccomp) facility.
+Three levels are defined: 0, 1, 2. The filters are disabled at level 0. At
+levels 1 and 2, \fBchronyd\fP will be killed if it makes a system call which is
+blocked by the filters. The level can be specified as a negative number to
+trigger the SIGSYS signal instead of SIGKILL, which can be useful for
+debugging. The default value is 0.
 .sp
-It is recommended to enable the filter only when it is known to work on the
-version of the system where \fBchrony\fP is installed as the filter needs to allow
-also system calls made from libraries that \fBchronyd\fP is using (e.g. libc) and
-different versions or implementations of the libraries might make different
-system calls. If the filter is missing some system call, \fBchronyd\fP could be
-killed even in normal operation.
+At level 1, the filters allow only selected system calls that are normally
+expected to be made by \fBchronyd\fP. Other system calls are blocked. This level is
+recommended only if it is known to work on the version of the system where
+\fBchrony\fP is installed. The filters need to allow also system calls made by
+libraries that \fBchronyd\fP is using (e.g. libc), but different versions or
+implementations of the libraries might make different system calls. If the
+filters are missing a system call, \fBchronyd\fP could be killed even in normal
+operation.
+.sp
+At level 2, the filters block only a small number of specific system calls
+(e.g. fork and exec). This approach should avoid false positives, but the
+protection of the system against a compromised \fBchronyd\fP process is much more
+limited.
+.sp
+The filters cannot be enabled with the \fBmailonchange\fP directive.
 .RE
 .sp
 \fB\-P\fP \fIpriority\fP
