@@ -1,3 +1,4 @@
 allow-IP_TOS-socket-option-in-seccomp-filter.patch
 nm-dispatcher-dhcp_Move-server_dir-to-run.patch
 allow-BINDTODEVICE-option-in-seccomp-filter.patch
+allow-getuid32-in-seccomp-filter.patch

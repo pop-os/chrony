@@ -1,0 +1,24 @@
+From 9cdfc15e310887d86c74beb0d6b748572624201c Mon Sep 17 00:00:00 2001
+From: Miroslav Lichvar <mlichvar@redhat.com>
+Date: Thu, 29 Apr 2021 16:53:40 +0200
+Subject: sys_linux: allow getuid32 in seccomp filter
+
+This was triggered on x86 in an NTS test.
+
+Applied-Upstream: https://git.tuxfamily.org/chrony/chrony.git/commit/?id=9cdfc15e310887d86c74beb0d6b748572624201c
+Last-Update: 2021-05-13
+diff --git a/sys_linux.c b/sys_linux.c
+index be5d44d..57b4e0f 100644
+--- a/sys_linux.c
++++ b/sys_linux.c
+@@ -508,6 +508,7 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
+     SCMP_SYS(getpid),
+     SCMP_SYS(getrlimit),
+     SCMP_SYS(getuid),
++    SCMP_SYS(getuid32),
+     SCMP_SYS(rt_sigaction),
+     SCMP_SYS(rt_sigreturn),
+     SCMP_SYS(rt_sigprocmask),
+--
+cgit v0.10.2
+
