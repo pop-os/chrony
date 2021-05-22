@@ -42,6 +42,7 @@ ntstrustedcerts $cert_file
 EOF
 
     __no_system_clock_control
+    __restart_chronyd
 }
 
 echo "$server_addr $server_name" >> /etc/hosts

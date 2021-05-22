@@ -8,7 +8,8 @@ set -e
 server_addr="192.0.2.1"
 
 printf "Preparing chronyd configuration: "
-__no_system_clock_control && __test_ok || __test_skip
+__no_system_clock_control
+__restart_chronyd && __test_ok || __test_skip
 
 printf "Adding a dummy server to the list of NTP sources: "
 printf "server $server_addr\n" > /etc/chrony/sources.d/dummy-server.sources && __test_ok || __test_fail
@@ -21,7 +22,6 @@ __check_sources "$server_addr"
 
 printf "Checking for dummy server availability after restarting chronyd: "
 __restart_chronyd
-sleep 2
 __check_sources "$server_addr"
 
 exit 0

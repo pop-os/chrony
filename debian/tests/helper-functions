@@ -6,7 +6,7 @@ __no_system_clock_control() {
 [Unit]
 ConditionCapability=
 EOF
-        systemctl daemon-reload && __restart_chronyd && sleep 3
+        systemctl daemon-reload
     fi
 }
 
@@ -31,6 +31,9 @@ __reload_sources() {
 
 __restart_chronyd() {
     systemctl --quiet restart chrony.service
+    rc=$?
+    sleep 3
+    return $rc
 }
 
 __check_sources() {
