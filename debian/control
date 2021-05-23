@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Vincent Blut <vincent.debian@free.fr>
 Standards-Version: 4.5.1
-Build-Depends: asciidoctor (>= 1.5.3-1~),
+Build-Depends: asciidoctor,
                bison,
                debhelper-compat (= 13),
                dh-apparmor,
@@ -15,7 +15,7 @@ Build-Depends: asciidoctor (>= 1.5.3-1~),
                libseccomp-dev (>= 2.4.3-1~) [amd64 arm64 armel armhf hppa i386 mips mipsel mips64el powerpc powerpcspe ppc64 ppc64el riscv64 s390x x32],
                nettle-dev,
                pkg-config,
-               pps-tools (>= 0.20120406+g0deb9c7e-2) [linux-any],
+               pps-tools [linux-any],
                procps <!nocheck>
 Homepage: https://chrony.tuxfamily.org
 Vcs-Git: https://salsa.debian.org/debian/chrony.git -b debian/latest
