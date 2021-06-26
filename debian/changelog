@@ -1,3 +1,21 @@
+chrony (4.1-2) experimental; urgency=medium
+
+  * Merge branch 'debian/unstable' into 'debian/latest'.
+
+  * debian/rules:
+    - Remove needless dh_auto_test override.
+
+  [ Christian Ehrhardt ]
+  * debian/tests/helper-functions:
+    - Improve chronyd restart logic. While rendering the tests more readable,
+    this also fixes ntp-server-and-nts-auth test on Ubuntu.
+
+  [ Debian Janitor ]
+  * debian/{control,chrony.maintscript}:
+    - Remove constraints unnecessary since stretch.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 26 Jun 2021 17:16:45 +0200
+
 chrony (4.1-1) experimental; urgency=medium
 
   * Import upstream version 4.1:
