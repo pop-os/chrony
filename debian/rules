@@ -43,8 +43,3 @@ override_dh_installinit:
 ifneq (,$(filter $(DEB_HOST_ARCH), alpha ia64 m68k sh4 sparc64))
 	sed -i '/DAEMON_OPTS=/s/"-F 1"/""/' $(BASE)/etc/default/chrony
 endif
-
-override_dh_auto_test:
-ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	dh_auto_test
-endif
