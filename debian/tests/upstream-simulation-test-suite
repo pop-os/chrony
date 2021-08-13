@@ -7,7 +7,7 @@
 set -e
 
 testdir="$PWD/test/simulation"
-clknetsim_ver=f89702d
+clknetsim_ver=153a8af
 clknetsim_src=https://github.com/mlichvar/clknetsim/archive/"$clknetsim_ver"/clknetsim-"$clknetsim_ver".tar.gz
 clknetsim_archive=$(basename "$clknetsim_src")
 
