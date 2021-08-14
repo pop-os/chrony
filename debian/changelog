@@ -1,3 +1,13 @@
+chrony (4.1-3) experimental; urgency=medium
+
+  * debian/patches/:
+    - Add allow-clone3-and-pread64-in-seccomp-filter.patch.
+
+  * debian/tests/upstream-simulation-test-suite:
+    - Update clknetsim version.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Sat, 14 Aug 2021 13:59:29 +0200
+
 chrony (4.1-2) experimental; urgency=medium
 
   * Merge branch 'debian/unstable' into 'debian/latest'.
