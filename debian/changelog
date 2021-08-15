@@ -1,4 +1,6 @@
-chrony (4.1-3) experimental; urgency=medium
+chrony (4.1-3) unstable; urgency=medium
+
+  * Upload to unstable.
 
   * debian/patches/:
     - Add allow-clone3-and-pread64-in-seccomp-filter.patch.
@@ -6,7 +8,7 @@ chrony (4.1-3) experimental; urgency=medium
   * debian/tests/upstream-simulation-test-suite:
     - Update clknetsim version.
 
- -- Vincent Blut <vincent.debian@free.fr>  Sat, 14 Aug 2021 13:59:29 +0200
+ -- Vincent Blut <vincent.debian@free.fr>  Sun, 15 Aug 2021 15:08:56 +0200
 
 chrony (4.1-2) experimental; urgency=medium
 
