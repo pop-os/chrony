@@ -1,4 +1,4 @@
-debian/chrony-dnssrv@.* usr/lib/systemd/system
+debian/chrony-dnssrv@.* lib/systemd/system
 debian/chrony-helper usr/libexec/chrony
 debian/chrony.conf usr/share/chrony
 debian/conf.d etc/chrony
