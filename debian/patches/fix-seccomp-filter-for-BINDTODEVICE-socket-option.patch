@@ -1,0 +1,35 @@
+From 29d7d3176d9d1b208039a9d2ca3f26bc3cc5a387 Mon Sep 17 00:00:00 2001
+From: Miroslav Lichvar <mlichvar@redhat.com>
+Date: Wed, 6 Oct 2021 10:02:34 +0200
+Subject: sys_linux: fix seccomp filter for BINDTODEVICE option
+
+The BINDTODEVICE socket option is the first option in the seccomp filter
+setting a string instead of int. Remove the length check from the
+setsockopt rules to allow a device name longer than 3 characters.
+
+This was reported in Debian bug #995207.
+
+Fixes: b9f5ce83b02e ("sys_linux: allow BINDTODEVICE option in seccomp filter")
+
+Origin: upstream, https://git.tuxfamily.org/chrony/chrony.git/commit/?id=29d7d3176d9d1b208039a9d2ca3f26bc3cc5a387
+Bug-Debian: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=995207
+diff --git a/sys_linux.c b/sys_linux.c
+index 8fba259..9cab2ef 100644
+--- a/sys_linux.c
++++ b/sys_linux.c
+@@ -739,10 +739,9 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
+ 
+     /* Allow selected socket options */
+     for (i = 0; i < sizeof (socket_options) / sizeof (*socket_options); i++) {
+-      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 3,
++      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 2,
+                            SCMP_A1(SCMP_CMP_EQ, socket_options[i][0]),
+-                           SCMP_A2(SCMP_CMP_EQ, socket_options[i][1]),
+-                           SCMP_A4(SCMP_CMP_LE, sizeof (int))) < 0)
++                           SCMP_A2(SCMP_CMP_EQ, socket_options[i][1])))
+         goto add_failed;
+     }
+ 
+-- 
+cgit v0.10.2
+
