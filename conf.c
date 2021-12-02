@@ -273,6 +273,9 @@ static int no_system_cert = 0;
 /* Array of CNF_HwTsInterface */
 static ARR_Instance hwts_interfaces;
 
+/* PTP event port (disabled by default) */
+static int ptp_port = 0;
+
 typedef struct {
   NTP_Source_Type type;
   int pool;
@@ -686,6 +689,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_source(p, command, 1);
   } else if (!strcasecmp(command, "port")) {
     parse_int(p, &ntp_port);
+  } else if (!strcasecmp(command, "ptpport")) {
+    parse_int(p, &ptp_port);
   } else if (!strcasecmp(command, "ratelimit")) {
     parse_ratelimit(p, &ntp_ratelimit_enabled, &ntp_ratelimit_interval,
                     &ntp_ratelimit_burst, &ntp_ratelimit_leak);
@@ -1212,100 +1217,18 @@ parse_ntstrustedcerts(char *line)
 static void
 parse_allow_deny(char *line, ARR_Instance restrictions, int allow)
 {
-  char *p;
-  unsigned long a, b, c, d, n;
-  int all = 0;
-  AllowDeny *new_node = NULL;
-  IPAddr ip_addr;
+  int all, subnet_bits;
+  AllowDeny *node;
+  IPAddr ip;
 
-  p = line;
+  if (!CPS_ParseAllowDeny(line, &all, &ip, &subnet_bits))
+    command_parse_error();
 
-  if (!strncmp(p, "all", 3)) {
-    all = 1;
-    p = CPS_SplitWord(line);
-  }
-
-  if (!*p) {
-    /* Empty line applies to all addresses */
-    new_node = (AllowDeny *)ARR_GetNewElement(restrictions);
-    new_node->allow = allow;
-    new_node->all = all;
-    new_node->ip.family = IPADDR_UNSPEC;
-    new_node->subnet_bits = 0;
-  } else {
-    char *slashpos;
-    slashpos = strchr(p, '/');
-    if (slashpos) *slashpos = 0;
-
-    check_number_of_args(p, 1);
-    n = 0;
-    if (UTI_StringToIP(p, &ip_addr) ||
-        (n = sscanf(p, "%lu.%lu.%lu.%lu", &a, &b, &c, &d)) >= 1) {
-      new_node = (AllowDeny *)ARR_GetNewElement(restrictions);
-      new_node->allow = allow;
-      new_node->all = all;
-
-      if (n == 0) {
-        new_node->ip = ip_addr;
-        if (ip_addr.family == IPADDR_INET6)
-          new_node->subnet_bits = 128;
-        else
-          new_node->subnet_bits = 32;
-      } else {
-        new_node->ip.family = IPADDR_INET4;
-
-        a &= 0xff;
-        b &= 0xff;
-        c &= 0xff;
-        d &= 0xff;
-        
-        switch (n) {
-          case 1:
-            new_node->ip.addr.in4 = (a<<24);
-            new_node->subnet_bits = 8;
-            break;
-          case 2:
-            new_node->ip.addr.in4 = (a<<24) | (b<<16);
-            new_node->subnet_bits = 16;
-            break;
-          case 3:
-            new_node->ip.addr.in4 = (a<<24) | (b<<16) | (c<<8);
-            new_node->subnet_bits = 24;
-            break;
-          case 4:
-            new_node->ip.addr.in4 = (a<<24) | (b<<16) | (c<<8) | d;
-            new_node->subnet_bits = 32;
-            break;
-          default:
-            assert(0);
-        }
-      }
-      
-      if (slashpos) {
-        int specified_subnet_bits, n;
-        n = sscanf(slashpos+1, "%d", &specified_subnet_bits);
-        if (n == 1) {
-          new_node->subnet_bits = specified_subnet_bits;
-        } else {
-          command_parse_error();
-        }
-      }
-
-    } else {
-      if (!slashpos && DNS_Name2IPAddress(p, &ip_addr, 1) == DNS_Success) {
-        new_node = (AllowDeny *)ARR_GetNewElement(restrictions);
-        new_node->allow = allow;
-        new_node->all = all;
-        new_node->ip = ip_addr;
-        if (ip_addr.family == IPADDR_INET6)
-          new_node->subnet_bits = 128;
-        else
-          new_node->subnet_bits = 32;
-      } else {
-        command_parse_error();
-      }      
-    }
-  }
+  node = ARR_GetNewElement(restrictions);
+  node->allow = allow;
+  node->all = all;
+  node->ip = ip;
+  node->subnet_bits = subnet_bits;
 }
   
 /* ================================================== */
@@ -1556,6 +1479,8 @@ parse_hwtimestamp(char *line)
         iface->rxfilter = CNF_HWTS_RXFILTER_NONE;
       else if (!strcasecmp(filter, "ntp"))
         iface->rxfilter = CNF_HWTS_RXFILTER_NTP;
+      else if (!strcasecmp(filter, "ptp"))
+        iface->rxfilter = CNF_HWTS_RXFILTER_PTP;
       else if (!strcasecmp(filter, "all"))
         iface->rxfilter = CNF_HWTS_RXFILTER_ALL;
       else
@@ -2555,6 +2480,14 @@ CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface)
 
   *iface = (CNF_HwTsInterface *)ARR_GetElement(hwts_interfaces, index);
   return 1;
+}
+
+/* ================================================== */
+
+int
+CNF_GetPtpPort(void)
+{
+  return ptp_port;
 }
 
 /* ================================================== */

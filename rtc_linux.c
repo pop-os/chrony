@@ -64,7 +64,7 @@ static OperatingMode operating_mode = OM_NORMAL;
 
 /* ================================================== */
 
-static int fd = -1;
+static int fd;
 
 #define LOWEST_MEASUREMENT_PERIOD 15
 #define HIGHEST_MEASUREMENT_PERIOD 480
@@ -82,15 +82,11 @@ static int skip_interrupts;
 #define MAX_SAMPLES 64
 
 /* Real time clock samples.  We store the seconds count as originally
-   measured, together with a 'trim' that compensates these values for
-   any steps made to the RTC to bring it back into line
-   occasionally.  The trim is in seconds. */
+   measured. */
 static time_t *rtc_sec = NULL;
-static double *rtc_trim = NULL;
 
 /* Reference time, against which delta times on the RTC scale are measured */
 static time_t rtc_ref;
-
 
 /* System clock samples associated with the above samples. */
 static struct timespec *system_times = NULL;
@@ -145,7 +141,7 @@ static double file_ref_offset, file_rate_ppm;
 /* ================================================== */
 
 /* Flag to remember whether to assume the RTC is running on UTC */
-static int rtc_on_utc = 1;
+static int rtc_on_utc;
 
 /* ================================================== */
 
@@ -168,7 +164,6 @@ discard_samples(int new_first)
   n_to_save = n_samples - new_first;
 
   memmove(rtc_sec, rtc_sec + new_first, n_to_save * sizeof(time_t));
-  memmove(rtc_trim, rtc_trim + new_first, n_to_save * sizeof(double));
   memmove(system_times, system_times + new_first, n_to_save * sizeof(struct timespec));
 
   n_samples = n_to_save;
@@ -188,21 +183,16 @@ accumulate_sample(time_t rtc, struct timespec *sys)
   }
 
   /* Discard all samples if the RTC was stepped back (not our trim) */
-  if (n_samples > 0 && rtc_sec[n_samples - 1] - rtc >= rtc_trim[n_samples - 1]) {
+  if (n_samples > 0 && rtc_sec[n_samples - 1] >= rtc) {
     DEBUG_LOG("RTC samples discarded");
     n_samples = 0;
   }
 
   /* Always use most recent sample as reference */
-  /* use sample only if n_sample is not negative*/
-  if(n_samples >=0)
-  {
   rtc_ref = rtc;
   rtc_sec[n_samples] = rtc;
-  rtc_trim[n_samples] = 0.0;
   system_times[n_samples] = *sys;
   ++n_samples_since_regression;
-  }
   ++n_samples;
 }
 
@@ -227,7 +217,7 @@ run_regression(int new_sample,
   if (n_samples > 0) {
 
     for (i=0; i<n_samples; i++) {
-      rtc_rel[i] = rtc_trim[i] + (double)(rtc_sec[i] - rtc_ref);
+      rtc_rel[i] = (double)(rtc_sec[i] - rtc_ref);
       offsets[i] = ((double) (rtc_ref - system_times[i].tv_sec) -
                     (1.0e-9 * system_times[i].tv_nsec) +
                     rtc_rel[i]);
@@ -434,6 +424,7 @@ setup_config(void)
 static void
 read_coefs_from_file(void)
 {
+  double ref_time;
   FILE *in;
 
   if (!tried_to_load_coefs) {
@@ -444,11 +435,12 @@ read_coefs_from_file(void)
 
     if (coefs_file_name &&
         (in = UTI_OpenFile(NULL, coefs_file_name, NULL, 'r', 0))) {
-      if (fscanf(in, "%d%ld%lf%lf",
+      if (fscanf(in, "%d%lf%lf%lf",
                  &valid_coefs_from_file,
-                 &file_ref_time,
+                 &ref_time,
                  &file_ref_offset,
                  &file_rate_ppm) == 4) {
+        file_ref_time = ref_time;
       } else {
         LOG(LOGS_WARN, "Could not read coefficients from %s", coefs_file_name);
       }
@@ -472,7 +464,7 @@ write_coefs_to_file(int valid,time_t ref_time,double offset,double rate)
     return RTC_ST_BADFILE;
 
   /* Gain rate is written out in ppm */
-  fprintf(out, "%1d %ld %.6f %.3f\n", valid, ref_time, offset, 1.0e6 * rate);
+  fprintf(out, "%1d %.0f %.6f %.3f\n", valid, (double)ref_time, offset, 1.0e6 * rate);
   fclose(out);
 
   /* Rename the temporary file to the correct location */
@@ -525,7 +517,6 @@ RTC_Linux_Initialise(void)
   UTI_FdSetCloexec(fd);
 
   rtc_sec = MallocArray(time_t, MAX_SAMPLES);
-  rtc_trim = MallocArray(double, MAX_SAMPLES);
   system_times = MallocArray(struct timespec, MAX_SAMPLES);
 
   /* Setup details depending on configuration options */
@@ -578,7 +569,6 @@ RTC_Linux_Finalise(void)
     LCL_RemoveParameterChangeHandler(slew_samples, NULL);
 
   Free(rtc_sec);
-  Free(rtc_trim);
   Free(system_times);
 }
 
@@ -639,11 +629,7 @@ handle_initial_trim(void)
   run_regression(1, &coefs_valid, &coef_ref_time, &coef_seconds_fast, &coef_gain_rate);
 
   n_samples_since_regression = 0;
-
-  /* Set sample number to -1 so the next sample is not used, as it will not yet be corrected for System Trim*/
-
-  n_samples = -1;
-
+  n_samples = 0;
 
   read_coefs_from_file();
 
@@ -1028,8 +1014,7 @@ RTC_Linux_GetReport(RPT_RTC_Report *report)
   report->n_samples = n_samples;
   report->n_runs = n_runs;
   if (n_samples > 1) {
-    report->span_seconds = ((rtc_sec[n_samples-1] - rtc_sec[0]) +
-                            (long)(rtc_trim[n_samples-1] - rtc_trim[0]));
+    report->span_seconds = rtc_sec[n_samples - 1] - rtc_sec[0];
   } else {
     report->span_seconds = 0;
   }

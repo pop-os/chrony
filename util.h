@@ -133,6 +133,9 @@ extern void UTI_GetNtp64Fuzz(NTP_int64 *ts, int precision);
 extern double UTI_Ntp32ToDouble(NTP_int32 x);
 extern NTP_int32 UTI_DoubleToNtp32(double x);
 
+extern double UTI_Ntp32f28ToDouble(NTP_int32 x);
+extern NTP_int32 UTI_DoubleToNtp32f28(double x);
+
 /* Zero an NTP timestamp */
 extern void UTI_ZeroNtp64(NTP_int64 *ts);
 
@@ -154,6 +157,9 @@ extern void UTI_TimespecToNtp64(const struct timespec *src, NTP_int64 *dest,
 
 /* Convert an NTP timestamp into a timespec */
 extern void UTI_Ntp64ToTimespec(const NTP_int64 *src, struct timespec *dest);
+
+/* Calculate a - b in any epoch */
+extern double UTI_DiffNtp64ToDouble(const NTP_int64 *a, const NTP_int64 *b);
 
 /* Check if time + offset is sane */
 extern int UTI_IsTimeOffsetSane(const struct timespec *ts, double offset);
@@ -217,6 +223,10 @@ extern void UTI_GetRandomBytesUrandom(void *buf, unsigned int len);
    available (e.g. arc4random()), which may not necessarily be suitable for
    generating long-term keys */
 extern void UTI_GetRandomBytes(void *buf, unsigned int len);
+
+/* Close /dev/urandom and drop any cached data used by the GetRandom functions
+   to prevent forked processes getting the same sequence of random numbers */
+extern void UTI_ResetGetRandomFunctions(void);
 
 /* Print data in hexadecimal format */
 extern int UTI_BytesToHex(const void *buf, unsigned int buf_len, char *hex, unsigned int hex_len);

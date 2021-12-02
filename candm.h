@@ -270,6 +270,7 @@ typedef struct {
 #define REQ_ADDSRC_BURST 0x100
 #define REQ_ADDSRC_NTS 0x200
 #define REQ_ADDSRC_COPY 0x400
+#define REQ_ADDSRC_EF_EXP1 0x800
 
 typedef struct {
   uint32_t type;
@@ -516,7 +517,8 @@ typedef struct {
 #define RPY_CLIENT_ACCESSES_BY_INDEX3 21
 #define RPY_SERVER_STATS2 22
 #define RPY_SELECT_DATA 23
-#define N_REPLY_TYPES 24
+#define RPY_SERVER_STATS3 24
+#define N_REPLY_TYPES 25
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -529,8 +531,7 @@ typedef struct {
 #define STT_BADSUBNET 7
 #define STT_ACCESSALLOWED 8
 #define STT_ACCESSDENIED 9
-/* Deprecated */
-#define STT_NOHOSTACCESS 10
+#define STT_NOHOSTACCESS 10 /* Deprecated */
 #define STT_SOURCEALREADYKNOWN 11
 #define STT_TOOMANYSOURCES 12
 #define STT_NORTC 13
@@ -660,6 +661,9 @@ typedef struct {
   uint32_t cmd_drops;
   uint32_t log_drops;
   uint32_t ntp_auth_hits;
+  uint32_t ntp_interleaved_hits;
+  uint32_t ntp_timestamps;
+  uint32_t ntp_span_seconds;
   int32_t EOR;
 } RPY_ServerStats;
 

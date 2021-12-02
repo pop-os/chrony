@@ -2,12 +2,12 @@
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2021-05-12
+.\"      Date: 2021-12-02
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2021-05-12" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2021-12-02" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -362,10 +362,11 @@ sources are unreachable.
 .RS 4
 This option sets the NTP version of packets sent to the server. This can be
 useful when the server runs an old NTP implementation that does not respond to
-requests using a newer version. The default version depends on whether a key is
-specified by the \fBkey\fP option and which authentication hash function the key
-is using. If the output size of the hash function is longer than 160 bits, the
-default version is 3 for compatibility with older \fBchronyd\fP servers. Otherwise,
+requests using a newer version. The default version depends on other options.
+If the \fBextfield\fP or \fBxleave\fP option is used, the default version is 4. If
+those options are not used and the \fBkey\fP option specifies a key using a hash
+function with output size longer than 160 bits (e.g. SHA256), the default
+version is 3 for compatibility with older \fBchronyd\fP servers. In other cases,
 the default version is 4.
 .RE
 .sp
@@ -379,6 +380,33 @@ This is useful when multiple instances of \f(CRchronyd\fP are running on one com
 to synchronise the system clock and other instances started with the \fB\-x\fP
 option to operate as NTP servers for other computers with their NTP clocks
 synchronised to the first instance.
+.RE
+.sp
+\fBextfield\fP \fItype\fP
+.RS 4
+This option enables an NTPv4 extension field specified by its type as a
+hexadecimal number. It will be included in requests sent to the server and
+processed in received responses if the server supports it. Note that some
+server implementations do not respond to requests containing an unknown
+extension field (\fBchronyd\fP as a server responded to such requests since
+version 2.0).
+.sp
+The following extension field can be enabled by this option:
+.sp
+\fIF323\fP
+.RS 4
+This is an experimental extension field for some improvements that were
+proposed for the next version of the NTP protocol (NTPv5). The field contains
+root delay and dispersion in higher resolution and a monotonic receive
+timestamp, which enables a frequency transfer between the server and client. It
+can significantly improve stability of the synchronization. Generally, it
+should be expected to work only between servers and clients running the same
+version of \fBchronyd\fP.
+.RE
+.RE
+.sp
+
+.RS 4
 .RE
 .RE
 .sp
@@ -1602,10 +1630,6 @@ is 5000 ppm, and on Solaris it is 32500 ppm. Also, due to a kernel limitation,
 setting \fBmaxslewrate\fP on FreeBSD, NetBSD, macOS 10.13+ to a value between 500
 ppm and 5000 ppm will effectively set it to 500 ppm.
 .sp
-In early beta releases of macOS 13 this capability is disabled because of a
-system kernel bug. When the kernel bug is fixed, chronyd will detect this and
-re\-enable the capability (see above limitations) with no recompilation required.
-.sp
 By default, the maximum slew rate is set to 83333.333 ppm (one twelfth).
 .RE
 .sp
@@ -1870,9 +1894,12 @@ directive.
 This directive specifies the maximum amount of memory that \fBchronyd\fP is allowed
 to allocate for logging of client accesses and the state that \fBchronyd\fP as an
 NTP server needs to support the interleaved mode for its clients. The default
-limit is 524288 bytes, which is sufficient for monitoring about four thousand
-clients at the same time. The maximum value is 2^32\-1 (4 GB) on 32\-bit systems
-and 2^35 (32 GB) on 64\-bit systems.
+limit is 524288 bytes, which enables monitoring of up to 4096 IP addresses at
+the same time and holding NTP timestamps for up to 4096 clients using the
+interleaved mode (depending on uniformity of their polling interval). The
+number of addresses and timestamps is always a power of 2. The maximum
+effective value is 2147483648 (2 GB), which corresponds to 16777216 addresses
+and timestamps.
 .sp
 An example of the use of this directive is:
 .sp
@@ -2005,7 +2032,8 @@ The port will be open only when a certificate and key is specified by the
 This directive specifies a file containing a certificate in the PEM format
 for \fBchronyd\fP to operate as an NTS server. The file should also include
 any intermediate certificates that the clients will need to validate the
-server\(cqs certificate.
+server\(cqs certificate. The file needs to be readable by the user under which
+\fBchronyd\fP is running after dropping root privileges.
 .sp
 This directive can be used multiple times to specify multiple certificates for
 different names of the server.
@@ -2019,7 +2047,9 @@ recommended for a near\-seamless server operation.
 \fBntsserverkey\fP \fIfile\fP
 .RS 4
 This directive specifies a file containing a private key in the PEM format
-for \fBchronyd\fP to operate as an NTS server.
+for \fBchronyd\fP to operate as an NTS server. The file needs to be readable by
+the user under which \fBchronyd\fP is running after dropping root privileges. For
+security reasons, it should not be readable by other users.
 .sp
 This directive can be used multiple times to specify multiple keys. The number
 of keys must be the same as the number of certificates and the corresponding
@@ -2131,7 +2161,7 @@ directive.
 The \fBratelimit\fP directive supports a number of options (which can be defined
 in any order):
 .sp
-\fBinterval\fP
+\fBinterval\fP \fIinterval\fP
 .RS 4
 This option sets the minimum interval between responses. It is defined as a
 power of 2 in seconds. The default value is 3 (8 seconds). The minimum value
@@ -2141,7 +2171,7 @@ is \-19 (524288 packets per second) and the maximum value is 12 (one packet per
 than the specified interval).
 .RE
 .sp
-\fBburst\fP
+\fBburst\fP \fIresponses\fP
 .RS 4
 This option sets the maximum number of responses that can be sent in a burst,
 temporarily exceeding the limit specified by the \fBinterval\fP option. This is
@@ -2150,7 +2180,7 @@ the \fBiburst\fP option). The default value is 8. The minimum value is 1 and the
 maximum value is 255.
 .RE
 .sp
-\fBleak\fP
+\fBleak\fP \fIrate\fP
 .RS 4
 This option sets the rate at which responses are randomly allowed even if the
 limits specified by the \fBinterval\fP and \fBburst\fP options are exceeded. This is
@@ -3615,7 +3645,7 @@ timestamping, which can be verified with the \fBethtool \-T\fP command. The list
 capabilities should include \fISOF_TIMESTAMPING_RAW_HARDWARE\fP,
 \fISOF_TIMESTAMPING_TX_HARDWARE\fP, and \fISOF_TIMESTAMPING_RX_HARDWARE\fP. Receive
 filter \fIHWTSTAMP_FILTER_ALL\fP, or \fIHWTSTAMP_FILTER_NTP_ALL\fP, is necessary for
-timestamping of received packets. Timestamping of packets received from bridged
+timestamping of received NTP packets. Timestamping of packets received on bridged
 and bonded interfaces is supported on Linux 4.13 and newer. When \fBchronyd\fP is
 running, no other process (e.g. a PTP daemon) should be working with the NIC
 clock.
@@ -3695,6 +3725,11 @@ Enables timestamping of all received packets.
 Enables timestamping of received NTP packets.
 .RE
 .sp
+\fIptp\fP
+.RS 4
+Enables timestamping of received PTP packets.
+.RE
+.sp
 \fInone\fP
 .RS 4
 Disables timestamping of received packets.
@@ -3703,12 +3738,14 @@ Disables timestamping of received packets.
 .sp
 
 .RS 4
-The most specific filter for timestamping NTP packets which is supported by the
-NIC is selected by default. Some NICs can timestamp only PTP packets, which
-limits the selection to the \fInone\fP filter. Forcing timestamping of all packets
-with the \fIall\fP filter when the NIC supports both \fIall\fP and \fIntp\fP filters can be
-useful when packets are received from or on a non\-standard UDP port (e.g.
-specified by the \fBport\fP directive).
+The most specific filter for timestamping of NTP packets supported by the NIC
+is selected by default. Some NICs can timestamp PTP packets only. By default,
+they will be configured with the \fInone\fP filter and expected to provide hardware
+timestamps for transmitted packets only. Timestamping of PTP packets is useful
+with NTP\-over\-PTP enabled by the \fBptpport\fP
+directive. Forcing timestamping of all packets with the \fIall\fP filter could be
+useful if the NIC supported both the \fIall\fP and \fIntp\fP filters, and it should
+timestamp both NTP and PTP packets, or NTP packets on a different UDP port.
 .RE
 .RE
 .sp
@@ -3797,12 +3834,9 @@ file when the \fBrekey\fP command is issued by \fBchronyc\fP).
 .sp
 \fBlock_all\fP
 .RS 4
-The \fBlock_all\fP directive will lock chronyd into RAM so that it will never be
-paged out. This mode is supported on Linux, FreeBSD, NetBSD, and Solaris.  This
-directive uses the POSIX \fBmlockall()\fP system call to prevent \fBchronyd\fP from
-ever being swapped out. This should result in lower and more consistent
-latency. It should not have significant impact on performance as \fBchronyd\(cqs\fP
-memory usage is modest. The \fBmlockall(2)\fP man page has more details.
+The \fBlock_all\fP directive will lock the \fBchronyd\fP process into RAM so that it
+will never be paged out. This can result in lower and more consistent latency.
+The directive is supported on Linux, FreeBSD, NetBSD, and Solaris.
 .RE
 .sp
 \fBpidfile\fP \fIfile\fP
@@ -3816,6 +3850,36 @@ e.g.:
 .if n .RS 4
 .nf
 pidfile /run/chronyd.pid
+.fi
+.if n .RE
+.RE
+.sp
+\fBptpport\fP \fIport\fP
+.RS 4
+The \fBptpport\fP directive enables \fBchronyd\fP to send and receive NTP messages
+contained in PTP event messages (NTP\-over\-PTP) to enable hardware timestamping
+on NICs which cannot timestamp NTP packets, but can timestamp unicast PTP
+packets. The port recognized by the NICs is 319 (PTP event port). The default
+value is 0 (disabled).
+.sp
+The NTP\-over\-PTP support is experimental. The protocol and configuration can
+change in future. It should be used only in local networks and expected to work
+only between servers and clients running the same version of \fBchronyd\fP.
+.sp
+The PTP port will be open even if \fBchronyd\fP is not configured to operate as a
+server or client. The directive does not change the default protocol of
+specified NTP sources. Each NTP source that should use NTP\-over\-PTP needs to
+be specified with the \fBport\fP option set to the PTP port. To actually enable
+hardware timestamping on NICs which can timestamp PTP packets only, the
+\fBrxfilter\fP option of the \fBhwtimestamp\fP directive needs to be set to \fIptp\fP.
+.sp
+An example of client configuration is:
+.sp
+.if n .RS 4
+.nf
+server foo.example.net minpoll 0 maxpoll 0 xleave port 319
+hwtimestamp * rxfilter ptp
+ptpport 319
 .fi
 .if n .RE
 .RE

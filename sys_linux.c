@@ -98,21 +98,6 @@ static int have_setoffset;
 static int tick_update_hz;
 
 /* ================================================== */
-
-inline static long
-our_round(double x)
-{
-  long y;
-
-  if (x > 0.0)
-    y = x + 0.5;
-  else
-    y = x - 0.5;
-
-  return y;
-}
-
-/* ================================================== */
 /* Positive means currently fast of true time, i.e. jump backwards */
 
 static int
@@ -149,7 +134,7 @@ set_frequency(double freq_ppm)
   double required_freq;
   int required_delta_tick;
 
-  required_delta_tick = our_round(freq_ppm / dhz);
+  required_delta_tick = round(freq_ppm / dhz);
 
   /* Older kernels (pre-2.6.18) don't apply the frequency offset exactly as
      set by adjtimex() and a scaling constant (that depends on the internal
@@ -503,6 +488,9 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
 
     /* Process */
     SCMP_SYS(clone),
+#ifdef __NR_clone3
+    SCMP_SYS(clone3),
+#endif
     SCMP_SYS(exit),
     SCMP_SYS(exit_group),
     SCMP_SYS(getpid),
@@ -595,6 +583,7 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
 #ifdef __NR_ppoll_time64
     SCMP_SYS(ppoll_time64),
 #endif
+    SCMP_SYS(pread64),
     SCMP_SYS(pselect6),
 #ifdef __NR_pselect6_time64
     SCMP_SYS(pselect6_time64),
@@ -750,10 +739,9 @@ SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context)
 
     /* Allow selected socket options */
     for (i = 0; i < sizeof (socket_options) / sizeof (*socket_options); i++) {
-      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 3,
+      if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setsockopt), 2,
                            SCMP_A1(SCMP_CMP_EQ, socket_options[i][0]),
-                           SCMP_A2(SCMP_CMP_EQ, socket_options[i][1]),
-                           SCMP_A4(SCMP_CMP_LE, sizeof (int))) < 0)
+                           SCMP_A2(SCMP_CMP_EQ, socket_options[i][1])))
         goto add_failed;
     }
 

@@ -2,56 +2,63 @@
   chronyd/chronyc - Programs for keeping computer clocks accurate.
 
  **********************************************************************
- * Copyright (C) Miroslav Lichvar  2012
- * 
+ * Copyright (C) Miroslav Lichvar  2021
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
  * published by the Free Software Foundation.
- * 
+ *
  * This program is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- * 
+ *
  **********************************************************************
 
   =======================================================================
 
-  Header file for crypto hashing.
+  This is the header file for the Precision Time Protocol (PTP).
 
   */
+#ifndef GOT_PTP_H
+#define GOT_PTP_H
 
-#ifndef GOT_HASH_H
-#define GOT_HASH_H
+#include "sysincl.h"
 
-/* length of hash values produced by SHA512 */
-#define MAX_HASH_LENGTH 64
+#include "ntp.h"
 
-typedef enum {
-  HSH_INVALID = 0,
-  HSH_MD5 = 1,
-  HSH_SHA1 = 2,
-  HSH_SHA256 = 3,
-  HSH_SHA384 = 4,
-  HSH_SHA512 = 5,
-  HSH_SHA3_224 = 6,
-  HSH_SHA3_256 = 7,
-  HSH_SHA3_384 = 8,
-  HSH_SHA3_512 = 9,
-  HSH_TIGER = 10,
-  HSH_WHIRLPOOL = 11,
-  HSH_MD5_NONCRYPTO = 10000, /* For NTPv4 reference ID */
-} HSH_Algorithm;
+#define PTP_VERSION 2
+#define PTP_TYPE_DELAY_REQ 1
+#define PTP_DOMAIN_NTP 123
+#define PTP_FLAG_UNICAST (1 << (2 + 8))
+#define PTP_TLV_NTP 0x2023
 
-extern int HSH_GetHashId(HSH_Algorithm algorithm);
+typedef struct {
+  uint8_t type;
+  uint8_t version;
+  uint16_t length;
+  uint8_t domain;
+  uint8_t min_sdoid;
+  uint16_t flags;
+  uint8_t rest[26];
+} PTP_Header;
 
-extern int HSH_Hash(int id, const void *in1, int in1_len, const void *in2, int in2_len,
-                    unsigned char *out, int out_len);
+typedef struct {
+  uint16_t type;
+  uint16_t length;
+} PTP_TlvHeader;
 
-extern void HSH_Finalise(void);
+typedef struct {
+  PTP_Header header;
+  uint8_t origin_ts[10];
+  PTP_TlvHeader tlv_header;
+  NTP_Packet ntp_msg;
+} PTP_NtpMessage;
+
+#define PTP_NTP_PREFIX_LENGTH (int)offsetof(PTP_NtpMessage, ntp_msg)
 
 #endif

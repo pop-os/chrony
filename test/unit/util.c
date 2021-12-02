@@ -34,7 +34,7 @@ test_unit(void)
 {
   struct timespec ts, ts2, ts3, ts4;
   char buf[16], *s, *s2, *words[3];
-  NTP_int64 ntp_ts, ntp_fuzz;
+  NTP_int64 ntp_ts, ntp_ts2, ntp_fuzz;
   NTP_int32 ntp32_ts;
   struct timeval tv;
   double x, y, nan, inf;
@@ -113,6 +113,13 @@ test_unit(void)
   TEST_CHECK(ts.tv_sec == 0);
 #endif
   TEST_CHECK(ts.tv_nsec == 999999999);
+
+  ntp_ts.hi = htonl(JAN_1970 - 1);
+  ntp_ts.lo = htonl(0xffffffff);
+  ntp_ts2.hi = htonl(JAN_1970 + 1);
+  ntp_ts2.lo = htonl(0x80000000);
+  TEST_CHECK(fabs(UTI_DiffNtp64ToDouble(&ntp_ts, &ntp_ts2) + 1.5) < 1e-9);
+  TEST_CHECK(fabs(UTI_DiffNtp64ToDouble(&ntp_ts2, &ntp_ts) - 1.5) < 1e-9);
 
   UTI_AddDoubleToTimespec(&ts, 1e-9, &ts);
 #if defined(HAVE_LONG_TIME_T) && NTP_ERA_SPLIT > 0
@@ -472,8 +479,8 @@ test_unit(void)
   ts2.tv_nsec = 250000000;
   UTI_AdjustTimespec(&ts, &ts2, &ts3, &x, 2.0, -5.0);
   TEST_CHECK(fabs(x - 6.5) < 1.0e-15);
-  TEST_CHECK(ts3.tv_sec == 10);
-  TEST_CHECK(ts3.tv_nsec == 0);
+  TEST_CHECK((ts3.tv_sec == 10 && ts3.tv_nsec == 0) ||
+             (ts3.tv_sec == 9 && ts3.tv_nsec == 999999999));
 
   for (i = -32; i <= 32; i++) {
     for (j = c = 0; j < 1000; j++) {
@@ -501,9 +508,20 @@ test_unit(void)
   TEST_CHECK(UTI_DoubleToNtp32(65536.0) == htonl(0xffffffff));
   TEST_CHECK(UTI_DoubleToNtp32(65537.0) == htonl(0xffffffff));
 
+  TEST_CHECK(UTI_DoubleToNtp32f28(-1.0) == htonl(0));
+  TEST_CHECK(UTI_DoubleToNtp32f28(0.0) == htonl(0));
+  TEST_CHECK(UTI_DoubleToNtp32f28(1e-9) == htonl(1));
+  TEST_CHECK(UTI_DoubleToNtp32f28(4e-9) == htonl(2));
+  TEST_CHECK(UTI_DoubleToNtp32f28(8.0) == htonl(0x80000000));
+  TEST_CHECK(UTI_DoubleToNtp32f28(16.0) == htonl(0xffffffff));
+  TEST_CHECK(UTI_DoubleToNtp32f28(16.1) == htonl(0xffffffff));
+  TEST_CHECK(UTI_DoubleToNtp32f28(16.1) == htonl(0xffffffff));
+
+  TEST_CHECK(UTI_Ntp32f28ToDouble(htonl(0xffffffff)) >= 65535.999);
   for (i = 0; i < 100000; i++) {
     UTI_GetRandomBytes(&ntp32_ts, sizeof (ntp32_ts));
     TEST_CHECK(UTI_DoubleToNtp32(UTI_Ntp32ToDouble(ntp32_ts)) == ntp32_ts);
+    TEST_CHECK(UTI_DoubleToNtp32f28(UTI_Ntp32f28ToDouble(ntp32_ts)) == ntp32_ts);
   }
 
   ts.tv_nsec = 0;
@@ -652,6 +670,10 @@ test_unit(void)
     UTI_GetRandomBytesUrandom(buf, j);
     if (j && buf[j - 1] % 2)
       c++;
+    if (random() % 10000 == 0) {
+      UTI_ResetGetRandomFunctions();
+      TEST_CHECK(!urandom_file);
+    }
   }
   TEST_CHECK(c > 46000 && c < 48000);
 
@@ -660,6 +682,12 @@ test_unit(void)
     UTI_GetRandomBytes(buf, j);
     if (j && buf[j - 1] % 2)
       c++;
+    if (random() % 10000 == 0) {
+      UTI_ResetGetRandomFunctions();
+#if HAVE_GETRANDOM
+      TEST_CHECK(getrandom_buf_available == 0);
+#endif
+    }
   }
   TEST_CHECK(c > 46000 && c < 48000);
 
