@@ -2,12 +2,12 @@
 .\"     Title: chronyc
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2021-05-12
+.\"      Date: 2021-12-02
 .\"    Manual: User manual
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONYC" "1" "2021-05-12" "chrony @CHRONY_VERSION@" "User manual"
+.TH "CHRONYC" "1" "2021-12-02" "chrony @CHRONY_VERSION@" "User manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -2022,13 +2022,9 @@ received/accepted.
 .sp
 \fBserverstats\fP
 .RS 4
-The \fBserverstats\fP command displays how many valid NTP and command requests, and
-NTS\-KE connections, \fBchronyd\fP operating as a server received from clients, and
-how many of them were dropped due to rate limiting. It also displays how many
-client log records were dropped due to the memory limit configured by the
-\fBclientloglimit\fP directive and how many of
-the NTP requests (from those which were not dropped) were authenticated. An
-example of the output is shown below.
+The \fBserverstats\fP command displays NTP and command server statistics.
+.sp
+An example of the output is shown below.
 .sp
 .if n .RS 4
 .nf
@@ -2040,8 +2036,83 @@ Client log records dropped : 0
 NTS\-KE connections accepted: 3
 NTS\-KE connections dropped : 0
 Authenticated NTP packets  : 189
+Interleaved NTP packets    : 43
+NTP timestamps held        : 44
+NTP timestamp span         : 120
 .fi
 .if n .RE
+.sp
+The fields have the following meaning:
+.sp
+\fBNTP packets received\fP
+.RS 4
+The number of valid NTP requests received by the server.
+.RE
+.sp
+\fBNTP packets dropped\fP
+.RS 4
+The number of NTP requests dropped by the server due to rate limiting
+(configured by the \fBratelimit\fP directive).
+.RE
+.sp
+\fBCommand packets received\fP
+.RS 4
+The number of command requests received by the server.
+.RE
+.sp
+\fBCommand packets dropped\fP
+.RS 4
+The number of command requests dropped by the server due to rate limiting
+(configured by the \fBcmdratelimit\fP directive).
+.RE
+.sp
+\fBClient log records dropped\fP
+.RS 4
+The number of client log records dropped by the server to limit the memory use
+(configured by the \fBclientloglimit\fP
+directive).
+.RE
+.sp
+\fBNTS\-KE connections accepted\fP
+.RS 4
+The number of NTS\-KE connections accepted by the server.
+.RE
+.sp
+\fBNTS\-KE connections dropped\fP
+.RS 4
+The number of NTS\-KE connections dropped by the server due to rate limiting
+(configured by the \fBntsratelimit\fP directive).
+.RE
+.sp
+\fBAuthenticated NTP packets\fP
+.RS 4
+The number of received NTP requests that were authenticated (with a symmetric
+key or NTS).
+.RE
+.sp
+\fBInterleaved NTP packets\fP
+.RS 4
+The number of received NTP requests that were detected to be in the interleaved
+mode.
+.RE
+.sp
+\fBNTP timestamps held\fP
+.RS 4
+The number of pairs of receive and transmit timestamps that the server is
+currently holding in memory for clients using the interleaved mode.
+.RE
+.sp
+\fBNTP timestamp span\fP
+.RS 4
+The interval (in seconds) covered by the currently held NTP timestamps.
+.RE
+.RE
+.sp
+
+.RS 4
+.sp
+Note that the numbers reported by this overflow to zero after 4294967295
+(32\-bit values).
 .RE
 .sp
 \fBallow\fP [\fBall\fP] [\fIsubnet\fP]

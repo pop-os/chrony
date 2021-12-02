@@ -779,178 +779,21 @@ process_cmd_manual(CMD_Request *msg, const char *line)
 /* ================================================== */
 
 static int
-parse_allow_deny(CMD_Request *msg, char *line)
+process_cmd_allowdeny(CMD_Request *msg, char *line, int cmd, int allcmd)
 {
-  unsigned long a, b, c, d;
-  int n, specified_subnet_bits;
+  int all, subnet_bits;
   IPAddr ip;
-  char *p;
   
-  p = line;
-  if (!*p) {
-    /* blank line - applies to all addresses */
-    ip.family = IPADDR_UNSPEC;
-    UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
-    msg->data.allow_deny.subnet_bits = htonl(0);
-  } else {
-    char *slashpos;
-    slashpos = strchr(p, '/');
-    if (slashpos) *slashpos = 0;
-    
-    n = 0;
-    if (!UTI_StringToIP(p, &ip) &&
-        (n = sscanf(p, "%lu.%lu.%lu.%lu", &a, &b, &c, &d)) <= 0) {
-
-      /* Try to parse as the name of a machine */
-      if (slashpos || DNS_Name2IPAddress(p, &ip, 1) != DNS_Success) {
-        LOG(LOGS_ERR, "Could not read address");
-        return 0;
-      } else {
-        UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
-        if (ip.family == IPADDR_INET6)
-          msg->data.allow_deny.subnet_bits = htonl(128);
-        else
-          msg->data.allow_deny.subnet_bits = htonl(32);
-      }        
-    } else {
-      
-      if (n == 0) {
-        if (ip.family == IPADDR_INET6)
-          msg->data.allow_deny.subnet_bits = htonl(128);
-        else
-          msg->data.allow_deny.subnet_bits = htonl(32);
-      } else {
-        ip.family = IPADDR_INET4;
-
-        a &= 0xff;
-        b &= 0xff;
-        c &= 0xff;
-        d &= 0xff;
-        
-        switch (n) {
-          case 1:
-            ip.addr.in4 = htonl((a<<24));
-            msg->data.allow_deny.subnet_bits = htonl(8);
-            break;
-          case 2:
-            ip.addr.in4 = htonl((a<<24) | (b<<16));
-            msg->data.allow_deny.subnet_bits = htonl(16);
-            break;
-          case 3:
-            ip.addr.in4 = htonl((a<<24) | (b<<16) | (c<<8));
-            msg->data.allow_deny.subnet_bits = htonl(24);
-            break;
-          case 4:
-            ip.addr.in4 = htonl((a<<24) | (b<<16) | (c<<8) | d);
-            msg->data.allow_deny.subnet_bits = htonl(32);
-            break;
-          default:
-            assert(0);
-        }
-      }
-
-      UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
-
-      if (slashpos) {
-        n = sscanf(slashpos+1, "%d", &specified_subnet_bits);
-        if (n == 1) {
-          msg->data.allow_deny.subnet_bits = htonl(specified_subnet_bits);
-        } else {
-          LOG(LOGS_WARN, "Warning: badly formatted subnet size, using %d",
-              (int)ntohl(msg->data.allow_deny.subnet_bits));
-        }
-      } 
-    }
+  if (!CPS_ParseAllowDeny(line, &all, &ip, &subnet_bits)) {
+    LOG(LOGS_ERR, "Could not read address");
+    return 0;
   }
+
+  msg->command = htons(all ? allcmd : cmd);
+  UTI_IPHostToNetwork(&ip, &msg->data.allow_deny.ip);
+  msg->data.allow_deny.subnet_bits = htonl(subnet_bits);
+
   return 1;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_allow(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_ALLOW);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_allowall(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_ALLOWALL);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_deny(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_DENY);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_denyall(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_DENYALL);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_cmdallow(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_CMDALLOW);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_cmdallowall(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_CMDALLOWALL);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_cmddeny(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_CMDDENY);
-  status = parse_allow_deny(msg, line);
-  return status;
-}
-
-/* ================================================== */
-
-static int
-process_cmd_cmddenyall(CMD_Request *msg, char *line)
-{
-  int status;
-  msg->command = htons(REQ_CMDDENYALL);
-  status = parse_allow_deny(msg, line);
-  return status;
 }
 
 /* ================================================== */
@@ -1099,6 +942,7 @@ process_cmd_add_source(CMD_Request *msg, char *line)
           (data.params.burst ? REQ_ADDSRC_BURST : 0) |
           (data.params.nts ? REQ_ADDSRC_NTS : 0) |
           (data.params.copy ? REQ_ADDSRC_COPY : 0) |
+          (data.params.ext_fields & NTP_EF_FLAG_EXP1 ? REQ_ADDSRC_EF_EXP1 : 0) |
           (data.params.sel_options & SRC_SELECT_PREFER ? REQ_ADDSRC_PREFER : 0) |
           (data.params.sel_options & SRC_SELECT_NOSELECT ? REQ_ADDSRC_NOSELECT : 0) |
           (data.params.sel_options & SRC_SELECT_TRUST ? REQ_ADDSRC_TRUST : 0) |
@@ -2616,7 +2460,7 @@ process_cmd_serverstats(char *line)
   CMD_Reply reply;
 
   request.command = htons(REQ_SERVER_STATS);
-  if (!request_reply(&request, &reply, RPY_SERVER_STATS2, 0))
+  if (!request_reply(&request, &reply, RPY_SERVER_STATS3, 0))
     return 0;
 
   print_report("NTP packets received       : %U\n"
@@ -2626,7 +2470,10 @@ process_cmd_serverstats(char *line)
                "Client log records dropped : %U\n"
                "NTS-KE connections accepted: %U\n"
                "NTS-KE connections dropped : %U\n"
-               "Authenticated NTP packets  : %U\n",
+               "Authenticated NTP packets  : %U\n"
+               "Interleaved NTP packets    : %U\n"
+               "NTP timestamps held        : %U\n"
+               "NTP timestamp span         : %U\n",
                (unsigned long)ntohl(reply.data.server_stats.ntp_hits),
                (unsigned long)ntohl(reply.data.server_stats.ntp_drops),
                (unsigned long)ntohl(reply.data.server_stats.cmd_hits),
@@ -2635,6 +2482,9 @@ process_cmd_serverstats(char *line)
                (unsigned long)ntohl(reply.data.server_stats.nke_hits),
                (unsigned long)ntohl(reply.data.server_stats.nke_drops),
                (unsigned long)ntohl(reply.data.server_stats.ntp_auth_hits),
+               (unsigned long)ntohl(reply.data.server_stats.ntp_interleaved_hits),
+               (unsigned long)ntohl(reply.data.server_stats.ntp_timestamps),
+               (unsigned long)ntohl(reply.data.server_stats.ntp_span_seconds),
                REPORT_END);
 
   return 1;
@@ -3232,11 +3082,7 @@ process_line(char *line)
   } else if (!strcmp(command, "add")) {
     do_normal_submit = process_cmd_add_source(&tx_message, line);
   } else if (!strcmp(command, "allow")) {
-    if (!strncmp(line, "all", 3)) {
-      do_normal_submit = process_cmd_allowall(&tx_message, CPS_SplitWord(line));
-    } else {
-      do_normal_submit = process_cmd_allow(&tx_message, line);
-    }
+    do_normal_submit = process_cmd_allowdeny(&tx_message, line, REQ_ALLOW, REQ_ALLOWALL);
   } else if (!strcmp(command, "authdata")) {
     do_normal_submit = 0;
     ret = process_cmd_authdata(line);
@@ -3248,28 +3094,15 @@ process_line(char *line)
   } else if (!strcmp(command, "cmdaccheck")) {
     do_normal_submit = process_cmd_cmdaccheck(&tx_message, line);
   } else if (!strcmp(command, "cmdallow")) {
-    if (!strncmp(line, "all", 3)) {
-      do_normal_submit = process_cmd_cmdallowall(&tx_message, CPS_SplitWord(line));
-    } else {
-      do_normal_submit = process_cmd_cmdallow(&tx_message, line);
-    }
+    do_normal_submit = process_cmd_allowdeny(&tx_message, line, REQ_CMDALLOW, REQ_CMDALLOWALL);
   } else if (!strcmp(command, "cmddeny")) {
-    if (!strncmp(line, "all", 3)) {
-      line = CPS_SplitWord(line);
-      do_normal_submit = process_cmd_cmddenyall(&tx_message, line);
-    } else {
-      do_normal_submit = process_cmd_cmddeny(&tx_message, line);
-    }
+    do_normal_submit = process_cmd_allowdeny(&tx_message, line, REQ_CMDDENY, REQ_CMDDENYALL);
   } else if (!strcmp(command, "cyclelogs")) {
     process_cmd_cyclelogs(&tx_message, line);
   } else if (!strcmp(command, "delete")) {
     do_normal_submit = process_cmd_delete(&tx_message, line);
   } else if (!strcmp(command, "deny")) {
-    if (!strncmp(line, "all", 3)) {
-      do_normal_submit = process_cmd_denyall(&tx_message, CPS_SplitWord(line));
-    } else {
-      do_normal_submit = process_cmd_deny(&tx_message, line);
-    }
+    do_normal_submit = process_cmd_allowdeny(&tx_message, line, REQ_DENY, REQ_DENYALL);
   } else if (!strcmp(command, "dfreq")) {
     do_normal_submit = process_cmd_dfreq(&tx_message, line);
   } else if (!strcmp(command, "dns")) {

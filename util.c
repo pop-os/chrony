@@ -123,7 +123,7 @@ UTI_DoubleToTimeval(double a, struct timeval *b)
 
   b->tv_sec = a;
   frac_part = 1.0e6 * (a - b->tv_sec);
-  b->tv_usec = frac_part > 0 ? frac_part + 0.5 : frac_part - 0.5;
+  b->tv_usec = round(frac_part);
   UTI_NormaliseTimeval(b);
 }
 
@@ -400,7 +400,7 @@ UTI_IPToRefid(const IPAddr *ip)
       return ip->addr.in4;
     case IPADDR_INET6:
       if (MD5_hash < 0)
-        MD5_hash = HSH_GetHashId(HSH_MD5);
+        MD5_hash = HSH_GetHashId(HSH_MD5_NONCRYPTO);
 
       if (MD5_hash < 0 ||
           HSH_Hash(MD5_hash, (const unsigned char *)ip->addr.in6, sizeof (ip->addr.in6),
@@ -637,6 +637,43 @@ UTI_DoubleToNtp32(double x)
 
 /* ================================================== */
 
+double
+UTI_Ntp32f28ToDouble(NTP_int32 x)
+{
+  uint32_t r = ntohl(x);
+
+  /* Maximum value is special */
+  if (r == 0xffffffff)
+    return MAX_NTP_INT32;
+
+  return r / (double)(1U << 28);
+}
+
+/* ================================================== */
+
+NTP_int32
+UTI_DoubleToNtp32f28(double x)
+{
+  NTP_int32 r;
+
+  if (x >= 4294967295.0 / (1U << 28)) {
+    r = 0xffffffff;
+  } else if (x <= 0.0) {
+    r = 0;
+  } else {
+    x *= 1U << 28;
+    r = x;
+
+    /* Round up */
+    if (r < x)
+      r++;
+  }
+
+  return htonl(r);
+}
+
+/* ================================================== */
+
 void
 UTI_ZeroNtp64(NTP_int64 *ts)
 {
@@ -747,6 +784,16 @@ UTI_Ntp64ToTimespec(const NTP_int64 *src, struct timespec *dest)
 #endif
 
   dest->tv_nsec = ntp_frac / NSEC_PER_NTP64;
+}
+
+/* ================================================== */
+
+double
+UTI_DiffNtp64ToDouble(const NTP_int64 *a, const NTP_int64 *b)
+{
+  /* Don't convert to timespec to allow any epoch */
+  return (int32_t)(ntohl(a->hi) - ntohl(b->hi)) +
+         ((double)ntohl(a->lo) - (double)ntohl(b->lo)) / (1.0e9 * NSEC_PER_NTP64);
 }
 
 /* ================================================== */
@@ -1355,29 +1402,32 @@ UTI_DropRoot(uid_t uid, gid_t gid)
 
 #define DEV_URANDOM "/dev/urandom"
 
+static FILE *urandom_file = NULL;
+
 void
 UTI_GetRandomBytesUrandom(void *buf, unsigned int len)
 {
-  static FILE *f = NULL;
-
-  if (!f)
-    f = UTI_OpenFile(NULL, DEV_URANDOM, NULL, 'R', 0);
-  if (fread(buf, 1, len, f) != len)
+  if (!urandom_file)
+    urandom_file = UTI_OpenFile(NULL, DEV_URANDOM, NULL, 'R', 0);
+  if (fread(buf, 1, len, urandom_file) != len)
     LOG_FATAL("Can't read from %s", DEV_URANDOM);
 }
 
 /* ================================================== */
 
 #ifdef HAVE_GETRANDOM
+
+static unsigned int getrandom_buf_available = 0;
+
 static void
 get_random_bytes_getrandom(char *buf, unsigned int len)
 {
   static char rand_buf[256];
-  static unsigned int available = 0, disabled = 0;
+  static unsigned int disabled = 0;
   unsigned int i;
 
   for (i = 0; i < len; i++) {
-    if (!available) {
+    if (getrandom_buf_available == 0) {
       if (disabled)
         break;
 
@@ -1386,10 +1436,10 @@ get_random_bytes_getrandom(char *buf, unsigned int len)
         break;
       }
 
-      available = sizeof (rand_buf);
+      getrandom_buf_available = sizeof (rand_buf);
     }
 
-    buf[i] = rand_buf[--available];
+    buf[i] = rand_buf[--getrandom_buf_available];
   }
 
   if (i < len)
@@ -1408,6 +1458,20 @@ UTI_GetRandomBytes(void *buf, unsigned int len)
   get_random_bytes_getrandom(buf, len);
 #else
   UTI_GetRandomBytesUrandom(buf, len);
+#endif
+}
+
+/* ================================================== */
+
+void
+UTI_ResetGetRandomFunctions(void)
+{
+  if (urandom_file) {
+    fclose(urandom_file);
+    urandom_file = NULL;
+  }
+#ifdef HAVE_GETRANDOM
+  getrandom_buf_available = 0;
 #endif
 }
 

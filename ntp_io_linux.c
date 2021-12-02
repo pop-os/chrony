@@ -73,7 +73,7 @@ struct Interface {
 /* Minimum interval between PHC readings */
 #define MIN_PHC_POLL -6
 
-/* Maximum acceptable offset between HW and daemon/kernel timestamp */
+/* Maximum acceptable offset between SW/HW and daemon timestamp */
 #define MAX_TS_DELAY 1.0
 
 /* Array of Interfaces */
@@ -189,6 +189,14 @@ add_interface(CNF_HwTsInterface *conf_iface)
       rx_filter = HWTSTAMP_FILTER_NTP_ALL;
       break;
 #endif
+    case CNF_HWTS_RXFILTER_PTP:
+      if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_PTP_V2_L4_EVENT))
+        rx_filter = HWTSTAMP_FILTER_PTP_V2_L4_EVENT;
+      else if (ts_info.rx_filters & (1 << HWTSTAMP_FILTER_PTP_V2_EVENT))
+        rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
+      else
+        rx_filter = HWTSTAMP_FILTER_NONE;
+      break;
     default:
       rx_filter = HWTSTAMP_FILTER_ALL;
       break;
@@ -612,6 +620,28 @@ process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
 }
 
 /* ================================================== */
+
+static void
+process_sw_timestamp(struct timespec *sw_ts, NTP_Local_Timestamp *local_ts)
+{
+  double ts_delay, local_err;
+  struct timespec ts;
+
+  LCL_CookTime(sw_ts, &ts, &local_err);
+
+  ts_delay = UTI_DiffTimespecsToDouble(&local_ts->ts, &ts);
+
+  if (fabs(ts_delay) > MAX_TS_DELAY) {
+    DEBUG_LOG("Unacceptable timestamp delay %.9f", ts_delay);
+    return;
+  }
+
+  local_ts->ts = ts;
+  local_ts->err = local_err;
+  local_ts->source = NTP_TS_KERNEL;
+}
+
+/* ================================================== */
 /* Extract UDP data from a layer 2 message.  Supported is Ethernet
    with optional VLAN tags. */
 
@@ -736,8 +766,7 @@ NIO_Linux_ProcessMessage(SCK_Message *message, NTP_Local_Address *local_addr,
 
   if (local_ts->source == NTP_TS_DAEMON && !UTI_IsZeroTimespec(&message->timestamp.kernel) &&
       (!is_tx || UTI_IsZeroTimespec(&message->timestamp.hw))) {
-    LCL_CookTime(&message->timestamp.kernel, &local_ts->ts, &local_ts->err);
-    local_ts->source = NTP_TS_KERNEL;
+    process_sw_timestamp(&message->timestamp.kernel, local_ts);
   }
 
   /* If the kernel is slow with enabling RX timestamping, open a dummy
@@ -776,7 +805,10 @@ NIO_Linux_ProcessMessage(SCK_Message *message, NTP_Local_Address *local_addr,
     return 1;
   }
 
-  if (message->length < NTP_HEADER_LENGTH)
+  if (!NIO_UnwrapMessage(message, local_addr->sock_fd))
+    return 1;
+
+  if (message->length < NTP_HEADER_LENGTH || message->length > sizeof (NTP_Packet))
     return 1;
 
   NSR_ProcessTx(&message->remote_addr.ip, local_addr, local_ts, message->data, message->length);

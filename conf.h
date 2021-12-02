@@ -134,6 +134,7 @@ typedef enum {
   CNF_HWTS_RXFILTER_ANY,
   CNF_HWTS_RXFILTER_NONE,
   CNF_HWTS_RXFILTER_NTP,
+  CNF_HWTS_RXFILTER_PTP,
   CNF_HWTS_RXFILTER_ALL,
 } CNF_HwTs_RxFilter;
 
@@ -150,6 +151,8 @@ typedef struct {
 } CNF_HwTsInterface;
 
 extern int CNF_GetHwTsInterface(unsigned int index, CNF_HwTsInterface **iface);
+
+extern int CNF_GetPtpPort(void);
 
 extern char *CNF_GetNtsDumpDir(void);
 extern char *CNF_GetNtsNtpServer(void);
