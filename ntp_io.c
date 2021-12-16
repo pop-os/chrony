@@ -4,7 +4,7 @@
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) Timo Teras  2009
- * Copyright (C) Miroslav Lichvar  2009, 2013-2016, 2018-2020
+ * Copyright (C) Miroslav Lichvar  2009, 2013-2016, 2018-2021
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -594,7 +594,7 @@ NIO_SendPacket(NTP_Packet *packet, NTP_Remote_Address *remote_addr,
 #if !defined(HAVE_IN_PKTINFO) && defined(IP_SENDSRCADDR)
   /* On FreeBSD a local IPv4 address cannot be specified on bound socket */
   if (message.local_addr.ip.family == IPADDR_INET4 &&
-      (local_addr->sock_fd != server_sock_fd4 || bound_server_sock_fd4))
+      (bound_server_sock_fd4 || !NIO_IsServerSocket(local_addr->sock_fd)))
     message.local_addr.ip.family = IPADDR_UNSPEC;
 #endif
 
