@@ -1,13 +1,13 @@
 '\" t
 .\"     Title: chrony.conf
 .\"    Author: [see the "AUTHOR(S)" section]
-.\" Generator: Asciidoctor 2.0.10
-.\"      Date: 2021-12-02
+.\" Generator: Asciidoctor 2.0.15
+.\"      Date: 2021-12-16
 .\"    Manual: Configuration Files
 .\"    Source: chrony @CHRONY_VERSION@
 .\"  Language: English
 .\"
-.TH "CHRONY.CONF" "5" "2021-12-02" "chrony @CHRONY_VERSION@" "Configuration Files"
+.TH "CHRONY.CONF" "5" "2021-12-16" "chrony @CHRONY_VERSION@" "Configuration Files"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -336,7 +336,9 @@ included in a \fBserver\fP directive:
 .sp
 .if n .RS 4
 .nf
+.fam C
 presend 9
+.fam
 .fi
 .if n .RE
 .sp
@@ -442,7 +444,9 @@ An example of the \fBpool\fP directive is
 .sp
 .if n .RS 4
 .nf
+.fam C
 pool pool.ntp.org iburst maxsources 3
+.fam
 .fi
 .if n .RE
 .RE
@@ -512,7 +516,9 @@ An example of the use of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 initstepslew 30 foo.example.net bar.example.net baz.example.net
+.fam
 .fi
 .if n .RE
 .sp
@@ -574,9 +580,11 @@ Examples:
 .sp
 .if n .RS 4
 .nf
+.fam C
 refclock PPS /dev/pps0 lock NMEA refid GPS
 refclock SHM 0 offset 0.5 delay 0.2 refid NMEA noselect
 refclock PPS /dev/pps1:clear refid GPS2
+.fam
 .fi
 .if n .RE
 .RE
@@ -603,8 +611,10 @@ Examples:
 .sp
 .if n .RS 4
 .nf
+.fam C
 refclock SHM 0 poll 3 refid GPS1
 refclock SHM 1:perm=0644 refid GPS2
+.fam
 .fi
 .if n .RE
 .RE
@@ -625,7 +635,9 @@ page. For example:
 .sp
 .if n .RS 4
 .nf
+.fam C
 refclock SOCK /var/run/chrony.ttyS0.sock
+.fam
 .fi
 .if n .RE
 .RE
@@ -682,9 +694,11 @@ Examples:
 .sp
 .if n .RS 4
 .nf
+.fam C
 refclock PHC /dev/ptp0 poll 0 dpoll \-2 offset \-37
 refclock PHC /dev/ptp1:nocrossts poll 3 pps
 refclock PHC /dev/ptp2:extpps:pin=1 width 0.2 poll 2
+.fam
 .fi
 .if n .RE
 .RE
@@ -887,7 +901,9 @@ An example of the \fBacquisitionport\fP directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 acquisitionport 1123
+.fam
 .fi
 .if n .RE
 .sp
@@ -918,7 +934,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 bindacqdevice eth0
+.fam
 .fi
 .if n .RE
 .RE
@@ -935,7 +953,9 @@ An example of the directive (setting the Expedited Forwarding class) is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 dscp 46
+.fam
 .fi
 .if n .RE
 .RE
@@ -968,7 +988,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 dumpdir @CHRONYRUNDIR@
+.fam
 .fi
 .if n .RE
 .sp
@@ -1019,7 +1041,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntsdumpdir @CHRONYVARDIR@
+.fam
 .fi
 .if n .RE
 .sp
@@ -1058,10 +1082,12 @@ An example is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntstrustedcerts /etc/pki/nts/foo.crt
 ntstrustedcerts 1 /etc/pki/nts/bar.crt
 ntstrustedcerts 1 /etc/pki/nts/baz.crt
 ntstrustedcerts 2 /etc/pki/nts/qux.crt
+.fam
 .fi
 .if n .RE
 .RE
@@ -1086,7 +1112,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 nocerttimecheck 1
+.fam
 .fi
 .if n .RE
 .sp
@@ -1168,10 +1196,12 @@ As an example, the following configuration using the default \fBmix\fP mode:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net nts
 server bar.example.net nts
 server baz.example.net
 refclock SHM 0
+.fam
 .fi
 .if n .RE
 .sp
@@ -1179,11 +1209,13 @@ is equivalent to the following configuration using the \fBignore\fP mode:
 .sp
 .if n .RS 4
 .nf
+.fam C
 authselectmode ignore
 server foo.example.net nts require trust
 server bar.example.net nts require trust
 server baz.example.net
 refclock SHM 0 require trust
+.fam
 .fi
 .if n .RE
 .RE
@@ -1285,7 +1317,9 @@ An example setting the precision to 8 nanoseconds is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 clockprecision 8e\-9
+.fam
 .fi
 .if n .RE
 .RE
@@ -1339,7 +1373,9 @@ An example of the driftfile directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 driftfile @CHRONYVARDIR@/drift
+.fam
 .fi
 .if n .RE
 .RE
@@ -1358,7 +1394,9 @@ seconds). The syntax is as follows:
 .sp
 .if n .RS 4
 .nf
+.fam C
 fallbackdrift 16 19
+.fam
 .fi
 .if n .RE
 .sp
@@ -1418,7 +1456,11 @@ clock will be off for a longer time. On Linux with the default
 .RS 4
 No correction is applied to the clock for the leap second. The clock will be
 corrected later in normal operation when new measurements are made and the
-estimated offset includes the one second error.
+estimated offset includes the one second error. This option is particularly
+useful when multiple \fBchronyd\fP instances are running on the system, one
+controlling the system clock and others started with the \fB\-x\fP option, which
+should rely on the first instance to correct the system clock and ignore it for
+the correction of their own NTP clock running on top of the system clock.
 .RE
 .RE
 .sp
@@ -1445,9 +1487,11 @@ A recommended configuration to enable a server leap smear is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 leapsecmode slew
 maxslewrate 1000
 smoothtime 400 0.001024 leaponly
+.fam
 .fi
 .if n .RE
 .sp
@@ -1466,7 +1510,9 @@ The duration of the leap smear can be calculated from the specified wander as
 .sp
 .if n .RS 4
 .nf
+.fam C
 duration = sqrt(4 / wander)
+.fam
 .fi
 .if n .RE
 .RE
@@ -1500,7 +1546,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 leapsectz right/UTC
+.fam
 .fi
 .if n .RE
 .sp
@@ -1509,8 +1557,10 @@ and can be used with this directive:
 .sp
 .if n .RS 4
 .nf
+.fam C
 $ TZ=right/UTC date \-d \(aqDec 31 2008 23:59:60\(aq
 Wed Dec 31 23:59:60 UTC 2008
+.fam
 .fi
 .if n .RE
 .RE
@@ -1535,7 +1585,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 makestep 0.1 3
+.fam
 .fi
 .if n .RE
 .sp
@@ -1556,7 +1608,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 maxchange 1000 1 2
+.fam
 .fi
 .if n .RE
 .sp
@@ -1583,7 +1637,7 @@ This directive specifies the maximum assumed drift (frequency error) of the
 system clock. It limits the frequency adjustment that \fBchronyd\fP is allowed to
 use to correct the measured drift. It is an additional limit to the maximum
 adjustment that can be set by the system driver (100000 ppm on Linux, 500 ppm
-on FreeBSD, NetBSD, and macOS 10.13+, 32500 ppm on Solaris).
+on FreeBSD, NetBSD, and macOS 10.13+, 32500 ppm on illumos).
 .sp
 By default, the maximum assumed drift is 500000 ppm, i.e. the adjustment is
 limited by the system driver rather than this directive.
@@ -1591,7 +1645,7 @@ limited by the system driver rather than this directive.
 .sp
 \fBmaxupdateskew\fP \fIskew\-in\-ppm\fP
 .RS 4
-One of \fBchronyd\fP\(cqs tasks is to work out how fast or slow the computer\(cqs clock
+One of \fBchronyd\fP\(aqs tasks is to work out how fast or slow the computer\(cqs clock
 runs relative to its reference sources. In addition, it computes an estimate of
 the error bounds around the estimated value.
 .sp
@@ -1626,7 +1680,7 @@ all supported systems with the exception of macOS 12 or earlier).
 .sp
 For each system there is a maximum frequency offset of the clock that can be set
 by the driver. On Linux it is 100000 ppm, on FreeBSD, NetBSD and macOS 10.13+ it
-is 5000 ppm, and on Solaris it is 32500 ppm. Also, due to a kernel limitation,
+is 5000 ppm, and on illumos it is 32500 ppm. Also, due to a kernel limitation,
 setting \fBmaxslewrate\fP on FreeBSD, NetBSD, macOS 10.13+ to a value between 500
 ppm and 5000 ppm will effectively set it to 500 ppm.
 .sp
@@ -1658,7 +1712,9 @@ The frequency compensation is calculated (in ppm) as
 .sp
 .if n .RS 4
 .nf
+.fam C
 comp = k0 + (T \- T0) * k1 + (T \- T0)^2 * k2
+.fam
 .fi
 .if n .RE
 .sp
@@ -1670,7 +1726,9 @@ An example of the use is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 tempcomp /sys/class/hwmon/hwmon0/temp2_input 30 26000 0.0 0.000183 0.0
+.fam
 .fi
 .if n .RE
 .sp
@@ -1687,7 +1745,9 @@ An example is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 tempcomp /sys/class/hwmon/hwmon0/temp2_input 30 /etc/chrony.tempcomp
+.fam
 .fi
 .if n .RE
 .sp
@@ -1695,6 +1755,7 @@ where the \fI/etc/chrony.tempcomp\fP file could have
 .sp
 .if n .RS 4
 .nf
+.fam C
 20000 1.0
 21000 0.64
 22000 0.36
@@ -1706,6 +1767,7 @@ where the \fI/etc/chrony.tempcomp\fP file could have
 28000 0.36
 29000 0.64
 30000 1.0
+.fam
 .fi
 .if n .RE
 .sp
@@ -1730,6 +1792,7 @@ Examples of the use of the directive are as follows:
 .sp
 .if n .RS 4
 .nf
+.fam C
 allow 1.2.3.4
 allow 3.4.5.0/24
 allow 3.4.5
@@ -1737,6 +1800,7 @@ allow 2001:db8::/32
 allow 0/0
 allow ::/0
 allow
+.fam
 .fi
 .if n .RE
 .sp
@@ -1754,9 +1818,11 @@ consider the two examples:
 .sp
 .if n .RS 4
 .nf
+.fam C
 allow 1.2.3.4
 deny 1.2.3.0/24
 allow 1.2.0.0/16
+.fam
 .fi
 .if n .RE
 .sp
@@ -1764,9 +1830,11 @@ and
 .sp
 .if n .RS 4
 .nf
+.fam C
 allow 1.2.3.4
 deny 1.2.3.0/24
 allow all 1.2.0.0/16
+.fam
 .fi
 .if n .RE
 .sp
@@ -1824,7 +1892,9 @@ An example of the use of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 bindaddress 192.168.1.1
+.fam
 .fi
 .if n .RE
 .sp
@@ -1843,7 +1913,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 binddevice eth0
+.fam
 .fi
 .if n .RE
 .RE
@@ -1861,9 +1933,11 @@ The syntax is as follows:
 .sp
 .if n .RS 4
 .nf
+.fam C
 broadcast 32 192.168.1.255
 broadcast 64 192.168.2.255 12123
 broadcast 64 ff02::101
+.fam
 .fi
 .if n .RE
 .sp
@@ -1905,7 +1979,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 clientloglimit 1048576
+.fam
 .fi
 .if n .RE
 .RE
@@ -1959,7 +2035,9 @@ The current root distance can be calculated from root delay and root dispersion
 .sp
 .if n .RS 4
 .nf
+.fam C
 distance = delay / 2 + dispersion
+.fam
 .fi
 .if n .RE
 .RE
@@ -1980,7 +2058,7 @@ synchronised to it. If that server stops responding, the server with the second
 smallest reference ID will take over when its local reference mode activates
 (root distance reaches the threshold configured by the \fBdistance\fP option).
 .sp
-The \fBorphan\fP mode is compatible with the \fBntpd\fP\(cqs orphan mode (enabled by the
+The \fBorphan\fP mode is compatible with the \fBntpd\fP\(aqs orphan mode (enabled by the
 \fBtos orphan\fP command).
 .RE
 .RE
@@ -1992,7 +2070,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 local stratum 10 orphan distance 0.1
+.fam
 .fi
 .if n .RE
 .RE
@@ -2013,7 +2093,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntpsigndsocket /var/lib/samba/ntp_signd
+.fam
 .fi
 .if n .RE
 .RE
@@ -2085,7 +2167,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntsdumpdir @CHRONYVARDIR@
+.fam
 .fi
 .if n .RE
 .sp
@@ -2127,7 +2211,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntsrotate 2592000
+.fam
 .fi
 .if n .RE
 .RE
@@ -2199,7 +2285,9 @@ An example use of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ratelimit interval 1 burst 16
+.fam
 .fi
 .if n .RE
 .sp
@@ -2218,7 +2306,9 @@ An example of the use of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 ntsratelimit interval 3 burst 1
+.fam
 .fi
 .if n .RE
 .RE
@@ -2266,7 +2356,9 @@ could be:
 .sp
 .if n .RS 4
 .nf
+.fam C
 smoothtime 400 0.001
+.fam
 .fi
 .if n .RE
 .sp
@@ -2274,7 +2366,9 @@ An example suitable for clients using \fBchronyd\fP on Linux could be:
 .sp
 .if n .RS 4
 .nf
+.fam C
 smoothtime 50000 0.01
+.fam
 .fi
 .if n .RE
 .RE
@@ -2301,8 +2395,10 @@ lines:
 .sp
 .if n .RS 4
 .nf
+.fam C
 bindcmdaddress 0.0.0.0
 bindcmdaddress ::
+.fam
 .fi
 .if n .RE
 .sp
@@ -2315,7 +2411,9 @@ An example that sets the path of the Unix domain command socket is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 bindcmdaddress /var/run/chrony/chronyd.sock
+.fam
 .fi
 .if n .RE
 .RE
@@ -2330,7 +2428,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 bindcmddevice eth0
+.fam
 .fi
 .if n .RE
 .RE
@@ -2374,7 +2474,9 @@ An example shows the syntax:
 .sp
 .if n .RS 4
 .nf
+.fam C
 cmdport 257
+.fam
 .fi
 .if n .RE
 .sp
@@ -2393,7 +2495,9 @@ An example of the use of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 cmdratelimit interval 2
+.fam
 .fi
 .if n .RE
 .RE
@@ -2412,7 +2516,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 hwclockfile /etc/adjtime
+.fam
 .fi
 .if n .RE
 .RE
@@ -2432,7 +2538,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 rtcautotrim 30
+.fam
 .fi
 .if n .RE
 .sp
@@ -2454,7 +2562,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 rtcfile @CHRONYVARDIR@/rtc
+.fam
 .fi
 .if n .RE
 .sp
@@ -2556,8 +2666,10 @@ below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2016\-11\-09 05:40:50 203.0.113.15    N  2 111 111 1111  10 10 1.0 \(rs
    \-4.966e\-03  2.296e\-01  1.577e\-05  1.615e\-01  7.446e\-03 CB00717B 4B D K
+.fam
 .fi
 .if n .RE
 .sp
@@ -2812,8 +2924,10 @@ the file) from the log file is shown below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2016\-08\-10 05:40:50 203.0.113.15     6.261e\-03 \-3.247e\-03 \(rs
      2.220e\-03  1.874e\-06  1.080e\-06 7.8e\-02  16   0   8  0.00
+.fam
 .fi
 .if n .RE
 .sp
@@ -2994,8 +3108,10 @@ below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2017\-08\-22 13:22:36 203.0.113.15     2     \-3.541      0.075 \-8.621e\-06 N \(rs
             2  2.940e\-03 \-2.084e\-04  1.534e\-02  3.472e\-04  8.304e\-03
+.fam
 .fi
 .if n .RE
 .sp
@@ -3180,8 +3296,10 @@ file is shown below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2015\-07\-22 05:40:50     \-0.037360 1       \-0.037434\(rs
           \-37.948  12   5  120
+.fam
 .fi
 .if n .RE
 .sp
@@ -3306,7 +3424,9 @@ line in the file) from the log file is shown below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2009\-11\-30 14:33:27.000000 PPS2    7 N 1  4.900000e\-07 \-6.741777e\-07  1.000e\-06
+.fam
 .fi
 .if n .RE
 .sp
@@ -3428,7 +3548,9 @@ single line in the file) from the log file is shown below.
 .sp
 .if n .RS 4
 .nf
+.fam C
 2015\-04\-19 10:39:48  2.8000e+04  3.6600e\-01
+.fam
 .fi
 .if n .RE
 .sp
@@ -3489,7 +3611,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 log measurements statistics tracking
+.fam
 .fi
 .if n .RE
 .RE
@@ -3517,7 +3641,9 @@ An example of the use is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 logchange 0.1
+.fam
 .fi
 .if n .RE
 .sp
@@ -3535,7 +3661,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 logdir /var/log/chrony
+.fam
 .fi
 .if n .RE
 .RE
@@ -3550,7 +3678,9 @@ An example of the use of this directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 mailonchange root@localhost 0.5
+.fam
 .fi
 .if n .RE
 .sp
@@ -3581,7 +3711,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 confdir @SYSCONFDIR@/chrony.d
+.fam
 .fi
 .if n .RE
 .RE
@@ -3603,7 +3735,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 sourcedir /var/run/chrony\-dhcp
+.fam
 .fi
 .if n .RE
 .RE
@@ -3621,7 +3755,9 @@ An example of the directive is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 include @SYSCONFDIR@/chrony.d/*.conf
+.fam
 .fi
 .if n .RE
 .RE
@@ -3756,9 +3892,11 @@ Examples of the directive are:
 .sp
 .if n .RS 4
 .nf
+.fam C
 hwtimestamp eth0
 hwtimestamp eth1 txcomp 300e\-9 rxcomp 645e\-9
 hwtimestamp *
+.fam
 .fi
 .if n .RE
 .RE
@@ -3774,7 +3912,9 @@ The format of the directive is shown in the example below:
 .sp
 .if n .RS 4
 .nf
+.fam C
 keyfile @SYSCONFDIR@/chrony.keys
+.fam
 .fi
 .if n .RE
 .sp
@@ -3783,6 +3923,7 @@ format of the file is shown below:
 .sp
 .if n .RS 4
 .nf
+.fam C
 10 tulip
 11 hyacinth
 20 MD5 ASCII:crocus
@@ -3790,6 +3931,7 @@ format of the file is shown below:
 30 AES128 HEX:7EA62AE64D190114D46D5A082F948EC1
 31 AES256 HEX:37DDCBC67BB902BCB8E995977FAB4D2B5642F5B32EBCEEE421921D97E5CBFE39
  ...
+.fam
 .fi
 .if n .RE
 .sp
@@ -3836,7 +3978,7 @@ file when the \fBrekey\fP command is issued by \fBchronyc\fP).
 .RS 4
 The \fBlock_all\fP directive will lock the \fBchronyd\fP process into RAM so that it
 will never be paged out. This can result in lower and more consistent latency.
-The directive is supported on Linux, FreeBSD, NetBSD, and Solaris.
+The directive is supported on Linux, FreeBSD, NetBSD, and illumos.
 .RE
 .sp
 \fBpidfile\fP \fIfile\fP
@@ -3849,7 +3991,9 @@ e.g.:
 .sp
 .if n .RS 4
 .nf
+.fam C
 pidfile /run/chronyd.pid
+.fam
 .fi
 .if n .RE
 .RE
@@ -3877,16 +4021,18 @@ An example of client configuration is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net minpoll 0 maxpoll 0 xleave port 319
 hwtimestamp * rxfilter ptp
 ptpport 319
+.fam
 .fi
 .if n .RE
 .RE
 .sp
 \fBsched_priority\fP \fIpriority\fP
 .RS 4
-On Linux, FreeBSD, NetBSD, and Solaris, the \fBsched_priority\fP directive will
+On Linux, FreeBSD, NetBSD, and illumos, the \fBsched_priority\fP directive will
 select the SCHED_FIFO real\-time scheduler at the specified priority (which must
 be between 0 and 100). On macOS, this option must have either a value of 0 (the
 default) to disable the thread time constraint policy or 1 for the policy to be
@@ -3914,7 +4060,7 @@ The \fBuser\fP directive sets the name of the system user to which \fBchronyd\fP
 switch after start in order to drop root privileges.
 .sp
 On Linux, \fBchronyd\fP needs to be compiled with support for the \fBlibcap\fP library.
-On macOS, FreeBSD, NetBSD and Solaris \fBchronyd\fP forks into two processes.
+On macOS, FreeBSD, NetBSD and illumos \fBchronyd\fP forks into two processes.
 The child process retains root privileges, but can only perform a very limited
 range of privileged system calls on behalf of the parent.
 .sp
@@ -3978,7 +4124,7 @@ facilities.
 .  IP \(bu 2.3
 .\}
 Use public servers from the \c
-.URL "https://www.pool.ntp.org/" "pool.ntp.org" " "
+.URL "https://www.pool.ntp.org/" "pool.ntp.org" ""
 project.
 .RE
 .sp
@@ -3987,9 +4133,11 @@ and \fIbaz.example.net\fP, your \fIchrony.conf\fP file could contain as a minimu
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net
 server bar.example.net
 server baz.example.net
+.fam
 .fi
 .if n .RE
 .sp
@@ -4002,12 +4150,14 @@ like:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net iburst
 server bar.example.net iburst
 server baz.example.net iburst
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4018,10 +4168,12 @@ in this case look like:
 .sp
 .if n .RS 4
 .nf
+.fam C
 pool pool.ntp.org iburst
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4032,12 +4184,14 @@ file could look like:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net iburst nts
 server bar.example.net iburst nts
 server baz.example.net iburst nts
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 rtcsync
+.fam
 .fi
 .if n .RE
 .SS "NTP client with infrequent connection to NTP servers"
@@ -4054,12 +4208,14 @@ contain:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net offline
 server bar.example.net offline
 server baz.example.net offline
 driftfile @CHRONYVARDIR@/drift
 makestep 1.0 3
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4075,7 +4231,9 @@ used to connect to the Internet and that \fBchronyc\fP has been installed at
 .sp
 .if n .RS 4
 .nf
+.fam C
 @BINDIR@/chronyc online
+.fam
 .fi
 .if n .RE
 .sp
@@ -4083,11 +4241,13 @@ and the script \fI/etc/ppp/ip\-down\fP would include:
 .sp
 .if n .RS 4
 .nf
+.fam C
 @BINDIR@/chronyc offline
+.fam
 .fi
 .if n .RE
 .sp
-\fBchronyd\fP\(cqs polling of the servers would now only occur whilst the machine is
+\fBchronyd\fP\(aqs polling of the servers would now only occur whilst the machine is
 actually connected to the Internet.
 .SS "Isolated networks"
 .sp
@@ -4124,6 +4284,7 @@ A typical configuration file for the server (called \fIntp.local\fP) might be
 .sp
 .if n .RS 4
 .nf
+.fam C
 initstepslew 1 client1 client3 client6
 driftfile @CHRONYVARDIR@/drift
 local stratum 8
@@ -4131,6 +4292,7 @@ manual
 allow 192.168.165.0/24
 smoothtime 400 0.01
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4139,11 +4301,13 @@ the configuration file might be:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server ntp.local iburst
 driftfile @CHRONYVARDIR@/drift
 allow 192.168.165.0/24
 makestep 1.0 3
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4164,6 +4328,7 @@ servers called \fIntp1.local\fP, \fIntp2.local\fP, and \fIntp3.local\fP):
 .sp
 .if n .RS 4
 .nf
+.fam C
 initstepslew 1 ntp2.local ntp3.local
 server ntp2.local
 server ntp3.local
@@ -4172,6 +4337,7 @@ local stratum 8 orphan
 manual
 allow 192.168.165.0/24
 rtcsync
+.fam
 .fi
 .if n .RE
 .sp
@@ -4250,6 +4416,7 @@ For the \fIchrony.conf\fP file, the following can be used as an example.
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net maxdelay 0.4 offline
 server bar.example.net maxdelay 0.4 offline
 server baz.example.net maxdelay 0.4 offline
@@ -4260,6 +4427,7 @@ makestep 1.0 3
 maxupdateskew 100.0
 dumpdir @CHRONYVARDIR@
 rtcfile @CHRONYVARDIR@/rtc
+.fam
 .fi
 .if n .RE
 .sp
@@ -4271,7 +4439,9 @@ The relevant part of the \fI/etc/ppp/ip\-up\fP file is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 @BINDIR@/chronyc online
+.fam
 .fi
 .if n .RE
 .sp
@@ -4279,13 +4449,15 @@ and the relevant part of the \fI/etc/ppp/ip\-down\fP script is:
 .sp
 .if n .RS 4
 .nf
+.fam C
 @BINDIR@/chronyc \-m offline dump writertc
+.fam
 .fi
 .if n .RE
 .sp
 \fBchronyd\fP is started during the boot sequence with the \fB\-r\fP and \fB\-s\fP options.
 It might need to be started before any software that depends on the system clock
-not jumping or moving backwards, depending on the directives in \fBchronyd\fP\(cqs
+not jumping or moving backwards, depending on the directives in \fBchronyd\fP\(aqs
 configuration file.
 .sp
 For the system shutdown, \fBchronyd\fP should receive a SIGTERM several seconds
@@ -4294,7 +4466,7 @@ information to be saved.
 .SS "Public NTP server"
 .sp
 \fBchronyd\fP can be configured to operate as a public NTP server, e.g. to join the
-.URL "https://www.pool.ntp.org/en/join.html" "pool.ntp.org" " "
+.URL "https://www.pool.ntp.org/en/join.html" "pool.ntp.org" ""
 project. The configuration
 is similar to the NTP client with permanent connection, except it needs to
 allow client access from all addresses. It is recommended to find at least four
@@ -4317,6 +4489,7 @@ The configuration file could look like:
 .sp
 .if n .RS 4
 .nf
+.fam C
 server foo.example.net iburst
 server bar.example.net iburst
 server baz.example.net iburst
@@ -4328,6 +4501,7 @@ clientloglimit 100000000
 leapsectz right/UTC
 driftfile @CHRONYVARDIR@/drift
 dumpdir @CHRONYRUNDIR@
+.fam
 .fi
 .if n .RE
 .SH "SEE ALSO"

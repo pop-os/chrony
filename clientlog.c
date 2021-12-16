@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009, 2015-2017
+ * Copyright (C) Miroslav Lichvar  2009, 2015-2017, 2021
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -751,7 +751,7 @@ static void
 int64_to_ntp64(uint64_t ts, NTP_int64 *ntp_ts)
 {
   ntp_ts->hi = htonl(ts >> 32);
-  ntp_ts->lo = htonl(ts & ((1ULL << 32) - 1));
+  ntp_ts->lo = htonl(ts);
 }
 
 /* ================================================== */

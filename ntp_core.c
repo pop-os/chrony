@@ -3,7 +3,7 @@
 
  **********************************************************************
  * Copyright (C) Richard P. Curnow  1997-2003
- * Copyright (C) Miroslav Lichvar  2009-2020
+ * Copyright (C) Miroslav Lichvar  2009-2021
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -1972,7 +1972,7 @@ process_response(NCR_Instance inst, NTP_Local_Address *local_addr,
     updated_timestamps = 2;
 
     /* If available, update the monotonic timestamp and accumulate the offset.
-       This needs to be done here to no lose changes in remote_ntp_rx in
+       This needs to be done here to not lose changes in remote_ntp_rx in
        symmetric mode when there are multiple responses per request. */
     if (ef_exp1 && !UTI_IsZeroNtp64(&ef_exp1->mono_receive_ts)) {
       inst->remote_mono_epoch = ntohl(ef_exp1->mono_epoch);
