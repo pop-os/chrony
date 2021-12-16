@@ -16,7 +16,7 @@ Copyright: 2012-2020, Miroslav Lichvar
 License: GPL-2
 
 Files: ntp_io.c
-Copyright: 2009, 2013-2016, 2018-2020, Miroslav Lichvar
+Copyright: 2009, 2013-2016, 2018-2021, Miroslav Lichvar
            2009, Timo Teras
            1997-2003, Richard P. Curnow
 License: GPL-2
