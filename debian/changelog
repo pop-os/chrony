@@ -1,4 +1,4 @@
-chrony (4.2-1) UNRELEASED; urgency=medium
+chrony (4.2-1) unstable; urgency=medium
 
   * Import upstream version 4.2:
     - Please see /usr/share/doc/chrony/NEWS.gz for the release notes.
@@ -7,12 +7,16 @@ chrony (4.2-1) UNRELEASED; urgency=medium
     - Adopt upstream service unit hardening options.
 
   * debian/copyright:
-    - Update copyright year.
+    - Update copyright years.
 
   * debian/patches/*:
     - Drop patches applied upstream.
+    - Add ensure_awk_commands_in_008-ntpera_test_return_an_integer.patch
 
- -- Vincent Blut <vincent.debian@free.fr>  Fri, 17 Dec 2021 12:45:09 +0100
+  * debian/test/upstream-simulation-test-suite:
+    - Update clknetsim version.
+
+ -- Vincent Blut <vincent.debian@free.fr>  Thu, 13 Jan 2022 14:01:35 +0100
 
 chrony (4.1-4) unstable; urgency=medium
 
