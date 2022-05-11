@@ -2,7 +2,7 @@ Source: chrony
 Section: net
 Priority: optional
 Maintainer: Vincent Blut <vincent.debian@free.fr>
-Standards-Version: 4.6.0
+Standards-Version: 4.6.1
 Build-Depends: asciidoctor,
                bison,
                debhelper-compat (= 13),
